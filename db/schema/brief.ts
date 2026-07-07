@@ -37,7 +37,7 @@ export const briefs = pgTable("briefs", {
   regeneratedAt: timestamp("regenerated_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}).enableRLS();
 
 export const sequences = pgTable(
   "sequences",
@@ -57,4 +57,4 @@ export const sequences = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [unique("sequences_brief_touch_uq").on(t.briefId, t.touchNumber)],
-);
+).enableRLS();

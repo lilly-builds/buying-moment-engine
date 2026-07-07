@@ -60,7 +60,7 @@ export const practices = pgTable(
   (t) => [
     unique("practices_normalized_geo_uq").on(t.normalizedName, t.geoKey),
   ],
-);
+).enableRLS();
 
 /**
  * Evidence — the citation-contract atom (R5). Every fact traces to one of these:
@@ -71,9 +71,11 @@ export const evidence = pgTable("evidence", {
   sourceUrl: text("source_url").notNull(),
   snippet: text("snippet"),
   confidence: numeric("confidence"),
+  // TODO(U5): tighten to .notNull() when U5's direct-write path lands — R17
+  // wants provenance (detected_at) on every fact.
   detectedAt: timestamp("detected_at", { withTimezone: true }),
   createdAt: createdAt(),
-});
+}).enableRLS();
 
 export const signals = pgTable(
   "signals",
@@ -87,6 +89,8 @@ export const signals = pgTable(
       .notNull()
       .references(() => evidence.id),
     confidence: numeric("confidence"),
+    // TODO(U5): tighten to .notNull() when U5's direct-write path lands — R17
+    // wants provenance (detected_at) on every fact.
     detectedAt: timestamp("detected_at", { withTimezone: true }),
     // Freshness window — a signal past `expires_at` is treated as a signal change
     // (KTD: stored briefs never claim a stale signal count).
@@ -103,7 +107,7 @@ export const signals = pgTable(
       t.evidenceId,
     ),
   ],
-);
+).enableRLS();
 
 /**
  * Contacts — BUSINESS people only: the practice's decision-maker (name, role,
@@ -123,4 +127,4 @@ export const contacts = pgTable("contacts", {
   sourceUrl: text("source_url"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-});
+}).enableRLS();

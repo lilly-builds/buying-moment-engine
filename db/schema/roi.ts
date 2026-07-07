@@ -33,7 +33,7 @@ export const roiEvents = pgTable("roi_events", {
   vertical: text("vertical"),
   payload: jsonb("payload"),
   createdAt: createdAt(),
-});
+}).enableRLS();
 
 /**
  * cost_events (R19) — ONE row per metered paid call, written at the call site by
@@ -50,4 +50,4 @@ export const costEvents = pgTable("cost_events", {
   costUsd: numeric("cost_usd").notNull(),
   meta: jsonb("meta"),
   createdAt: createdAt(),
-});
+}).enableRLS();

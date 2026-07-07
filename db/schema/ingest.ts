@@ -29,4 +29,4 @@ export const rawSignals = pgTable("raw_signals", {
     .notNull()
     .default("pending"),
   rejectionReason: text("rejection_reason"),
-});
+}).enableRLS();

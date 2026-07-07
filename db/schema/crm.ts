@@ -39,7 +39,7 @@ export const feedback = pgTable(
   },
   // A re-vote UPDATES the existing row, never duplicates (R13).
   (t) => [unique("feedback_practice_ae_uq").on(t.practiceId, t.aeEmail)],
-);
+).enableRLS();
 
 export const crmLinks = pgTable(
   "crm_links",
@@ -62,4 +62,4 @@ export const crmLinks = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [unique("crm_links_practice_provider_uq").on(t.practiceId, t.provider)],
-);
+).enableRLS();
