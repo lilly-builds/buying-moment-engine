@@ -30,7 +30,7 @@ describe("data-layer round-trip", () => {
         detectedAt: new Date("2026-07-01T00:00:00Z"),
       })
       .returning();
-    const [sig] = await upsertSignal(t.db, {
+    const sig = await upsertSignal(t.db, {
       practiceId: practice.id,
       kind: "staffing_spike",
       evidenceId: ev.id,

@@ -59,6 +59,8 @@ function stableStringify(input: unknown): string {
 function dedupeHashOf(input: unknown): string {
   const provided = readString(input, "dedupeHash");
   if (provided) return provided;
+  // TODO(U5): the fallback uses key-order-sensitive JSON.stringify — canonicalize
+  // (sorted keys) before U3/U4 lean on the fallback hash for dedupe.
   return createHash("sha256").update(stableStringify(input)).digest("hex");
 }
 
@@ -87,44 +89,50 @@ export async function ingestRawSignal(
   }
 
   const data = validation.data;
-  const inserted = await db
-    .insert(rawSignals)
-    .values({
-      dedupeHash,
-      detectorKind: data.detectorKind,
-      payload: data.payload,
-      sourceUrl: data.sourceUrl,
-      practiceHint: data.practiceHint,
-      detectedAt: data.detectedAt,
-      validationStatus: "valid",
-    })
-    .onConflictDoNothing({ target: rawSignals.dedupeHash })
-    .returning({ id: rawSignals.id });
 
-  if (inserted.length === 0) return { status: "duplicate" };
+  // Atomic raw-insert + promotion. A mid-promotion failure rolls the raw row
+  // back so a retry cleanly re-promotes, instead of leaving the raw row committed
+  // as `valid` (dedupe guard) with an orphaned/missing signal.
+  return db.transaction(async (tx): Promise<IngestResult> => {
+    const inserted = await tx
+      .insert(rawSignals)
+      .values({
+        dedupeHash,
+        detectorKind: data.detectorKind,
+        payload: data.payload,
+        sourceUrl: data.sourceUrl,
+        practiceHint: data.practiceHint,
+        detectedAt: data.detectedAt,
+        validationStatus: "valid",
+      })
+      .onConflictDoNothing({ target: rawSignals.dedupeHash })
+      .returning({ id: rawSignals.id });
 
-  // Promote raw -> normalized (exact match). See file header for the U5 boundary.
-  const practice = await upsertPractice(db, {
-    name: data.practiceHint,
-    geoKey: data.geoKey ?? "unknown",
-  });
-  const [ev] = await db
-    .insert(evidence)
-    .values({
-      sourceUrl: data.sourceUrl,
-      snippet: readString(data.payload, "snippet"),
-      confidence: readNumericAsText(data.payload, "confidence"),
+    if (inserted.length === 0) return { status: "duplicate" };
+
+    // Promote raw -> normalized (exact match). See file header for the U5 boundary.
+    const practice = await upsertPractice(tx, {
+      name: data.practiceHint,
+      geoKey: data.geoKey ?? "unknown",
+    });
+    const [ev] = await tx
+      .insert(evidence)
+      .values({
+        sourceUrl: data.sourceUrl,
+        snippet: readString(data.payload, "snippet"),
+        confidence: readNumericAsText(data.payload, "confidence"),
+        detectedAt: data.detectedAt,
+      })
+      .returning({ id: evidence.id });
+    const sig = await upsertSignal(tx, {
+      practiceId: practice.id,
+      kind: data.detectorKind,
+      evidenceId: ev.id,
       detectedAt: data.detectedAt,
-    })
-    .returning({ id: evidence.id });
-  const [sig] = await upsertSignal(db, {
-    practiceId: practice.id,
-    kind: data.detectorKind,
-    evidenceId: ev.id,
-    detectedAt: data.detectedAt,
-    signalSource: data.detectorKind,
+      signalSource: data.detectorKind,
+    });
+    return { status: "ingested", practiceId: practice.id, signalId: sig.id };
   });
-  return { status: "ingested", practiceId: practice.id, signalId: sig.id };
 }
 
 export interface UpsertPracticeArgs {
@@ -174,9 +182,13 @@ export interface UpsertSignalArgs {
   signalSource?: string | null;
 }
 
-/** Idempotent signal upsert on (practice_id, kind, evidence_id). */
+/**
+ * Idempotent signal upsert on (practice_id, kind, evidence_id). Always returns
+ * the row: on a real conflict `returning()` is empty, so re-SELECT the existing
+ * row by its unique key (mirrors `upsertPractice`).
+ */
 export async function upsertSignal(db: Database, args: UpsertSignalArgs) {
-  return db
+  const inserted = await db
     .insert(signals)
     .values({
       practiceId: args.practiceId,
@@ -190,5 +202,19 @@ export async function upsertSignal(db: Database, args: UpsertSignalArgs) {
     .onConflictDoNothing({
       target: [signals.practiceId, signals.kind, signals.evidenceId],
     })
-    .returning({ id: signals.id });
+    .returning();
+  if (inserted.length > 0) return inserted[0];
+
+  const [existing] = await db
+    .select()
+    .from(signals)
+    .where(
+      and(
+        eq(signals.practiceId, args.practiceId),
+        eq(signals.kind, args.kind),
+        eq(signals.evidenceId, args.evidenceId),
+      ),
+    )
+    .limit(1);
+  return existing;
 }
