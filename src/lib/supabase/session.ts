@@ -4,9 +4,12 @@ import { isAllowlisted, parseAllowlist } from "@/src/lib/auth";
 
 /**
  * Session refresh + route gate (R18), called from the root `proxy.ts`.
- * Unauthenticated or non-allowlisted users are redirected to /login. If Supabase
- * env is absent (unconfigured preview / keyless deploy) the gate passes through
- * so the app still renders.
+ * Unauthenticated or non-allowlisted users are redirected to /login.
+ *
+ * FAIL CLOSED: if the Supabase-Auth env is missing, non-public routes redirect to
+ * /login rather than passing through — otherwise a deploy with DATABASE_URL set
+ * but Supabase-Auth env absent would serve the real-contact feed with no login.
+ * /login and the shared-secret callback stay reachable so it can't infinite-loop.
  */
 
 const PUBLIC_PATHS = ["/login", "/api/enrich-callback"];
@@ -17,6 +20,12 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
+function redirectToLogin(request: NextRequest): NextResponse {
+  const redirectUrl = request.nextUrl.clone();
+  redirectUrl.pathname = "/login";
+  return NextResponse.redirect(redirectUrl);
+}
+
 export async function updateSession(
   request: NextRequest,
 ): Promise<NextResponse> {
@@ -24,7 +33,12 @@ export async function updateSession(
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return response; // unconfigured -> pass through
+  if (!url || !anon) {
+    // Supabase Auth unconfigured -> deny all non-public routes (fail closed).
+    return isPublicPath(request.nextUrl.pathname)
+      ? response
+      : redirectToLogin(request);
+  }
 
   const supabase = createServerClient(url, anon, {
     cookies: {
@@ -48,12 +62,9 @@ export async function updateSession(
   } = await supabase.auth.getUser();
   const allowlist = parseAllowlist(process.env.ALLOWLIST_EMAILS);
   const authorized = isAllowlisted(user?.email, allowlist);
-  const pathname = request.nextUrl.pathname;
 
-  if (!authorized && !isPublicPath(pathname)) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
-    return NextResponse.redirect(redirectUrl);
+  if (!authorized && !isPublicPath(request.nextUrl.pathname)) {
+    return redirectToLogin(request);
   }
 
   return response;
