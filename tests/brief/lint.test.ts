@@ -128,10 +128,11 @@ describe("ungroundedNumbers", () => {
     expect(ungroundedNumbers("Across your twelve locations.", CORPUS)).toEqual([]);
   });
 
-  // ─── the meeting-duration exemption, and the two ways it must NOT leak ────────
+  // ─── the meeting-duration exemption, and the three ways it must NOT leak ──────
   it("allows the length of the meeting we are proposing", () => {
     expect(ungroundedNumbers("Worth a 15-minute call next week?", CORPUS)).toEqual([]);
     expect(ungroundedNumbers("Grab a 20 minute chat?", CORPUS)).toEqual([]);
+    expect(ungroundedNumbers("Book a 15 min intro.", CORPUS)).toEqual([]);
   });
 
   it("does not let the exemption launder a statistic — no unit means no exemption", () => {
@@ -141,6 +142,14 @@ describe("ungroundedNumbers", () => {
   it("does not let the exemption launder a claim about THEIR minutes", () => {
     // "minutes" is present, but "hold time" is not a meeting noun. Still a claim.
     expect(ungroundedNumbers("Patients wait 15 minutes of hold time.", CORPUS)).toEqual(["15"]);
+  });
+
+  it("does not let a PLURAL unit launder a claim that happens to precede a meeting noun", () => {
+    // The hole this closes: "30 minutes call handling" matched a plural-tolerant pattern
+    // and exempted a fabricated statistic about the practice's own day. A duration
+    // adjective is singular ("a 15-minute call"); a claim about their time is not.
+    expect(ungroundedNumbers("We save 30 minutes call handling time daily.", CORPUS)).toEqual(["30"]);
+    expect(ungroundedNumbers("Staff lose 45 minutes call triage each morning.", CORPUS)).toEqual(["45"]);
   });
 });
 

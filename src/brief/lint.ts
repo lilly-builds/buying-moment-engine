@@ -126,7 +126,10 @@ export const AI_TELLS: readonly string[] = [
   "low-hanging fruit",
   "robust solution",
   "solution provider",
-  "holistic",
+  // NOT banned: "holistic". It is a genuine word in healthcare positioning, and a
+  // personalization snippet quoting a practice's own "holistic skin care" line would be
+  // rejected, retried, and then killed. A tell that fires on a true sentence costs more
+  // than the tell it catches.
   "look no further",
   "streamline your",
   "unlock your",
@@ -144,18 +147,27 @@ const SENTENCE_SPLIT = /(?<=[.!?])\s+/;
 const EM_DASH = /—/g;
 
 /**
- * The length of the meeting WE are proposing — "a 15-minute call" — is not a claim
- * about the practice, so it needs no evidence. It is the only unevidenced number the
- * brief may contain, and the exemption is scoped as narrowly as it can be: the digits
- * must be immediately followed by a minutes-unit AND a meeting noun.
+ * The length of the meeting WE are proposing — "a 15-minute call" — is not a claim about
+ * the practice, so it needs no evidence. It is the only unevidenced number the brief may
+ * contain, and the exemption is scoped as narrowly as English allows.
  *
- * That narrowness is the whole safety argument. A bare allowlist of `{10,15,20,30,45}`
- * would silently launder "cut no-shows 45%". This pattern cannot: `45%` has no unit,
- * and `45 minutes of hold time` has no meeting noun — both still get caught. Tested
- * both ways.
+ * Three conditions, and every one of them is load-bearing:
+ *   1. a digits run,
+ *   2. a **singular** minutes-unit (`minute` / `min`, never `minutes` / `mins`),
+ *   3. a meeting noun immediately after it.
+ *
+ * Condition 2 is not pedantry, it is the whole guard. A duration ADJECTIVE is singular —
+ * "a 15-minute call" — while a claim about the practice's own time is plural: "we save
+ * 30 minutes call handling time daily". Allowing the plural form exempted that sentence
+ * and laundered a fabricated statistic straight through the truth gate. Caught by probing
+ * the exemption rather than by reading it; pinned by tests both ways.
+ *
+ * A bare allowlist of `{10,15,20,30,45}` would have laundered "cut no-shows 45%" too.
+ * This pattern cannot: `45%` has no unit, `45 minutes of hold time` has no meeting noun,
+ * and `30 minutes call handling` has no singular unit.
  */
 const MEETING_DURATION =
-  /\b\d{1,3}\s?-?\s?(?:minute|minutes|min|mins)\s+(?:call|chat|conversation|meeting|demo|intro|introduction|walkthrough)\b/gi;
+  /\b\d{1,3}\s?-?\s?(?:minute|min)\s+(?:call|chat|conversation|meeting|demo|intro|introduction|walkthrough)\b/gi;
 
 /**
  * Both sides of the number comparison get this, identically. Any transform applied to

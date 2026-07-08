@@ -63,8 +63,13 @@ export type SynthesizeResult =
       practiceId: string;
       reason: string;
       attempts: number;
-      /** The gate that rejected the last attempt. Distinct causes need distinct fixes. */
-      gate: "input" | "shape" | "closure" | "truth";
+      /**
+       * The gate that rejected the last attempt. Distinct causes need distinct fixes, and
+       * a cohort run reads this to tell "the model is drifting" (`truth`) from "Anthropic
+       * is rate-limiting us" (`transport`) from "this practice was never briefable"
+       * (`input`). Only `transport` is worth retrying later, unchanged.
+       */
+      gate: "input" | "shape" | "closure" | "truth" | "transport";
     };
 
 function defaultLogger(event: string, meta?: Record<string, unknown>): void {
@@ -123,9 +128,17 @@ function closureCorrections(
 
 interface AttemptOutcome {
   voice: VoiceBrief | null;
-  gate: "shape" | "closure" | "truth";
+  gate: "shape" | "closure" | "truth" | "transport";
   reason: string;
   corrections: string[];
+  /**
+   * A THROWN call was never billed — a 429, a timeout, a socket that died before headers.
+   * It tells us nothing about the practice, so retrying it immediately would answer a rate
+   * limit by spending money on the same rate limit. The loop stops and the caller decides
+   * when to come back. (Same reasoning as `waterfall.ts`'s `thrown` flag: a transient
+   * transport failure and a bad result are different facts and deserve different handling.)
+   */
+  retryable: boolean;
 }
 
 async function attemptVoice(
@@ -136,19 +149,34 @@ async function attemptVoice(
   corrections: readonly string[],
   attempt: number,
 ): Promise<AttemptOutcome> {
-  const outcome = await runVoice(
-    { client: deps.client, meter: deps.meter, practiceId: input.practice.id },
-    {
-      practice: input.practice,
-      facts: input.facts,
-      signals,
-      contact: input.contact,
-      pack: input.pack,
-      zeroSignal: factual.zeroSignal,
-      corrections,
-    },
-    attempt,
-  );
+  let outcome: Awaited<ReturnType<typeof runVoice>>;
+  try {
+    outcome = await runVoice(
+      { client: deps.client, meter: deps.meter, practiceId: input.practice.id },
+      {
+        practice: input.practice,
+        facts: input.facts,
+        signals,
+        contact: input.contact,
+        pack: input.pack,
+        zeroSignal: factual.zeroSignal,
+        corrections,
+      },
+      attempt,
+    );
+  } catch (err) {
+    // Gate 0 — TRANSPORT. A non-2xx throws (correctly: it is unbilled, and the meter records
+    // nothing). It must not take a whole seeding run down with it, and it must be
+    // distinguishable from a BAD RESULT — only the latter is evidence about the practice.
+    // Never retried, never persisted, never silently swallowed: logged with its message.
+    return {
+      voice: null,
+      gate: "transport",
+      reason: err instanceof Error ? err.message : String(err),
+      corrections: [],
+      retryable: false,
+    };
+  }
 
   // Gate 1 — SHAPE. A billed 200 whose body is malformed is a resolved result, never a
   // throw: the meter has already written its row and the money is already gone.
@@ -158,6 +186,7 @@ async function attemptVoice(
       gate: "shape",
       reason: outcome.reason,
       corrections: [`- your output did not parse: ${outcome.reason}. Return only the JSON object, and respect every length ceiling.`],
+      retryable: true,
     };
   }
 
@@ -175,6 +204,7 @@ async function attemptVoice(
           ? `cited ${unknown.length} evidence id(s) not present in the input`
           : "headline does not cite a signal",
       corrections: closureCorrections(unknown, headlineMissesSignal),
+      retryable: true,
     };
   }
 
@@ -187,10 +217,11 @@ async function attemptVoice(
       gate: "truth",
       reason: summarizeViolations(lint.violations),
       corrections: [formatViolations(lint.violations)],
+      retryable: true,
     };
   }
 
-  return { voice, gate: "truth", reason: "", corrections: [] };
+  return { voice, gate: "truth", reason: "", corrections: [], retryable: true };
 }
 
 function summarizeViolations(violations: readonly Violation[]): string {
@@ -225,7 +256,17 @@ export async function synthesizeBrief(
   const { factual, signals } = assembleFactual(input, generatedAt);
 
   let corrections: string[] = [];
-  let last: AttemptOutcome | null = null;
+  // Seeded, not nullable. A `let last: AttemptOutcome | null` would need a cast to read
+  // after the loop, and a cast over a possible null is precisely the kind of error-hiding
+  // this repo forbids — it would also become a real crash the day `VOICE_MAX_ATTEMPTS` is
+  // set to 0. Seeding it means the "no attempt ran" state is representable and honest.
+  let last: AttemptOutcome = {
+    voice: null,
+    gate: "transport",
+    reason: `no attempt made (VOICE_MAX_ATTEMPTS=${VOICE_MAX_ATTEMPTS})`,
+    corrections: [],
+    retryable: false,
+  };
 
   for (let attempt = 1; attempt <= VOICE_MAX_ATTEMPTS; attempt += 1) {
     const outcome = await attemptVoice(deps, input, factual, signals, corrections, attempt);
@@ -259,15 +300,26 @@ export async function synthesizeBrief(
       gate: outcome.gate,
       reason: outcome.reason,
     });
+
+    // An unbilled transport failure is not evidence about this practice, and a second
+    // identical call would answer a 429 by paying for another 429. Stop; the caller retries.
+    if (!outcome.retryable) {
+      return {
+        status: "failed",
+        practiceId,
+        reason: outcome.reason,
+        attempts: attempt,
+        gate: outcome.gate,
+      };
+    }
     corrections = outcome.corrections;
   }
 
-  const failure = last as AttemptOutcome;
   return {
     status: "failed",
     practiceId,
-    reason: failure.reason,
+    reason: last.reason,
     attempts: VOICE_MAX_ATTEMPTS,
-    gate: failure.gate,
+    gate: last.gate,
   };
 }

@@ -5,6 +5,7 @@ import { citationClosure, headlineCitesASignal, synthesizeBrief } from "@/src/br
 import type { VoiceRequest } from "@/src/brief/prompts/voice";
 import { renderBrief } from "@/src/brief/render";
 import { buildBriefInput } from "@/src/brief/inputs";
+import { AnthropicRequestError } from "@/src/enrich/types";
 import { recordingMeter } from "../enrich/doubles";
 import { createTestDb, type TestDb } from "../setup";
 import { FakeVoiceClient, malformedVoiceClient } from "./doubles";
@@ -291,6 +292,27 @@ describe("synthesizeBrief", () => {
     expect(rows).toEqual([]);
   });
 
+  // ─── transport failures are not the practice's fault, and are never retried ───────────
+  it("does not retry an unbilled transport failure, and spends nothing on it", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    let calls = 0;
+    const rateLimited = {
+      async generate(): Promise<never> {
+        calls += 1;
+        throw new AnthropicRequestError(429, "Too Many Requests");
+      },
+    };
+    const { deps: d, rows } = deps(t, rateLimited);
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "transport", attempts: 1 });
+    // Answering a 429 with a second immediate call spends money on the same 429.
+    expect(calls).toBe(1);
+    // A thrown call was never billed, so the meter must record nothing (R19, both ways).
+    expect(rows).toEqual([]);
+    expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
+  });
+
   // ─── persistence ──────────────────────────────────────────────────────────────────────
   it("regenerates in place rather than accumulating briefs", async () => {
     const ids = await seedGoldenPractice(t.db);
@@ -302,6 +324,22 @@ describe("synthesizeBrief", () => {
     expect(second.status).toBe("regenerated");
     if (first.status === "failed" || second.status === "failed") throw new Error("unexpected");
     expect(second.briefId).toBe(first.briefId);
+  });
+
+  it("survives two seeders racing the same practice", async () => {
+    // U15 briefs a metro in parallel. A SELECT-then-INSERT would let both workers read
+    // "missing", both INSERT, and one die on the practice_id unique constraint — after
+    // paying for its Opus call. One statement, and Postgres settles it.
+    const ids = await seedGoldenPractice(t.db);
+    const { deps: d } = deps(t, FakeVoiceClient.always(goodVoice));
+
+    const [a, b] = await Promise.all([
+      synthesizeBrief(d, ids.practiceId),
+      synthesizeBrief(d, ids.practiceId),
+    ]);
+    expect([a.status, b.status].filter((s) => s === "failed")).toEqual([]);
+    if (a.status === "failed" || b.status === "failed") throw new Error("unexpected");
+    expect(a.briefId).toBe(b.briefId);
   });
 });
 
