@@ -4,7 +4,11 @@ import {
   exchangeCodeForTokens,
   expiresAtFromExpiresIn,
   fetchTokenMeta,
+  hasSendScope,
+  HUBSPOT_OPTIONAL_SCOPES,
+  HUBSPOT_REQUIRED_SCOPES,
   HUBSPOT_SCOPES,
+  HUBSPOT_SEND_SCOPE,
   refreshAccessToken,
   shouldRefresh,
   type OAuthHttpDeps,
@@ -21,8 +25,51 @@ function depsWith(fetchImpl: typeof fetch): OAuthHttpDeps {
   };
 }
 
+describe("scope split (free portals must still install)", () => {
+  it("the send scope is OPTIONAL, never required", () => {
+    expect(HUBSPOT_OPTIONAL_SCOPES).toContain(HUBSPOT_SEND_SCOPE);
+    expect(HUBSPOT_REQUIRED_SCOPES).not.toContain(HUBSPOT_SEND_SCOPE);
+    expect(HUBSPOT_SCOPES).toContain(HUBSPOT_SEND_SCOPE);
+  });
+
+  it("required scopes include the schema writes ensureLeadProperties needs", () => {
+    // Verified live: without these, POST /crm/v3/properties/* -> 403 MISSING_SCOPES.
+    expect(HUBSPOT_REQUIRED_SCOPES).toContain("crm.schemas.companies.write");
+    expect(HUBSPOT_REQUIRED_SCOPES).toContain("crm.schemas.deals.write");
+  });
+
+  it("hasSendScope reads the GRANTED scopes, in string or array form", () => {
+    const granted = `crm.objects.deals.write ${HUBSPOT_SEND_SCOPE}`;
+    expect(hasSendScope(granted)).toBe(true);
+    expect(hasSendScope([HUBSPOT_SEND_SCOPE])).toBe(true);
+  });
+
+  it("hasSendScope is false for a free portal that installed without Sequences", () => {
+    // The exact scope string a live free portal returned on 2026-07-08.
+    const freePortalGrant =
+      "crm.objects.companies.read crm.objects.companies.write " +
+      "crm.objects.contacts.read crm.objects.contacts.write " +
+      "crm.objects.deals.read crm.objects.deals.write " +
+      "crm.schemas.companies.read crm.schemas.companies.write " +
+      "crm.schemas.deals.read crm.schemas.deals.write oauth";
+    expect(hasSendScope(freePortalGrant)).toBe(false);
+  });
+
+  it("hasSendScope is false for null/empty (never assume we can send)", () => {
+    expect(hasSendScope(null)).toBe(false);
+    expect(hasSendScope(undefined)).toBe(false);
+    expect(hasSendScope("")).toBe(false);
+    expect(hasSendScope([])).toBe(false);
+  });
+
+  it("hasSendScope does not match on a substring or a prefix", () => {
+    expect(hasSendScope("automation.sequences.enrollments.writeX")).toBe(false);
+    expect(hasSendScope("automation.sequences.enrollments.read")).toBe(false);
+  });
+});
+
 describe("hubspot-oauth pure helpers", () => {
-  it("authorize URL carries client_id, redirect_uri, state, and the send scope", () => {
+  it("authorize URL carries client_id, redirect_uri, state, and the send scope as OPTIONAL", () => {
     const url = buildAuthorizeUrl({
       clientId: "client-123",
       redirectUri: "https://app.example.com/cb",
@@ -32,10 +79,17 @@ describe("hubspot-oauth pure helpers", () => {
     expect(u.searchParams.get("client_id")).toBe("client-123");
     expect(u.searchParams.get("redirect_uri")).toBe("https://app.example.com/cb");
     expect(u.searchParams.get("state")).toBe("abc");
-    // ONE grant must include the Sequences (send) scope (R8, U11 rides along).
-    expect(u.searchParams.get("scope")).toContain(
+    // ONE grant still asks for the Sequences (send) scope (R8, U11 rides along)
+    // — but as an OPTIONAL scope. Verified live: requiring it makes a free portal
+    // refuse the whole install, taking the CRM push down with it.
+    expect(u.searchParams.get("optional_scope")).toContain(
       "automation.sequences.enrollments.write",
     );
+    expect(u.searchParams.get("scope")).not.toContain(
+      "automation.sequences.enrollments.write",
+    );
+    // The schema-write scopes must be REQUIRED — ensureLeadProperties 403s without them.
+    expect(u.searchParams.get("scope")).toContain("crm.schemas.companies.write");
     expect(HUBSPOT_SCOPES).toContain("crm.objects.deals.write");
   });
 

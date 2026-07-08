@@ -15,11 +15,14 @@ import type {
   StageReadback,
 } from "./adapter";
 import { createHubSpotAdapter } from "./hubspot";
+import { ensureLeadProperties } from "./hubspot-properties";
+import { INITIAL_DEAL_STAGE_ID, stageMilestone } from "./stages";
 import { decrypt, encrypt } from "./token-crypto";
 import {
   exchangeCodeForTokens,
   expiresAtFromExpiresIn,
   fetchTokenMeta,
+  hasSendScope,
   refreshAccessToken,
   shouldRefresh,
   type OAuthHttpDeps,
@@ -46,15 +49,27 @@ export interface ConnectOptions {
   now?: () => Date;
 }
 
+export interface ConnectResult {
+  portalId: string;
+  scopes: string;
+  /** True when the granted scopes include Sequences enrollment (U9/U11 gate). */
+  canSend: boolean;
+}
+
 /**
- * Complete the OAuth connect: exchange the `?code`, look up the portal id, and
- * store the tokens ENCRYPTED, keyed per-tenant by (provider, portal_id).
+ * Complete the OAuth connect: exchange the `?code`, look up the portal id, store
+ * the tokens ENCRYPTED (keyed per-tenant by provider + portal_id), and provision
+ * the four tag properties so the very first `pushLead` can land.
+ *
+ * Property provisioning is part of CONNECT, not of push: HubSpot 400s a write to
+ * a property that does not exist, so a connect that skipped this would hand the
+ * AE a CRM integration that fails on its first real lead.
  */
 export async function completeHubSpotConnect(
   db: Database,
   deps: OAuthHttpDeps,
   opts: ConnectOptions,
-): Promise<{ portalId: string; scopes: string }> {
+): Promise<ConnectResult> {
   const provider = opts.provider ?? DEFAULT_PROVIDER;
   const now = opts.now?.() ?? new Date();
 
@@ -71,7 +86,29 @@ export async function completeHubSpotConnect(
     scopes,
   });
 
-  return { portalId: meta.hubId, scopes };
+  // Idempotent: an already-provisioned portal answers 409 and we move on. The
+  // freshly-exchanged access token is valid for ~30 min, so no refresh needed.
+  await ensureLeadProperties({
+    fetch: deps.fetch,
+    getAccessToken: async () => tokens.accessToken,
+    baseUrl: deps.baseUrl,
+  });
+
+  return { portalId: meta.hubId, scopes, canSend: hasSendScope(meta.scopes) };
+}
+
+/**
+ * Whether the stored connection may drive the send path (R10). Reads GRANTED
+ * scopes, so a portal that installed without Sales Hub Pro reports `canSend:
+ * false` and the UI shows the honest gated state instead of 403-ing at send.
+ */
+export async function sendReadiness(
+  db: Database,
+  provider = DEFAULT_PROVIDER,
+): Promise<{ connected: boolean; canSend: boolean }> {
+  const active = await getActiveConnection(db, provider);
+  if (!active.ok) return { connected: false, canSend: false };
+  return { connected: true, canSend: hasSendScope(active.connection.scopes) };
 }
 
 // ── Access-token provider (proactive refresh) ────────────────────────────────
@@ -162,6 +199,12 @@ export async function pushPracticeLead(
     contactId: result.contactId,
     dealId: result.dealId,
     leadQuality: args.lead.tags.aeQuality ?? null,
+    // Record the stage the deal was CREATED in, so the first `recordStage` poll
+    // sees no transition. Without this, every pushed lead would immediately look
+    // like a stage change into HubSpot's first stage and log a phantom
+    // `meeting_booked` (see `stages.ts` — the default pipeline's first stage is
+    // "Appointment Scheduled").
+    stage: INITIAL_DEAL_STAGE_ID,
     syncedAt: new Date(),
   });
 
@@ -293,15 +336,17 @@ export async function recordStageForPractice(
     cycleTimeDays: readback.cycleTimeDays,
   });
 
-  // Log a milestone ONLY on an actual stage TRANSITION — a repeated poll that
-  // reads back the SAME stage must not log a second milestone, which would
-  // over-count the ROI number R8 measures on repeated stage polls.
-  // The WON gate stays: HubSpot sets `closedate` for closed-LOST too, so keying
-  // a "win" off closedAt would log every lost deal as a win. "closedwon" is
-  // HubSpot's default won-stage id (verify the portal's stage ids live in U15).
-  if (readback.stage && readback.stage !== priorStage) {
+  // Log a milestone ONLY on an actual stage TRANSITION *to a milestone stage*.
+  // Two guards, both load-bearing for R12's numbers:
+  //   1. transition, not poll — a repeated poll reading the SAME stage must not
+  //      log twice.
+  //   2. milestone, not any stage — `stageMilestone` returns null for
+  //      mid-pipeline steps and for `closedlost`, so walking the pipeline does
+  //      not book four "meetings" and a lost deal is never counted as a win.
+  const milestone = stageMilestone(readback.stage);
+  if (milestone && readback.stage !== priorStage) {
     await db.insert(roiEvents).values({
-      eventType: readback.stage === "closedwon" ? "deal_won" : "meeting_booked",
+      eventType: milestone,
       practiceId: args.practiceId,
       payload: { stage: readback.stage, cycleTimeDays: readback.cycleTimeDays },
     });
