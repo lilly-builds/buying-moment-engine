@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, ne, sql } from "drizzle-orm";
 import type { Database } from "./types";
 import { practices, signals } from "./schema";
 
@@ -27,7 +27,16 @@ export interface FeedRow {
   signalCount: number;
 }
 
-/** Practices ranked by derived signal count (desc) for the push feed (R1). */
+/**
+ * Practices ranked by derived signal count (desc) for the push feed (R1).
+ *
+ * `unclassified` practices are EXCLUDED (R6, U5): a practice whose specialty the
+ * classifier could not resolve has no vertical pack, so it has no pain line, no
+ * opener, and no proof point. Showing it would mean either an empty card or a
+ * guessed vertical — the honest behaviour is to withhold it from the feed rather
+ * than misfile it. Use `isFeedEligible` in `src/engine/verticals.ts` for the same
+ * rule in pure code.
+ */
 export async function feedPractices(db: Database): Promise<FeedRow[]> {
   const rows = await db
     .select({
@@ -40,6 +49,7 @@ export async function feedPractices(db: Database): Promise<FeedRow[]> {
     })
     .from(practices)
     .leftJoin(signals, eq(signals.practiceId, practices.id))
+    .where(ne(practices.vertical, "unclassified"))
     .groupBy(practices.id)
     .orderBy(desc(sql`count(distinct ${signals.kind})`));
   return rows.map((r) => ({ ...r, signalCount: Number(r.signalCount) }));
