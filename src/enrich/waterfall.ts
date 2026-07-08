@@ -198,7 +198,7 @@ export async function enrichPractice(
   const primary = await runPrimaryPath(deps, practice, log);
 
   let findings = primary.findings;
-  let factsDropped = primary.factsDropped;
+  const factsDropped = primary.factsDropped;
   let factsUnverifiable = 0;
   let escalated = false;
   let reason = primary.reason;
