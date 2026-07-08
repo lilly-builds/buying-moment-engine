@@ -31,16 +31,23 @@ export const MEETING_STAGE_ID = "appointmentscheduled";
  * ⚠️ SEMANTIC GAP (for U12): HubSpot's default pipeline has no "lead surfaced"
  * stage — its first stage is literally "Appointment Scheduled". So a pushed lead
  * necessarily starts in the same stage that `stageMilestone` reads as a booked
- * meeting. `recordStageForPractice` therefore never counts a deal ARRIVING in the
- * stage it was created in — not on the first poll, and not when an AE moves a deal
- * back to it. Reaching a stage the tool put the deal in is not the AE booking a
+ * meeting. `recordStageForPractice` therefore never counts a deal arriving in
+ * `INITIAL_DEAL_STAGE_ID` — not on the first poll, and not when an AE moves a deal
+ * back to it. Reaching the stage the tool put the deal in is not the AE booking a
  * meeting.
  *
  * The consequence, stated honestly: while `INITIAL_DEAL_STAGE_ID === MEETING_STAGE_ID`
  * the `meeting_booked` tile reads ZERO. Giving it a real number needs a dedicated
- * pipeline whose first stage means "surfaced, not yet worked" — at which point the
- * guard releases itself, because the two constants diverge. That is a U12 decision,
- * not something to fake here.
+ * pipeline whose first stage means "surfaced, not yet worked". That is a U12
+ * decision, not something to fake here.
+ *
+ * ⚠️ WHEN U12 DIVERGES THOSE CONSTANTS: the guard compares the read-back stage to
+ * the CURRENT global `INITIAL_DEAL_STAGE_ID`, not to the stage each deal was
+ * actually created in. The moment the two differ, every already-pushed deal still
+ * parked in `appointmentscheduled` becomes eligible and logs a `meeting_booked` on
+ * its next poll — the guard releases RETROACTIVELY over historical deals. If that
+ * matters, persist the created stage on `crm_links` (a `created_stage` column) and
+ * compare against that instead.
  */
 export const INITIAL_DEAL_STAGE_ID = MEETING_STAGE_ID;
 

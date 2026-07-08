@@ -219,9 +219,11 @@ export async function pushPracticeLead(
     leadQuality: args.lead.tags.aeQuality ?? null,
     // Seed the created stage ONLY for a deal this push created. Writing it on a
     // re-push would clobber a real stage the AE has since moved the deal to (the
-    // link row would then contradict HubSpot). On a create it stops the first
-    // `recordStage` poll looking like a transition into HubSpot's first stage and
-    // logging a phantom `meeting_booked` (see `stages.ts`).
+    // link row would then contradict HubSpot). On a create it makes
+    // `crm_links.stage` reflect reality before the first poll runs — that column is
+    // what `roiCycleTimeReadback` serves to the U12 scoreboard. It is NOT what
+    // prevents a phantom `meeting_booked`: the create-stage guard in
+    // `recordStageForPractice` is, and that holds even with this seed absent.
     ...(dealAlreadyLanded ? {} : { stage: INITIAL_DEAL_STAGE_ID }),
     syncedAt: new Date(),
   });
