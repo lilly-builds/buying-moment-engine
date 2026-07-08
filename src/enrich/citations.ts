@@ -21,7 +21,7 @@ import {
  *
  * Pure: no network, no DB, no clock. Mirrors `gaps.ts`.
  *
- * ─── The two rules that keep this honest ──────────────────────────────────────
+ * ─── The three rules that keep this honest ────────────────────────────────────
  *
  * 1. NORMALIZE BOTH SIDES, IDENTICALLY. Any transform applied to the snippet and not
  *    to the page (or vice versa) turns a true fact into a "fabrication". `html-clean.ts`
@@ -29,9 +29,18 @@ import {
  *    spacing, never rewrite a word.
  *
  * 2. RETURN THE DROPS. A fact removed silently is a fact we cannot explain. Every drop
- *    carries its field path, its reason, and the offending snippet, because the drop
- *    COUNT is the early-warning signal that a prompt has drifted, and the drop LIST is
- *    what turns "the model hallucinated" into a diff you can read.
+ *    carries its field path, its reason, the offending snippet AND the value it was
+ *    offered as proof of, because the drop COUNT is the early-warning signal that a
+ *    prompt has drifted, and the drop LIST is what turns "the model hallucinated" into
+ *    a diff you can read.
+ *
+ * 3. A REAL QUOTATION IS NOT A TRUE CLAIM. The snippet is the EXHIBIT; `value` is what
+ *    the brief actually renders. Proving the exhibit is on the page says nothing about
+ *    whether the exhibit backs the claim. `{value: "Epic", snippet: "Our patient portal
+ *    is powered by ModMed EMA."}` has a genuine snippet on a genuine page — and the
+ *    brief would print "EHR: Epic" over a link that says the opposite. See `FactClass`
+ *    for where the containment check applies, and — just as important — where it does
+ *    not.
  */
 
 /** Straight-quote both curly single quotes; likewise double. */
@@ -49,6 +58,13 @@ export type DropReason =
   /** The cited page does not contain the snippet, contiguously, after normalization. */
   | "snippet-not-verbatim"
   /**
+   * The snippet IS on the cited page, and it does not contain the `value` the brief
+   * would render. A real quotation offered as proof of something it does not say —
+   * the failure mode a citation check that only looks at the snippet cannot see.
+   * QUOTATION-class fields only; see `FactClass`.
+   */
+  | "value-not-in-snippet"
+  /**
    * The fact itself verified, but the `decisionMaker` it hung on was discarded because
    * that contact's ROLE could not be verified. Not a model failure — reported anyway,
    * because a verified fact vanishing from the output with no record is exactly the
@@ -60,9 +76,53 @@ export interface DroppedFact {
   /** e.g. `firmographics.specialty`, `incumbentTooling[1]`, `decisionMaker.role`. */
   field: string;
   reason: DropReason;
+  /**
+   * The string the brief would have rendered. Carried because on a
+   * `value-not-in-snippet` drop the snippet is genuine and the VALUE is the finding —
+   * a drop record that omits it cannot explain itself. Rule 2.
+   */
+  value: string;
   sourceUrl: string;
   snippet: string;
 }
+
+/**
+ * What a fact's `value` IS, relative to its `snippet`. This is the difference between
+ * a check that catches fabrication and a check that deletes true facts.
+ *
+ * **QUOTATION** — the value is a span lifted straight out of the page. `"ModMed EMA"`
+ * sits inside `"Our patient portal is powered by ModMed EMA."`; `"2004"` inside
+ * `"…served South Florida since 2004."` The containment check applies, and
+ * `extract-prompt.ts` rule 5 makes the contract satisfiable by demanding it.
+ *
+ * **LABEL** — the value is the model's own word FOR what the snippet says, and is
+ * *supposed* not to appear in it. Measured across all three fixtures:
+ *
+ * | field | `value` ⊂ its own `snippet`? |
+ * |---|---|
+ * | `firmographics.specialty` | no — `"Orthopedics"` vs `"…orthopedic practice."` |
+ * | `firmographics.website` | no — a URL vs a prose sentence |
+ * | `incumbentTooling[]` | no — `"Podium reviews"` vs `"Reviews collected via Podium."` |
+ * | `decisionMaker.linkedinUrl` | no — scheme + `www.` absent from the page's prose |
+ * | `buyingMomentContext[]` | no — a summary of the announcement |
+ *
+ * Applying containment to those would drop every one of them. That is R2's mistake in
+ * a new costume: a check run against a substrate that was never promised to satisfy it.
+ * Their citation is proven; their WORDING is the model's, not the page's — which is why
+ * they are named in `VerificationResult.paraphrased` and must never be rendered inside
+ * quotation marks.
+ *
+ * Before adding a field here, measure it against real fixture data. Guessing `quotation`
+ * for a label field silently deletes true facts; guessing `label` for a quotation field
+ * silently ships fabrications.
+ */
+export type FactClass = "quotation" | "label";
+
+const FIRMOGRAPHIC_CLASS: Record<keyof Firmographics, FactClass> = {
+  specialty: "label",
+  website: "label",
+  yearFounded: "quotation",
+};
 
 export interface VerificationResult {
   verified: ResearchFindings;
@@ -72,6 +132,16 @@ export interface VerificationResult {
    * only for URLs we never fetched. Empty on the primary path, always.
    */
   unverifiable: DroppedFact[];
+  /**
+   * Field paths on `verified` whose `value` is the model's LABEL for the snippet rather
+   * than a span copied out of it (see `FactClass`). The citation is proven; the wording
+   * is not the page's.
+   *
+   * **U6 must never render one of these inside quotation marks.** A `value` is safe to
+   * present as the page's own words only if its field appears in neither `paraphrased`
+   * nor `unverifiable`.
+   */
+  paraphrased: string[];
 }
 
 export interface VerifyOptions {
@@ -121,6 +191,7 @@ interface VerifyContext {
   pages: Map<string, string>;
   dropped: DroppedFact[];
   unverifiable: DroppedFact[];
+  paraphrased: string[];
   keepUnheld: boolean;
 }
 
@@ -139,11 +210,31 @@ function lookupPage(pages: Map<string, string>, sourceUrl: string): string | und
 }
 
 function factRef(field: string, fact: CitedFact, reason: DropReason): DroppedFact {
-  return { field, reason, sourceUrl: fact.sourceUrl, snippet: fact.snippet };
+  return { field, reason, value: fact.value, sourceUrl: fact.sourceUrl, snippet: fact.snippet };
 }
 
-/** Verified -> the fact. Unprovable -> `null`, and a row on `dropped` saying why. */
-function verifyFact(field: string, fact: CitedFact, ctx: VerifyContext): CitedFact | null {
+/**
+ * Verified -> the fact. Unprovable -> `null`, and a row on `dropped` saying why.
+ *
+ * The three gates run in this order, and the order is load-bearing:
+ *
+ *   1. Do we HOLD the cited page?      -> `url-not-held`
+ *   2. Is the snippet ON that page?    -> `snippet-not-verbatim`
+ *   3. Is the value IN that snippet?   -> `value-not-in-snippet`   (QUOTATION only)
+ *
+ * Gate 3 sits behind gate 1 on purpose. The escalation path holds no pages, so every
+ * one of its facts exits at gate 1 as `unverifiable` and is never value-checked — and
+ * it must not be. The *research* prompt never asked Sonnet to copy its values verbatim
+ * out of its snippets; only `extract-prompt.ts` makes that promise. Enforcing a contract
+ * the caller never agreed to is precisely how R2 turned true facts into "fabrication".
+ * Where we hold nothing, we claim nothing.
+ */
+function verifyFact(
+  field: string,
+  fact: CitedFact,
+  cls: FactClass,
+  ctx: VerifyContext,
+): CitedFact | null {
   const page = lookupPage(ctx.pages, fact.sourceUrl);
   if (page === undefined) {
     // The agentic path cites the open web. We cannot check it; we also cannot call it
@@ -159,11 +250,25 @@ function verifyFact(field: string, fact: CitedFact, ctx: VerifyContext): CitedFa
   const snippet = normalizeForCitation(fact.snippet);
   // `"anything".includes("")` is true, so a snippet of pure whitespace would sail
   // through and prove nothing. Zod's `min(1)` accepts `"   "`; this does not.
-  if (snippet !== "" && page.includes(snippet)) return fact;
+  if (snippet === "" || !page.includes(snippet)) {
+    // We HOLD this page and the snippet is not on it. No mode forgives that.
+    ctx.dropped.push(factRef(field, fact, "snippet-not-verbatim"));
+    return null;
+  }
 
-  // We HOLD this page and the snippet is not on it. No mode forgives that.
-  ctx.dropped.push(factRef(field, fact, "snippet-not-verbatim"));
-  return null;
+  if (cls === "label") {
+    // Proven citation, model-authored wording. Kept, and named as paraphrase.
+    ctx.paraphrased.push(field);
+    return fact;
+  }
+
+  // The exhibit is real. Does it say what the brief is about to print?
+  const value = normalizeForCitation(fact.value);
+  if (value === "" || !snippet.includes(value)) {
+    ctx.dropped.push(factRef(field, fact, "value-not-in-snippet"));
+    return null;
+  }
+  return fact;
 }
 
 function verifyFirmographics(firmographics: Firmographics, ctx: VerifyContext): Firmographics {
@@ -171,7 +276,7 @@ function verifyFirmographics(firmographics: Firmographics, ctx: VerifyContext): 
   for (const field of FIRMOGRAPHIC_FIELDS) {
     const fact = firmographics[field];
     if (fact === undefined) continue;
-    const ok = verifyFact(`firmographics.${field}`, fact, ctx);
+    const ok = verifyFact(`firmographics.${field}`, fact, FIRMOGRAPHIC_CLASS[field], ctx);
     if (ok) verified[field] = ok;
   }
   return verified;
@@ -194,14 +299,22 @@ function verifyDecisionMaker(
 
   // Check every field first — even when the role is about to sink the contact — so a
   // genuinely fabricated `name` is reported as fabrication rather than as collateral.
-  const okName = name ? verifyFact("decisionMaker.name", name, ctx) : null;
-  const okRole = verifyFact("decisionMaker.role", role, ctx);
-  const okEmail = email ? verifyFact("decisionMaker.email", email, ctx) : null;
+  // `linkedinUrl` alone is a LABEL: the page prints `linkedin.com/in/x`, the value we
+  // store carries the scheme the `href` needs. Everything else about a contact is a
+  // name the page states, and a brief that gets one wrong calls the wrong person.
+  const okName = name ? verifyFact("decisionMaker.name", name, "quotation", ctx) : null;
+  const okRole = verifyFact("decisionMaker.role", role, "quotation", ctx);
+  const okEmail = email ? verifyFact("decisionMaker.email", email, "quotation", ctx) : null;
   const okLinkedin = linkedinUrl
-    ? verifyFact("decisionMaker.linkedinUrl", linkedinUrl, ctx)
+    ? verifyFact("decisionMaker.linkedinUrl", linkedinUrl, "label", ctx)
     : null;
 
   if (!okRole) {
+    // Nothing under `decisionMaker.` survives, so nothing under it can be paraphrase:
+    // `paraphrased` names fields U6 will RENDER. Leaving a collapsed field on it would
+    // describe a fact that is not there.
+    ctx.paraphrased = ctx.paraphrased.filter((f) => !f.startsWith("decisionMaker."));
+
     // Report the survivors we are throwing away with the contact. Rule 2.
     for (const [field, fact] of [
       ["decisionMaker.name", okName],
@@ -216,8 +329,13 @@ function verifyDecisionMaker(
   return { name: okName, role: okRole, email: okEmail, linkedinUrl: okLinkedin };
 }
 
-function verifyList(field: string, facts: CitedFact[], ctx: VerifyContext): CitedFact[] {
-  return facts.filter((fact, i) => verifyFact(`${field}[${i}]`, fact, ctx) !== null);
+function verifyList(
+  field: string,
+  facts: CitedFact[],
+  cls: FactClass,
+  ctx: VerifyContext,
+): CitedFact[] {
+  return facts.filter((fact, i) => verifyFact(`${field}[${i}]`, fact, cls, ctx) !== null);
 }
 
 /**
@@ -229,6 +347,11 @@ function verifyList(field: string, facts: CitedFact[], ctx: VerifyContext): Cite
  *
  * Non-mutating. `verified` is a fresh object; the caller keeps the original findings
  * for logging alongside the drops.
+ *
+ * A surviving fact has cleared BOTH gates a citation has to clear: the snippet is on the
+ * page it names, and — where the field is a QUOTATION (`FactClass`) — the value the brief
+ * renders is inside that snippet. A genuine quotation attached to a value it does not
+ * support is dropped as `value-not-in-snippet`.
  *
  * The agentic escalation path passes through here too, with
  * `{ unheldUrl: "keep-unverifiable" }`. It browses the open web, so most of its citations
@@ -248,16 +371,27 @@ export function verifyFindings(
     ),
     dropped: [],
     unverifiable: [],
+    paraphrased: [],
     keepUnheld: options.unheldUrl === "keep-unverifiable",
   };
 
   const verified: ResearchFindings = {
     firmographics: verifyFirmographics(findings.firmographics, ctx),
-    ehr: findings.ehr ? verifyFact("ehr", findings.ehr, ctx) : null,
-    incumbentTooling: verifyList("incumbentTooling", findings.incumbentTooling, ctx),
+    ehr: findings.ehr ? verifyFact("ehr", findings.ehr, "quotation", ctx) : null,
+    incumbentTooling: verifyList("incumbentTooling", findings.incumbentTooling, "label", ctx),
     decisionMaker: verifyDecisionMaker(findings.decisionMaker, ctx),
-    buyingMomentContext: verifyList("buyingMomentContext", findings.buyingMomentContext, ctx),
+    buyingMomentContext: verifyList(
+      "buyingMomentContext",
+      findings.buyingMomentContext,
+      "label",
+      ctx,
+    ),
   };
 
-  return { verified, dropped: ctx.dropped, unverifiable: ctx.unverifiable };
+  return {
+    verified,
+    dropped: ctx.dropped,
+    unverifiable: ctx.unverifiable,
+    paraphrased: ctx.paraphrased,
+  };
 }

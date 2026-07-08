@@ -6,7 +6,12 @@ import researchFixture from "./fixtures/anthropic-research-response.json";
 import roleOnly from "./fixtures/anthropic-research-role-only.json";
 import personMatch from "./fixtures/pdl-person-enrich-match.json";
 import personNotFound from "./fixtures/pdl-person-enrich-404.json";
-import { HARBOR_PAGES, METRO_PAGES, SUNSHINE_PAGES } from "./fixtures/held-pages";
+import {
+  HARBOR_PAGES,
+  METRO_PAGES,
+  SUNSHINE_PAGES,
+  SUNSHINE_PAGES_ROLE_DRIFTED,
+} from "./fixtures/held-pages";
 import {
   emptyScraper,
   FakeExtractClient,
@@ -324,6 +329,49 @@ describe("enrichment waterfall (integration)", () => {
     expect(drops[0]).toMatchObject({ practice: SUNSHINE.name, dropped: 1 });
     expect(drops[0].facts).toMatchObject([
       { field: "ehr", reason: "snippet-not-verbatim" },
+    ]);
+  });
+
+  it("D2: a fabricated VALUE on a genuine snippet never reaches practice_facts", async () => {
+    // R1, end to end. The `ehr` snippet is left exactly as it is — verbatim on the page
+    // we hold — and only the VALUE is swapped to a competing product. Everything the old
+    // verifier looked at still checks out. The brief would have printed "EHR: Epic" and
+    // linked a page reading "powered by ModMed EMA", and `waterfall.ts` would have fed
+    // that string to `classifyVertical`.
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
+    const base = parseMessagesResponse(researchFixture);
+    const fabricated = new FakeExtractClient(async () => ({
+      ...base,
+      text: base.text.replace('"value": "ModMed EMA"', '"value": "Epic"'),
+    }));
+
+    const drops: Record<string, unknown>[] = [];
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: fabricated,
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter: recordingMeter().meter,
+        now: () => NOW,
+        logger: (event, meta) => {
+          if (event === "enrich.citation_drops" && meta) drops.push(meta);
+        },
+      },
+      { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    expect(result.status).toBe("enriched");
+    expect(result.factsDropped).toBe(1);
+    expect(result.factsWritten).toBe(4); // was 5
+
+    const rows = await t.db.select().from(practiceFacts);
+    expect(rows.map((f) => f.field)).not.toContain("ehr");
+    expect(rows.map((f) => f.value)).not.toContain("Epic");
+
+    // The drop names the VALUE, not just the snippet — the snippet here is innocent.
+    expect(drops[0].facts).toMatchObject([
+      { field: "ehr", reason: "value-not-in-snippet", value: "Epic" },
     ]);
   });
 
@@ -827,9 +875,12 @@ describe("enrichment waterfall (integration)", () => {
     const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const pdl = FakePdlClient.fromFixture(personMatch);
     const { meter } = recordingMeter();
-    const withExtract = (extract: FakeExtractClient): WaterfallDeps => ({
+    const withExtract = (
+      extract: FakeExtractClient,
+      held: Map<string, string> = SUNSHINE_PAGES,
+    ): WaterfallDeps => ({
       db: t.db,
-      scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+      scrape: fakeScraper(held).scrape,
       extract,
       pdl,
       meter,
@@ -838,19 +889,26 @@ describe("enrichment waterfall (integration)", () => {
     });
     const practice = { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl };
 
-    // Only the role's VALUE drifts. Its snippet still verifies — the page still says
-    // "Dana Whitfield, Practice Administrator" — so this is a title change, not a lie.
+    // Dana was RE-TITLED, so the PAGE drifts and the model quotes the new page. Drifting
+    // only the model's `value` would leave "Practice Manager" cited to a page that still
+    // says "Practice Administrator" — a fabrication `citations.ts` is required to drop,
+    // and this test would then be asserting the opposite of the guarantee.
     const base = parseMessagesResponse(researchFixture);
     const drifted = new FakeExtractClient(async () => ({
       ...base,
-      text: base.text.replaceAll(
-        '"value": "Practice Administrator"',
-        '"value": "Practice Manager"',
-      ),
+      text: base.text
+        .replaceAll('"value": "Practice Administrator"', '"value": "Practice Manager"')
+        .replaceAll(
+          '"snippet": "Dana Whitfield, Practice Administrator"',
+          '"snippet": "Dana Whitfield, Practice Manager"',
+        ),
     }));
 
     await enrichPractice(withExtract(FakeExtractClient.fromFixture(researchFixture)), practice);
-    const second = await enrichPractice(withExtract(drifted), practice);
+    const second = await enrichPractice(
+      withExtract(drifted, SUNSHINE_PAGES_ROLE_DRIFTED),
+      practice,
+    );
 
     // The drifted role is an unfilled contact, so PDL is bought for it.
     expect(second.pdlCalls).toBe(1);

@@ -13,13 +13,15 @@
  * exercised end-to-end rather than only in a unit test.
  */
 
+export const SUNSHINE_TEAM_URL = "https://sunshinederm.example/team";
+
 export const SUNSHINE_PAGES = new Map([
   [
     "https://sunshinederm.example/about",
     "# About us\n\nSunshine Dermatology Associates is a full-service dermatology group.\nWe have served South Florida since 2004.",
   ],
   [
-    "https://sunshinederm.example/team",
+    SUNSHINE_TEAM_URL,
     "# Our team\n\nDana Whitfield, Practice Administrator\n\nDr. Elena Ruiz, Dermatologist",
   ],
   [
@@ -35,6 +37,21 @@ export const SUNSHINE_PAGES = new Map([
     "# Expanding to Hialeah\n\nWe are thrilled to announce our fourth location, opening in Hialeah this fall.",
   ],
 ]);
+
+/**
+ * Sunshine, six months later: Dana Whitfield's title on the team page now reads
+ * "Practice Manager".
+ *
+ * A role DRIFT has to move the page, not just the model's `value`. `decisionMaker.role`
+ * is a QUOTATION field (`citations.ts`), so a run that reports "Practice Manager" while
+ * the page still says "Practice Administrator" is not a re-titled employee — it is a
+ * fabricated value on a real snippet, and the verifier is supposed to drop it. Drifting
+ * only the value would make the drift test assert the opposite of the guarantee.
+ */
+export const SUNSHINE_PAGES_ROLE_DRIFTED = new Map(SUNSHINE_PAGES).set(
+  SUNSHINE_TEAM_URL,
+  "# Our team\n\nDana Whitfield, Practice Manager\n\nDr. Elena Ruiz, Dermatologist",
+);
 
 export const METRO_PAGES = new Map([
   [

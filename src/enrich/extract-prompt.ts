@@ -12,14 +12,22 @@ import type { ExtractRequest } from "./types";
  * Same input, different prompt, different result: the decision-maker regression was a
  * PROMPT problem, not a mechanism problem. Two clauses did it, and both are load-bearing:
  *
- *   Rule 6 — "a founding or owner physician named on an About/Team page IS a valid
+ *   Rule 8 — "a founding or owner physician named on an About/Team page IS a valid
  *             decision-maker". Without it the model reads "practice manager" literally
  *             and reports nothing for a one-physician practice.
  *   Rule 4 — "if you cannot find a single CONTIGUOUS verbatim span that by itself
  *             proves the fact, OMIT it. Never stitch." Without it the model tallies.
  *
- * Rule 4 is a REQUEST. `citations.ts` is the enforcement, and it caught a stitched
- * snippet in both rounds. Never let this file be mistaken for the guarantee.
+ * Rules 5 and 6 are the newer pair, and they exist because a verbatim snippet was never
+ * the same thing as a true claim: `{value: "Epic", snippet: "Our patient portal is
+ * powered by ModMed EMA."}` cleared every check this file's contract used to impose.
+ * Rule 5 makes `citations.ts`'s QUOTATION containment check SATISFIABLE — a model told
+ * only "cite a verbatim snippet" has no reason to also copy the value out of it. Rule 6
+ * says which fields are exempt, so the model does not omit a `specialty` it is right
+ * about just because it summarized the page's wording.
+ *
+ * Every rule here is a REQUEST. `citations.ts` is the enforcement, and it caught a
+ * stitched snippet in both E8 rounds. Never let this file be mistaken for the guarantee.
  *
  * D9 binds: public BUSINESS information only, never a patient, and we only ever read
  * pages we already fetched — this call reaches nothing.
@@ -32,11 +40,15 @@ HARD RULES — these are constraints, not preferences:
 2. "sourceUrl" MUST be copied EXACTLY from the "=== SOURCE: <url> ===" header of the page the fact came from.
 3. "snippet" MUST be a VERBATIM, CONTIGUOUS substring of that page's text — copy and paste it. Do not paraphrase, do not fix typos, do not join across a gap. Keep it under 200 characters.
 4. If a fact is not stated in the supplied text, return null (or omit it from an array). CRITICAL: if you cannot find a single CONTIGUOUS verbatim span that by itself proves the fact, OMIT THE FACT. Never stitch a snippet together from separate parts of a page. A count you had to tally yourself is not citable — omit it.
-5. Do NOT report how many locations or how many providers the practice has. Those are tallies with no single sentence that proves them. Code counts them from the evidence you cite.
-6. "decisionMaker" is the person who would buy front-desk / patient-communication software. In order of preference: practice manager, practice administrator, director of operations, COO, CEO, practice founder, or the OWNER-PHYSICIAN. A founding or owner physician named on an About or Team page IS a valid decision-maker — name them. Only if no individual is named anywhere should you set "name" to null and return the role alone.
-7. "buyingMomentContext" is timing intelligence a static data vendor cannot have: a new location, an acquisition or PE deal, a front-desk hiring push, a publicly announced expansion or new service line. Only what a page states.
-8. Business information only. Never a patient. Staff appear only in their professional capacity.
-9. The only firmographics fields are "specialty", "website" and "yearFounded". Set a field to null unless a page states it.
+5. QUOTED FIELDS — "ehr", "yearFounded", and the decision-maker's "name", "role" and "email". For these, the "value" MUST appear CHARACTER-FOR-CHARACTER inside the "snippet" you supply for it. Copy it out of the snippet. If no single contiguous span of the page contains the value, OMIT the fact — do not supply a nearby sentence instead.
+   VALID:   {"value": "ModMed EMA", "snippet": "Our patient portal is powered by ModMed EMA."}
+   INVALID: {"value": "Epic",       "snippet": "Our patient portal is powered by ModMed EMA."}   <- the snippet is real and it does not say Epic. This fact will be discarded.
+6. LABELLED FIELDS — "specialty", "website", "linkedinUrl", "incumbentTooling" and "buyingMomentContext". For these the "value" is your own short label for what the snippet says, so it need NOT appear inside the snippet. The snippet must still be a verbatim span of the cited page. Example: {"value": "Orthopedics", "snippet": "Metro Ortho Group is Denver's largest independent orthopedic practice."}
+7. Do NOT report how many locations or how many providers the practice has. Those are tallies with no single sentence that proves them. Code counts them from the evidence you cite.
+8. "decisionMaker" is the person who would buy front-desk / patient-communication software. In order of preference: practice manager, practice administrator, director of operations, COO, CEO, practice founder, or the OWNER-PHYSICIAN. A founding or owner physician named on an About or Team page IS a valid decision-maker — name them. Only if no individual is named anywhere should you set "name" to null and return the role alone.
+9. "buyingMomentContext" is timing intelligence a static data vendor cannot have: a new location, an acquisition or PE deal, a front-desk hiring push, a publicly announced expansion or new service line. Only what a page states.
+10. Business information only. Never a patient. Staff appear only in their professional capacity.
+11. The only firmographics fields are "specialty", "website" and "yearFounded". Set a field to null unless a page states it.
 
 Every fact object is exactly {"value", "sourceUrl", "snippet"}. Return null for any fact the pages do not state.`;
 

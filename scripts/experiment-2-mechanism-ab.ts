@@ -200,6 +200,7 @@ async function runEntry(entry: CohortEntry, apiKey: string): Promise<MechanismRe
     drops: dropped.map((d) => ({
       field: d.field,
       reason: d.reason,
+      value: d.value,
       snippet: d.snippet,
       sourceUrl: d.sourceUrl,
     })),

@@ -445,6 +445,9 @@ function logDrops(
     facts: dropped.map((d) => ({
       field: d.field,
       reason: d.reason,
+      // On a `value-not-in-snippet` drop the snippet is genuine and the VALUE is the
+      // finding. Logging one without the other cannot explain the drop.
+      value: d.value,
       sourceUrl: d.sourceUrl,
       snippet: d.snippet.slice(0, 120),
     })),
