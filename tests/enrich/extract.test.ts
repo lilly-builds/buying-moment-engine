@@ -95,6 +95,48 @@ describe("the prompt + schema never ask for a tally (KTD-4)", () => {
   });
 });
 
+/**
+ * The prompt and `citations.ts` are ONE contract. A field the verifier treats as a
+ * QUOTATION must be a field the prompt tells the model to quote — otherwise the verifier
+ * deletes true facts and the drop row blames the model for obeying its instructions.
+ * That is not hypothetical: rule 8's role vocabulary once did exactly this.
+ */
+describe("the prompt agrees with citations.ts about which fields are quoted", () => {
+  it("names every QUOTATION field as a quoted field", () => {
+    const quoted = EXTRACT_SYSTEM_PROMPT.match(/^5\. QUOTED FIELDS.*$/m)?.[0] ?? "";
+    for (const field of ["ehr", "incumbentTooling", "yearFounded", "name", "role", "email"]) {
+      expect(quoted, `rule 5 must name ${field}`).toContain(`"${field}"`);
+    }
+  });
+
+  it("does NOT list a QUOTATION field among the labelled (exempt) fields", () => {
+    const labelled = EXTRACT_SYSTEM_PROMPT.match(/^6\. LABELLED FIELDS.*$/m)?.[0] ?? "";
+    expect(labelled).not.toContain('"ehr"');
+    expect(labelled).not.toContain('"incumbentTooling"');
+    expect(labelled).not.toContain('"role"');
+  });
+
+  it("rule 8's role list is a SEARCH vocabulary, and says the role must be copied verbatim", () => {
+    // Without this, the model returns `role: "Owner-Physician"` for a physician whose page
+    // prints no role noun, the verifier drops it as `value-not-in-snippet`, and the dropped
+    // role collapses the entire contact — E8 round 1's regression, via the verifier.
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/not the value you return/i);
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/copied verbatim from the page/i);
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/never return a category word/i);
+    // And the honest degradation, rather than an invented title.
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/prints no title or credential .* return "decisionMaker": null/i);
+  });
+
+  it("warns that a value may not be letters inside a longer word", () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/WHOLE WORD or phrase/);
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/Epicare/);
+  });
+
+  it("asks for the incumbent tool's NAME as printed, not a category phrase", () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toMatch(/"Podium", not "Podium reviews"/);
+  });
+});
+
 describe("buildExtractRequestBody — what Haiku 4.5 accepts, and what it rejects", () => {
   const body = buildExtractRequestBody(REQUEST);
 
