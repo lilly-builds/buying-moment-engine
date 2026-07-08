@@ -10,6 +10,9 @@ import { computeExpiresAt } from "@/src/engine/freshness";
 import type { DetectorKind } from "@/src/ingest/validate";
 import type { Meter } from "@/src/roi/cost-meter";
 import type { Database } from "@/db/types";
+import { staffingSpikeDetector } from "@/src/detectors/staffing-spike";
+import { phoneComplaintsDetector } from "@/src/detectors/phone-complaints";
+import { growthEventsDetector } from "@/src/detectors/growth-events";
 
 /**
  * Detector runner (R3/R7) — the error-isolated scheduler body. It runs each
@@ -144,10 +147,17 @@ export async function runDetectors(
 }
 
 /**
- * Detector registry — U4 populates this with the real detectors. Kept empty here
- * so the framework + scheduler ship independently of the detectors themselves.
+ * Detector registry — the three built signals (U4). The scheduled cron runs each
+ * one, error-isolated. Live per-metro source config (Adzuna keys + queries,
+ * Google Places place_ids, GDELT queries) is wired in U15's seeding run; until
+ * then a detector with no live config simply emits nothing (honest — the run
+ * summary reports "nothing found", never a crash or invented signal).
  */
-export const detectorRegistry: Detector[] = [];
+export const detectorRegistry: Detector[] = [
+  staffingSpikeDetector,
+  phoneComplaintsDetector,
+  growthEventsDetector,
+];
 
 /**
  * Scheduled run (Inngest cron). Builds production deps lazily inside the handler
