@@ -22,7 +22,7 @@ import {
   syncPracticeLead,
 } from "@/src/crm/sync";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
-import type { LeadInput } from "@/src/crm/adapter";
+import type { CrmAdapter, LeadInput } from "@/src/crm/adapter";
 import {
   hubspotApiMock,
   hubspotConnectMock,
@@ -344,6 +344,65 @@ describe("pushPracticeLead (idempotent push + ROI event)", () => {
     // …and the lead IS counted, exactly once. Keying `lead_pushed` off "was the
     // company created" lost it entirely here: the retry saw an existing companyId,
     // reported created:false, and never logged the push that actually landed.
+    const pushed = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("a crash AFTER the deal lands does not lose lead_pushed, forever", async () => {
+    // `onProgress` commits the deal id in a statement of its OWN, before the final
+    // `upsertCrmLink` + `roi_events` insert. Kill the request in that window and a
+    // guard keyed on "has the deal already landed?" reads a landed deal on every
+    // later retry and skips the event permanently — a silent, unrecoverable
+    // under-count. The exactly-once invariant has to re-read `roi_events` (the
+    // ground truth), not a cache of it. Same lesson as `deal_won`.
+    //
+    // NOTE: a transaction around the final upsert + insert does NOT fix this — the
+    // deal id was committed by `onProgress`, outside any such transaction.
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    // Walk the REAL push — the deal lands and its id is committed — then die exactly
+    // where a serverless timeout, a pod kill, or a DB blip would.
+    const crashing: CrmAdapter = {
+      ...adapter,
+      pushLead: async (lead, existing, onProgress) => {
+        await adapter.pushLead(lead, existing, onProgress);
+        throw new Error("process died after the deal landed");
+      },
+    };
+    await expect(
+      pushPracticeLead(t.db, crashing, { practiceId, lead: LEAD }),
+    ).rejects.toThrow(/died after the deal landed/);
+
+    // The trap: the deal DID land, and its id is durably persisted…
+    const [partial] = await t.db
+      .select()
+      .from(crmLinks)
+      .where(eq(crmLinks.practiceId, practiceId));
+    expect(partial.dealId).not.toBeNull();
+    // …while the ROI event that records it never got written.
+    const beforeRetry = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(beforeRetry).toHaveLength(0);
+
+    // The retry re-pushes idempotently — the deal is PATCHed, never re-created…
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    const dealPosts = mock.calls.filter(
+      (c) => c.method === "POST" && c.path.endsWith("/deals"),
+    );
+    expect(dealPosts).toHaveLength(1);
+
+    // …and the lead that actually landed IS counted, exactly once.
     const pushed = await t.db
       .select()
       .from(roiEvents)
