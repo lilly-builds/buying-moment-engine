@@ -142,8 +142,15 @@ export const AI_TELLS: readonly string[] = [
 const WHITESPACE_RUN = /\s+/g;
 /** Thousands separators, so `2,000` and `2000` are the same number on both sides. */
 const DIGIT_GROUPING = /(?<=\d),(?=\d)/g;
-/** A number as a human writes one: `52`, `2,000`, `13.4`, `196`. */
-const NUMBER_TOKEN = /\d[\d,]*(?:\.\d+)?/g;
+/**
+ * A maximal number token, extracted AFTER `normalizeForGrounding` has already removed
+ * digit-grouping commas — so `2,000` is `2000` by the time this runs and the class needs no
+ * comma of its own. It must not carry one: including `,` in the class made the token greedily
+ * swallow a TRAILING comma, and the first live call wrote "serving Omaha since 2004, and…" —
+ * `"2004,"` then failed to match the grounded `"2004"`, a false ungrounded-number on a true
+ * fact. Digits and an optional decimal only.
+ */
+const NUMBER_TOKEN = /\d+(?:\.\d+)?/g;
 /** Sentence terminator followed by whitespace, or end of string. */
 const SENTENCE_SPLIT = /(?<=[.!?])\s+/;
 const EM_DASH = /—/g;

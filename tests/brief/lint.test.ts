@@ -161,6 +161,13 @@ describe("ungroundedNumbers", () => {
     expect(ungroundedNumbers("40% here, 40% there.", CORPUS)).toEqual(["40"]);
   });
 
+  it("grounds a number even when a comma or period immediately follows it (found live)", () => {
+    // The live call wrote "...serving Omaha since 2004, and...". 2004 is grounded; the comma
+    // is punctuation. A tokenizer that read "2004," as a distinct number falsely rejected it.
+    expect(ungroundedNumbers("You have served Omaha since 2004, and it shows.", CORPUS)).toEqual([]);
+    expect(ungroundedNumbers("Founded in 2004. Still going.", CORPUS)).toEqual([]);
+  });
+
   it("now catches written-out numbers — the model reaches for the word form under pressure (P2-7)", () => {
     expect(ungroundedNumbers("Across your twelve locations.", CORPUS)).toEqual(["12"]);
     expect(ungroundedNumbers("You lose forty percent of new-patient calls.", CORPUS)).toEqual(["40"]);

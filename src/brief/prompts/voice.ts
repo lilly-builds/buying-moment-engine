@@ -46,7 +46,7 @@ You are given EVIDENCE: a set of facts, each with an id, gathered from the pract
 HARD RULES — these are constraints, not preferences. A brief that breaks one is discarded.
 1. Every fact you state must come from the EVIDENCE. Never use prior knowledge about this practice. Never infer, estimate, or round.
 2. When a field asks for "evidenceIds", list the ids of the EVIDENCE items your sentence relies on. Use the ids exactly as given. Never invent an id. Never cite an id for a sentence it does not support.
-3. NUMBERS. Never write a number that does not appear, digit for digit, in the EVIDENCE or the VERTICAL PACK — and never spell one out to get around this (no "forty percent", no "thirty seconds"). If you want to say a number and cannot find it, say it without the number. Write "around the clock", never "24/7". Write "most calls", never "80% of calls". Never quantify the EVIDENCE, even vaguely: if it is one review, write "a patient wrote", never "a couple of patients" or "several patients".
+3. NUMBERS. Never write a number that does not appear, digit for digit, in the EVIDENCE — and never spell one out to get around this (no "forty percent", no "thirty seconds"). If you want to say a number and cannot find it, say it without the number. Write "around the clock", never "24/7". Write "most calls", never "80% of calls". Never quantify the EVIDENCE, even vaguely: if it is one review, write "a patient wrote", never "a couple of patients" or "several patients". The VERTICAL PACK's proof-point and ROI figures are another practice's results, not this one's — quote them ONLY inside an objection rebuttal, never in the opener or a touch. Everywhere else, say what the proof shows without its numbers.
 4. Never state how many signals are firing, and never count anything. Those change after you write; the dashboard renders them live.
 5. ABSENCE IS ABSENCE. If the EVIDENCE does not name the person, do not name a person. If it does not name their EHR, do not name an EHR. Omit it. An empty section is honest; a guessed one ends the call.
 6. Do not write an email address, a phone number, or a URL into any sentence.
@@ -65,7 +65,7 @@ HOW TO SELL — this is the difference between a brief an AE uses and one they r
 
 THE THREE TOUCHES.
 - Touch 1 (email): the buying moment, one specific observation from the EVIDENCE, and the named CTA. Under six sentences.
-- Touch 2 (call or email): teach. Lead with the proof point or a discovery question. Do not repeat touch 1's pitch.
+- Touch 2 (call or email): teach. Lead with what the proof point shows — the story, not its figures, which belong only in a rebuttal — or with a discovery question. Do not repeat touch 1's pitch.
 - Touch 3 (email): the graceful close. Short. Offer the exit. Leave the door open.
 
 THE OTHER FIELDS.
@@ -183,7 +183,10 @@ export function buildVoicePrompt(request: VoiceRequest): string {
 
   const proof =
     pack.proofPoint.tag === "real"
-      ? [`proof point: ${pack.proofPoint.caseStudy}`, ...pack.proofPoint.metrics.map((m) => `  - ${m}`)]
+      ? [
+          `proof point — ${pack.proofPoint.caseStudy}'s results (quote these FIGURES only inside an objection rebuttal; elsewhere say what they show, no numbers):`,
+          ...pack.proofPoint.metrics.map((m) => `  - ${m}`),
+        ]
       : ["proof point: none published yet — do not invent one, and do not imply one"];
 
   const contact = request.contact
@@ -209,7 +212,7 @@ export function buildVoicePrompt(request: VoiceRequest): string {
     `tone: ${pack.opener.tone}`,
     `tone reference (do NOT copy this sentence): ${pack.opener.exampleOpener}`,
     ...proof,
-    "roi benchmarks (numbers here are safe to use):",
+    "roi benchmarks (quote these figures ONLY inside an objection rebuttal, never in the opener or a touch):",
     ...pack.roiBenchmark.items.map((item) => `  - ${item.label}`),
     "",
     "=== WHO YOU ARE WRITING TO ===",
