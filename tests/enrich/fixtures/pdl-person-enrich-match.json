@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "likelihood": 8,
+  "data": {
+    "id": "qEnOZ5Oh0poWnQ1luFBfVw_0000",
+    "full_name": "dana whitfield",
+    "first_name": "dana",
+    "last_name": "whitfield",
+    "job_title": "practice administrator",
+    "job_company_name": "sunshine dermatology associates",
+    "work_email": "dana.whitfield@sunshinederm.example",
+    "recommended_personal_email": "dana.whitfield@example-mail.invalid",
+    "linkedin_url": "linkedin.com/in/dana-whitfield-example",
+    "linkedin_username": "dana-whitfield-example",
+    "location_name": "miami, florida, united states"
+  }
+}

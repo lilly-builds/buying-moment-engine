@@ -1,0 +1,20 @@
+{
+  "status": 200,
+  "likelihood": 9,
+  "name": "sunshine dermatology associates",
+  "display_name": "Sunshine Dermatology Associates",
+  "website": "sunshinederm.example",
+  "industry": "medical practice",
+  "employee_count": 48,
+  "founded": 2004,
+  "location": {
+    "locality": "miami",
+    "region": "florida",
+    "country": "united states"
+  },
+  "locations": [
+    { "locality": "miami", "region": "florida" },
+    { "locality": "coral gables", "region": "florida" },
+    { "locality": "hialeah", "region": "florida" }
+  ]
+}

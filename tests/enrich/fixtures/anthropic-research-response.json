@@ -1,0 +1,42 @@
+{
+  "id": "msg_01ExampleResearchResponse",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01Example",
+      "name": "web_search",
+      "input": { "query": "Sunshine Dermatology Associates Miami staff" }
+    },
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_01Example",
+      "content": [
+        {
+          "type": "web_search_result",
+          "url": "https://sunshinederm.example/about",
+          "title": "About — Sunshine Dermatology Associates",
+          "encrypted_content": "EqgfCioIARgBIiQ3YTAwMjY1Mi1mZjM5",
+          "page_age": "May 2, 2026"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "{\n  \"firmographics\": {\n    \"specialty\": {\"value\": \"Dermatology\", \"sourceUrl\": \"https://sunshinederm.example/about\", \"snippet\": \"Sunshine Dermatology Associates is a full-service dermatology group.\"},\n    \"locationsCount\": {\"value\": \"3\", \"sourceUrl\": \"https://sunshinederm.example/locations\", \"snippet\": \"Visit us at one of our three South Florida locations.\"}\n  },\n  \"ehr\": {\"value\": \"ModMed EMA\", \"sourceUrl\": \"https://sunshinederm.example/patient-portal\", \"snippet\": \"Our patient portal is powered by ModMed EMA.\"},\n  \"incumbentTooling\": [\n    {\"value\": \"Podium reviews\", \"sourceUrl\": \"https://sunshinederm.example/reviews\", \"snippet\": \"Reviews collected via Podium.\"}\n  ],\n  \"decisionMaker\": {\n    \"name\": {\"value\": \"Dana Whitfield\", \"sourceUrl\": \"https://sunshinederm.example/team\", \"snippet\": \"Dana Whitfield, Practice Administrator\"},\n    \"role\": {\"value\": \"Practice Administrator\", \"sourceUrl\": \"https://sunshinederm.example/team\", \"snippet\": \"Dana Whitfield, Practice Administrator\"},\n    \"email\": null,\n    \"linkedinUrl\": null\n  },\n  \"buyingMomentContext\": [\n    {\"value\": \"Opening a fourth location in Hialeah in Q3\", \"sourceUrl\": \"https://sunshinederm.example/news/hialeah\", \"snippet\": \"We are thrilled to announce our fourth location, opening in Hialeah this fall.\"}\n  ]\n}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 6039,
+    "output_tokens": 931,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "server_tool_use": {
+      "web_search_requests": 2,
+      "web_fetch_requests": 3
+    }
+  }
+}
