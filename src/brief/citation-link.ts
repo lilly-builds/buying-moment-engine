@@ -181,6 +181,15 @@ export function citationHref(sourceUrl: string, snippet?: string | null): string
   // and this function's contract is that it always returns something clickable.
   if (!URL.canParse(sourceUrl)) return sourceUrl;
 
+  // …and it has to be a PAGE. `URL.canParse("mailto:joe@clinic.com")` is true, but a
+  // scroll-to-text fragment on a mailto is meaningless, and U9 renders this straight into an
+  // `<a href>`. Every `evidence.source_url` is http(s) today; this makes that a boundary
+  // rather than an assumption, so the day a detector writes a non-http source it degrades to
+  // the bare link instead of emitting a nonsensical one (P3-9). Read the scheme, do not
+  // re-serialize — the href is still built from the original string, host and all.
+  const scheme = new URL(sourceUrl).protocol;
+  if (scheme !== "http:" && scheme !== "https:") return sourceUrl;
+
   // Parse the fragment off the STRING, never off a `new URL()`. Re-serializing a `URL`
   // normalizes it — lowercases the host, adds a trailing slash to a bare origin, re-encodes
   // the query — and `sourceUrl` is the exact identifier `citations.ts` verified the snippet

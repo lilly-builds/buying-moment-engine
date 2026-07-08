@@ -94,6 +94,16 @@ describe("citationHref — when there is nothing deeper than the page", () => {
     expect(citationHref("/relative/path", "a real snippet")).toBe("/relative/path");
   });
 
+  it("returns a non-http(s) source unchanged — a text fragment on a mailto is nonsense (P3-9)", () => {
+    // `URL.canParse` accepts these; a scroll-to-text directive on them does not resolve to a
+    // page. Degrade to the given string rather than emit a link U9 would render as broken.
+    expect(citationHref("mailto:joel@clinic.example", "a real snippet")).toBe("mailto:joel@clinic.example");
+    expect(citationHref("tel:+15551234567", "a real snippet")).toBe("tel:+15551234567");
+    expect(citationHref("ftp://files.example/report.pdf", "a real snippet")).toBe(
+      "ftp://files.example/report.pdf",
+    );
+  });
+
   it("refuses to double-apply: a fragment that already holds `:~:` is returned unchanged", () => {
     // We did not write that directive and we do not own it. Appending a second `:~:`
     // produces a fragment no browser honours.
