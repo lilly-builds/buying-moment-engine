@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "./types";
 import { crmConnections, crmLinks } from "./schema";
 import type { CrmLinkRef } from "@/src/crm/adapter";
@@ -70,6 +70,32 @@ export async function loadConnection(
     )
     .limit(1);
   return row ?? null;
+}
+
+export type ActiveConnectionResult =
+  | { ok: true; connection: ConnectionRow }
+  | { ok: false; reason: "none" | "ambiguous" };
+
+/**
+ * Resolve the active connection for a provider SERVER-SIDE (U10 hardening). The
+ * push path must NEVER take a caller-supplied portal id (IDOR) — it derives the
+ * portal from the stored connection. This demo is single-tenant (one HubSpot
+ * portal): 0 rows -> "none" (connect first), exactly 1 -> that row, and >1 is a
+ * genuine ambiguity we refuse to guess through rather than pick a portal.
+ */
+export async function getActiveConnection(
+  db: Database,
+  provider = "hubspot",
+): Promise<ActiveConnectionResult> {
+  const rows = await db
+    .select()
+    .from(crmConnections)
+    .where(eq(crmConnections.provider, provider))
+    .orderBy(desc(crmConnections.updatedAt))
+    .limit(2);
+  if (rows.length === 0) return { ok: false, reason: "none" };
+  if (rows.length > 1) return { ok: false, reason: "ambiguous" };
+  return { ok: true, connection: rows[0] };
 }
 
 // ── Per-lead links ───────────────────────────────────────────────────────────

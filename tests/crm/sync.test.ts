@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "../setup";
 import { upsertPractice } from "@/db/ingest";
 import {
+  getActiveConnection,
   loadConnection,
   roiCycleTimeReadback,
   storeConnection,
@@ -17,6 +18,7 @@ import {
   pushPracticeLead,
   recordStageForPractice,
   syncLeadQuality,
+  syncPracticeLead,
 } from "@/src/crm/sync";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
 import type { LeadInput } from "@/src/crm/adapter";
@@ -364,5 +366,122 @@ describe("syncLeadQuality (AE 👍/👎 → CRM + link)", () => {
       .from(crmLinks)
       .where(eq(crmLinks.practiceId, practiceId));
     expect(link.leadQuality).toBe("down");
+  });
+});
+
+describe("getActiveConnection (server-side tenant resolution)", () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await createTestDb();
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  async function seedConn(portalId: string): Promise<void> {
+    await storeConnection(t.db, {
+      portalId,
+      accessTokenEnc: encrypt("at", KEY),
+      refreshTokenEnc: encrypt("rt", KEY),
+      expiresAt: new Date("2026-07-07T02:00:00Z"),
+    });
+  }
+
+  it("returns 'none' when no connection exists", async () => {
+    expect(await getActiveConnection(t.db)).toEqual({ ok: false, reason: "none" });
+  });
+
+  it("returns the single connection when exactly one exists", async () => {
+    await seedConn("REAL");
+    const res = await getActiveConnection(t.db);
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.connection.portalId).toBe("REAL");
+  });
+
+  it("refuses to guess when more than one connection exists (ambiguous)", async () => {
+    await seedConn("P_A");
+    await seedConn("P_B");
+    expect(await getActiveConnection(t.db)).toEqual({ ok: false, reason: "ambiguous" });
+  });
+});
+
+describe("syncPracticeLead (IDOR-safe push: portal resolved server-side)", () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await createTestDb();
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("uses the SERVER-RESOLVED connection's token — a body cannot redirect the portal", async () => {
+    const practiceId = await seedPractice(t);
+    // one stored connection; its access token is "at_real". Far-future expiry
+    // (syncPracticeLead uses the real clock) → no refresh, the stored token is used.
+    await storeConnection(t.db, {
+      portalId: "REAL_PORTAL",
+      accessTokenEnc: encrypt("at_real", KEY),
+      refreshTokenEnc: encrypt("rt_real", KEY),
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    });
+
+    const mock = hubspotApiMock();
+    // Note: syncPracticeLead takes NO portalId param — there is no input by
+    // which a caller could point this at a different connection (IDOR closed).
+    const outcome = await syncPracticeLead(t.db, oauthDeps(mock.fetch), {
+      practiceId,
+      lead: LEAD,
+      encryptionKey: KEY,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.result.companyId).toBe("co_1");
+    // every HubSpot call carried the token decrypted from the RESOLVED connection
+    const authed = mock.calls.filter((c) => c.path.startsWith("/crm/"));
+    expect(authed.length).toBeGreaterThan(0);
+    expect(authed.every((c) => c.authorization === "Bearer at_real")).toBe(true);
+    // the lead landed
+    const [link] = await t.db
+      .select()
+      .from(crmLinks)
+      .where(eq(crmLinks.practiceId, practiceId));
+    expect(link.companyId).toBe("co_1");
+  });
+
+  it("returns 409 when there is no connection to push through", async () => {
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const outcome = await syncPracticeLead(t.db, oauthDeps(mock.fetch), {
+      practiceId,
+      lead: LEAD,
+      encryptionKey: KEY,
+    });
+    expect(outcome).toEqual({
+      ok: false,
+      status: 409,
+      error: "No HubSpot connection — connect HubSpot first",
+    });
+    expect(mock.calls).toHaveLength(0); // nothing pushed
+  });
+
+  it("returns 503 when connections are ambiguous rather than guessing a tenant", async () => {
+    const practiceId = await seedPractice(t);
+    for (const portalId of ["P_A", "P_B"]) {
+      await storeConnection(t.db, {
+        portalId,
+        accessTokenEnc: encrypt("at", KEY),
+        refreshTokenEnc: encrypt("rt", KEY),
+        expiresAt: new Date("2026-07-07T02:00:00Z"),
+      });
+    }
+    const mock = hubspotApiMock();
+    const outcome = await syncPracticeLead(t.db, oauthDeps(mock.fetch), {
+      practiceId,
+      lead: LEAD,
+      encryptionKey: KEY,
+    });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.status).toBe(503);
+    expect(mock.calls).toHaveLength(0);
   });
 });

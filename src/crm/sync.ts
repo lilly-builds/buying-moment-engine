@@ -1,6 +1,7 @@
 import type { Database } from "@/db/types";
 import { roiEvents } from "@/db/schema";
 import {
+  getActiveConnection,
   loadCrmLink,
   loadConnection,
   storeConnection,
@@ -12,6 +13,7 @@ import type {
   PushResult,
   StageReadback,
 } from "./adapter";
+import { createHubSpotAdapter } from "./hubspot";
 import { decrypt, encrypt } from "./token-crypto";
 import {
   exchangeCodeForTokens,
@@ -175,6 +177,51 @@ export async function pushPracticeLead(
   });
 
   return result;
+}
+
+export interface SyncPracticeLeadArgs {
+  practiceId: string;
+  lead: LeadInput;
+  encryptionKey: Buffer;
+  provider?: string;
+}
+
+export type SyncPracticeLeadResult =
+  | { ok: true; result: PushResult }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Route-level push orchestrator (U10 hardening). Resolves the target HubSpot
+ * connection SERVER-SIDE (never from request input — closes the IDOR where a
+ * caller could pass an arbitrary portal id), binds a proactively-refreshing
+ * token provider to it, and pushes the lead. Returns a status the route maps to
+ * an HTTP response.
+ */
+export async function syncPracticeLead(
+  db: Database,
+  deps: OAuthHttpDeps,
+  args: SyncPracticeLeadArgs,
+): Promise<SyncPracticeLeadResult> {
+  const provider = args.provider ?? DEFAULT_PROVIDER;
+  const active = await getActiveConnection(db, provider);
+  if (!active.ok) {
+    return active.reason === "none"
+      ? { ok: false, status: 409, error: "No HubSpot connection — connect HubSpot first" }
+      : { ok: false, status: 503, error: "Multiple HubSpot connections — cannot resolve one" };
+  }
+
+  const getAccessToken = createDbTokenProvider(db, deps, {
+    portalId: active.connection.portalId, // server-resolved, not client-supplied
+    encryptionKey: args.encryptionKey,
+    provider,
+  });
+  const adapter = createHubSpotAdapter({ fetch: deps.fetch, getAccessToken });
+  const result = await pushPracticeLead(db, adapter, {
+    practiceId: args.practiceId,
+    lead: args.lead,
+    provider,
+  });
+  return { ok: true, result };
 }
 
 export interface SyncLeadQualityArgs {
