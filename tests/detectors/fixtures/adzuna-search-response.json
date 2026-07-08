@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "id": "1001",
+      "title": "Patient Coordinator - Front Desk",
+      "description": "Answer phones, greet patients, and manage the appointment schedule for our busy dermatology practice.",
+      "company": { "display_name": "Sunshine Dermatology" },
+      "location": { "display_name": "Tampa, FL", "area": ["US", "Florida", "Tampa"] },
+      "redirect_url": "https://www.adzuna.com/details/1001",
+      "created": "2026-06-30T08:00:00Z"
+    },
+    {
+      "id": "1002",
+      "title": "Registered Nurse - Outpatient Clinic",
+      "description": "Provide direct patient care, administer medications, and support physicians during procedures.",
+      "company": { "display_name": "Sunshine Dermatology" },
+      "location": { "display_name": "Tampa, FL", "area": ["US", "Florida", "Tampa"] },
+      "redirect_url": "https://www.adzuna.com/details/1002",
+      "created": "2026-06-30T08:00:00Z"
+    },
+    {
+      "id": "1003",
+      "title": "Call Center Representative",
+      "description": "Handle high call volume for a growing veterinary group, book appointments across 4 locations.",
+      "company": { "display_name": "Metro Vet Group" },
+      "location": { "display_name": "Denver, CO", "area": ["US", "Colorado", "Denver"] },
+      "redirect_url": "https://www.adzuna.com/details/1003",
+      "created": "2026-06-29T12:00:00Z"
+    }
+  ],
+  "count": 3
+}
