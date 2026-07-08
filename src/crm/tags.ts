@@ -83,7 +83,7 @@ export function contactProperties(lead: LeadInput): Props {
     lastname,
     jobtitle: c?.role,
     // Verified live 2026-07-08: `hs_linkedin_url` is a HubSpot-defined contact
-    // property, so it needs no provisioning (`docs/hubspot-recon.md`).
+    // property, so it needs no provisioning.
     hs_linkedin_url: c?.linkedinUrl,
   });
 }

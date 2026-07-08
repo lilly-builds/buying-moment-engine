@@ -6,7 +6,7 @@
  * The CRM-object mock ENFORCES HubSpot's real property contract: writing to a
  * property that does not exist answers `400 PROPERTY_DOESNT_EXIST`, and creating
  * a property/group that already exists answers `409`. Both shapes were captured
- * from a live portal on 2026-07-08 (`docs/hubspot-recon.md`). Before this, the
+ * from a live portal on 2026-07-08. Before this, the
  * mock accepted any property bag, which is exactly why ~60 green tests hid a
  * `pushLead` that could never have worked against a real portal.
  */

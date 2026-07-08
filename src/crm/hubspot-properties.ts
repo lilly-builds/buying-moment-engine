@@ -12,7 +12,7 @@ import { PREFIXED_TAG_KEY, TAG_PROPERTY_KEYS, type PropertyMode } from "./tags";
  * `400 PROPERTY_DOESNT_EXIST` — so `pushLead` cannot land a single tagged record
  * on a fresh portal until these are created. Verified against a live portal
  * 2026-07-08: the exact `companyProperties()` payload returned 400 before this
- * ran and 201 after (see `docs/hubspot-recon.md`).
+ * ran and 201 after.
  *
  * IDEMPOTENT BY CONTRACT (R17 — never blindly overwrite a real record): creating
  * a group or property that already exists returns 409, which we tolerate as

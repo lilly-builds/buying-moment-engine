@@ -1,8 +1,7 @@
 /**
  * Deal-stage → ROI milestone mapping (R12, U10). PURE — no I/O, no HubSpot client.
  *
- * Stage ids verified against a live portal's default pipeline 2026-07-08
- * (`docs/hubspot-recon.md`).
+ * Stage ids verified against a live portal's default pipeline 2026-07-08.
  *
  * WHY A MAP AND NOT "any stage change": the ROI scoreboard answers "how many
  * meetings did the tool get us?" and "are deals closing faster?". Treating every

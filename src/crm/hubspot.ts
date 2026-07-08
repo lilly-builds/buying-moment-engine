@@ -46,7 +46,7 @@ export {
 
 // ── HubSpot association type ids (HUBSPOT_DEFINED defaults) ───────────────────
 // Verified against a live portal 2026-07-08 via
-// GET /crm/v4/associations/{from}/{to}/labels — see `docs/hubspot-recon.md`.
+// GET /crm/v4/associations/{from}/{to}/labels.
 const ASSOCIATION_TYPE = {
   contactToCompany: 279,
   dealToCompany: 341,
