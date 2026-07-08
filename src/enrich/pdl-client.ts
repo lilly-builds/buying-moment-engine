@@ -81,15 +81,18 @@ function isBilled(httpStatus: number): boolean {
 
 /**
  * Read a BILLED 200's body without throwing. A 200 that isn't JSON at all (an
- * edge/proxy HTML page) was still charged, so it must reach the normalizer — which
- * degrades it to `billed: true, matched: false` — rather than throw past the meter.
+ * edge/proxy HTML page), or whose body stream dies mid-read, was still charged — so it
+ * must reach the normalizer, which degrades it to `billed: true, matched: false`,
+ * rather than throw past the meter.
+ *
+ * The READ is inside the guard, not just the parse: `res.text()` rejects on a broken
+ * stream and would unwind exactly as far as the `JSON.parse` we are guarding against.
  * The undefined is not a swallowed error: it is the "unrecognized body" the
  * normalizer's safe-parse is written to handle.
  */
 async function readJsonBody(res: Response): Promise<unknown> {
-  const raw = await res.text();
   try {
-    return JSON.parse(raw) as unknown;
+    return JSON.parse(await res.text()) as unknown;
   } catch {
     return undefined;
   }

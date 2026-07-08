@@ -280,6 +280,18 @@ describe("a BILLED Anthropic 200 always writes a cost row (R19)", () => {
     );
   }
 
+  /** A 200 whose headers landed — so it is billed — but whose body stream then dies. */
+  function stubFetchBrokenBodyStream(): void {
+    vi.stubGlobal("fetch", async () => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.error(new Error("socket hang up"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+  }
+
   const client = () => anthropicResearchClient("test-key-not-a-real-secret");
 
   it("a 200 with a garbage body is recorded as an UNPRICED call, never a throw", async () => {
@@ -329,6 +341,23 @@ describe("a BILLED Anthropic 200 always writes a cost row (R19)", () => {
     expect(rows[0].meta).toMatchObject({ inputTokens: 1000, outputTokens: 500 });
     // It was priced, so it is NOT flagged unpriced.
     expect(rows[0].meta).not.toHaveProperty("unpriced");
+  });
+
+  it("a 200 whose BODY STREAM dies mid-read is still billed, so it still writes a row", async () => {
+    // The 200 header is the billing event; `res.text()` rejecting afterwards must not
+    // unwind past the meter. Guarding only `JSON.parse` would leave this path throwing.
+    stubFetchBrokenBodyStream();
+    const { meter, rows } = recordingMeter();
+
+    const outcome = await runResearch({ client: client(), meter }, REQUEST);
+
+    expect(outcome.ok).toBe(false);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].units).toBe(1);
+    expect(rows[0].meta).toMatchObject({
+      unpriced: true,
+      reason: UNPARSEABLE_ENVELOPE,
+    });
   });
 
   it("ERROR PATH: a 500 is UNBILLED — it throws and writes NO cost row", async () => {

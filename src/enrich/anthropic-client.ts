@@ -141,15 +141,19 @@ export function parseMessagesResponse(body: unknown): ResearchResponse {
 }
 
 /**
- * Read a BILLED 200's body without throwing. A 200 that is not JSON at all was
- * still charged, so it must reach `parseMessagesResponse` — which degrades it to
- * an unpriced-but-recorded call — rather than throw past the meter. The undefined
- * is not a swallowed error: it is the "unrecognized body" tier 3 exists to handle.
+ * Read a BILLED 200's body without throwing. A 200 that is not JSON at all — or whose
+ * body stream dies mid-read (socket reset, or the request timeout firing after the
+ * headers landed) — was still charged, so it must reach `parseMessagesResponse`, which
+ * degrades it to an unpriced-but-recorded call, rather than throw past the meter.
+ *
+ * The READ is inside the guard, not just the parse: `res.text()` rejects on a broken
+ * stream, and that rejection would unwind exactly as far as the `JSON.parse` we are
+ * guarding against. The undefined is not a swallowed error — it is the "unrecognized
+ * body" that tier 3 of `parseMessagesResponse` exists to handle.
  */
 async function readJsonBody(res: Response): Promise<unknown> {
-  const raw = await res.text();
   try {
-    return JSON.parse(raw) as unknown;
+    return JSON.parse(await res.text()) as unknown;
   } catch {
     return undefined;
   }

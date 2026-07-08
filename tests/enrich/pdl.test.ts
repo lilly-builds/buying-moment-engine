@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import companyMatch from "./fixtures/pdl-company-enrich-match.json";
 import personLowLikelihood from "./fixtures/pdl-person-enrich-low-likelihood.json";
 import personMatch from "./fixtures/pdl-person-enrich-match.json";
@@ -8,6 +8,7 @@ import { PDL_USD_PER_MATCHED_RECORD } from "@/src/enrich/config";
 import {
   normalizeCompanyResponse,
   normalizePersonResponse,
+  pdlClient,
 } from "@/src/enrich/pdl-client";
 import { runPdlCompanyEnrich, runPdlPersonEnrich } from "@/src/enrich/pdl";
 import { PdlRateLimitError } from "@/src/enrich/types";
@@ -107,6 +108,70 @@ describe("BILLED vs MATCHED — PDL charges on the HTTP 200, not on our judgemen
     expect(rows[0].units).toBe(1);
     expect(rows[0].costUsd).toBeCloseTo(PDL_USD_PER_MATCHED_RECORD, 10);
     expect(rows[0].meta).toMatchObject({ billed: true, matched: false, likelihood: 3 });
+  });
+});
+
+describe("the real PDL client over a stubbed fetch — a billed 200 never throws", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a 200 whose BODY STREAM dies mid-read is still billed, so it still writes a row", async () => {
+    // The 200 header is the billing event; `res.text()` rejecting afterwards must not
+    // unwind past the meter. Guarding only `JSON.parse` would leave this path throwing.
+    vi.stubGlobal("fetch", async () => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.error(new Error("socket hang up"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const { meter, rows } = recordingMeter();
+
+    const result = await runPdlPersonEnrich(
+      { client: pdlClient("test-key-not-a-real-secret"), meter },
+      PERSON,
+    );
+
+    expect(result).toMatchObject({ billed: true, matched: false });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].units).toBe(1);
+    expect(rows[0].costUsd).toBeCloseTo(PDL_USD_PER_MATCHED_RECORD, 10);
+  });
+
+  it("a 200 of non-JSON (an edge/proxy HTML page) is billed, not a crash", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response("<html>200 OK</html>", { status: 200 }),
+    );
+    const { meter, rows } = recordingMeter();
+
+    const result = await runPdlPersonEnrich(
+      { client: pdlClient("test-key-not-a-real-secret"), meter },
+      PERSON,
+    );
+
+    expect(result).toMatchObject({ billed: true, matched: false });
+    expect(rows[0].units).toBe(1);
+  });
+
+  it("ERROR PATH: a 404 through the real client is UNBILLED", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ status: 404 }), { status: 404 }),
+    );
+    const { meter, rows } = recordingMeter();
+
+    const result = await runPdlPersonEnrich(
+      { client: pdlClient("test-key-not-a-real-secret"), meter },
+      PERSON,
+    );
+
+    expect(result).toMatchObject({ billed: false, matched: false });
+    expect(rows[0].units).toBe(0);
+    expect(rows[0].costUsd).toBe(0);
   });
 });
 
