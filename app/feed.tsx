@@ -9,7 +9,6 @@ import {
   SegmentedControl,
   SignalPill,
 } from "@/design/components";
-import { gradients } from "@/design/tokens";
 import { windowDaysFor } from "@/src/engine/freshness";
 import type { DetectorKind } from "@/src/ingest/validate";
 import {
@@ -101,45 +100,42 @@ export function Feed({ items }: FeedProps) {
       : items.filter((item) => item.vertical === vertical);
 
   return (
-    <div
-      className="relative overflow-hidden rounded-card"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
-      {/* 56px — the inset EliseAI pads `.new-nav-fixed` with. */}
-      <div className="flex flex-col gap-8 p-14">
-        <SectionHeader
-          title="Prospects at a buying moment"
-          tone="dark"
-          size="h4"
-          as="h2"
-          action={
-            <SegmentedControl<FeedFilterValue>
-              label="Filter feed by vertical"
-              options={VERTICAL_FILTERS}
-              value={vertical}
-              onValueChange={setVertical}
-              accent="health"
-            />
-          }
-        />
+    // Transparent: the health-blue hero is now the page surface (see app/page.tsx),
+    // so the feed lays its dark-tone header and white flat rows straight onto the
+    // blue. gap-8 between the header group and the rows; gap-4 between rows.
+    <div className="flex flex-col gap-8">
+      <SectionHeader
+        title="Prospects at a buying moment"
+        tone="dark"
+        size="h4"
+        as="h2"
+        action={
+          <SegmentedControl<FeedFilterValue>
+            label="Filter feed by vertical"
+            options={VERTICAL_FILTERS}
+            value={vertical}
+            onValueChange={setVertical}
+            accent="brand"
+          />
+        }
+      />
 
-        <div className="flex flex-col gap-4">
-          {rows.length > 0 ? (
-            rows.map((item) => <FeedCard key={item.id} item={item} />)
-          ) : (
-            <Card variant="flat" padding="lg">
-              <div className="flex flex-col items-center gap-2 py-8 text-center">
-                <p className="font-display text-h5 text-ink">
-                  No prospects at a buying moment here yet
-                </p>
-                <p className="max-w-text font-sans text-base text-ink-body">
-                  Detectors haven&apos;t surfaced a signal in this vertical. Widen the
-                  freshness window, or check back after the next run.
-                </p>
-              </div>
-            </Card>
-          )}
-        </div>
+      <div className="flex flex-col gap-4">
+        {rows.length > 0 ? (
+          rows.map((item) => <FeedCard key={item.id} item={item} />)
+        ) : (
+          <Card variant="flat" padding="lg">
+            <div className="flex flex-col items-center gap-2 py-8 text-center">
+              <p className="font-display text-h5 text-ink">
+                No prospects at a buying moment here yet
+              </p>
+              <p className="max-w-text font-sans text-base text-ink-body">
+                Detectors haven&apos;t surfaced a signal in this vertical. Widen the
+                freshness window, or check back after the next run.
+              </p>
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   );

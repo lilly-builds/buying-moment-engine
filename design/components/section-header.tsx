@@ -14,7 +14,7 @@ import { cn } from "@/design/lib/cn";
  */
 
 export type SectionHeaderTone = "light" | "dark";
-export type SectionHeaderSize = "display" | "h1" | "h2" | "h3" | "h4";
+export type SectionHeaderSize = "display" | "h1" | "h2" | "h3" | "h4" | "h5";
 export type SectionHeaderLevel = "h1" | "h2" | "h3" | "h4";
 
 const SIZES: Record<SectionHeaderSize, string> = {
@@ -23,6 +23,10 @@ const SIZES: Record<SectionHeaderSize, string> = {
   h2: "text-h2",
   h3: "text-h3",
   h4: "text-h4",
+  // h5 (24px) — a card-level title, e.g. the brief's "Who to contact". `text-h5`
+  // is a real EliseAI token; card subheadings need it, and a plain <h*> with
+  // `text-h5` scattered through pages is exactly the drift the kit prevents.
+  h5: "text-h5",
 };
 
 export interface SectionHeaderProps {

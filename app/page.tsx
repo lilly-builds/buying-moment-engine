@@ -2,7 +2,8 @@ import { getDb } from "@/db/client";
 import { feedPractices } from "@/db/queries";
 import { isFresh } from "@/src/engine/freshness";
 import { toVerticalSlug } from "@/src/ui/signal-display";
-import { TopNav } from "@/design/components";
+import { PageContainer, TopNav } from "@/design/components";
+import { gradients } from "@/design/tokens";
 import { Feed, type FeedItem } from "./feed";
 
 // Read live data at request time — never at build time — so `next build` and a
@@ -46,15 +47,24 @@ export default async function Home() {
   const items = await loadFeed();
 
   return (
-    <>
-      <TopNav />
+    // The health-blue hero is the WHOLE page now, not a card in a white margin:
+    // the gradient paints edge-to-edge behind the (transparent, backdrop-blurred)
+    // nav and the feed, exactly the "over a health-blue hero" surface the styleguide
+    // mounts the dark nav on. `flex-1` lets it stretch past the fold when the feed
+    // is long, so the gradient never stops short of the last row.
+    <div
+      className="flex flex-1 flex-col"
+      style={{ backgroundImage: gradients.healthHero }}
+    >
+      {/* Dark tone: white logo + nav ink and a hairline that reads on blue. */}
+      <TopNav tone="dark" />
       <main className="flex flex-1 flex-col">
         {/* Content density, not marketing rhythm: the feed breathes at gap-8, not
-            py-section. The gradient-backed container supplies its own padding. */}
-        <div className="mx-auto w-full max-w-page px-gutter py-8">
+            py-section. PageContainer keeps it on the same 1280px edge as the nav. */}
+        <PageContainer className="py-8">
           <Feed items={items} />
-        </div>
+        </PageContainer>
       </main>
-    </>
+    </div>
   );
 }
