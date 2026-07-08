@@ -253,6 +253,44 @@ describe("synthesizeBrief", () => {
     expect(result.status === "failed" && result.reason).toContain("ungrounded-number");
   });
 
+  it("kills a brief that asserts the pack's own proof numbers about this practice (P1-3)", async () => {
+    // The two-holes-into-one exploit: the dermatology pack's 2,000 calls and 250 new patients,
+    // stated about the prospect in a touch body, citing nothing. Closure passes (empty ids are
+    // legal on a touch), but the corpus split means the pack's numbers ground only a rebuttal.
+    const ids = await seedGoldenPractice(t.db);
+    const packNumbers = (req: VoiceRequest) => {
+      const voice = goodVoice(req);
+      const [t1, t2, t3] = voice.sequence.touches;
+      return {
+        ...voice,
+        sequence: {
+          ...voice.sequence,
+          touches: [
+            { ...t1, body: "You are fielding roughly 2,000 calls a month and losing 250 new patients to voicemail." },
+            t2,
+            t3,
+          ],
+        },
+      };
+    };
+    const { deps: d } = deps(t, FakeVoiceClient.always(packNumbers));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: 2 });
+    expect(result.status === "failed" && result.reason).toContain("ungrounded-number");
+    expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
+  });
+
+  it("kills a brief whose personalization snippet cites no evidence at all (P1-3 belt)", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    const uncited = (req: VoiceRequest) => ({ ...goodVoice(req), personalizationEvidenceIds: [] });
+    const { deps: d } = deps(t, FakeVoiceClient.always(uncited));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "closure" });
+    expect(result.status === "failed" && result.reason).toContain("personalizationSnippet");
+  });
+
   it("retries once with the violations attached, and persists when the retry is clean", async () => {
     const ids = await seedGoldenPractice(t.db);
     const client = FakeVoiceClient.sequence([

@@ -188,9 +188,30 @@ export function numberTokens(text: string): string[] {
 }
 
 /**
- * The numbers the brief is allowed to state, as a SET of maximal tokens.
+ * The strings a grounding corpus is built from, in TWO buckets — because not every number
+ * the model was shown may be asserted about the practice.
  *
- * A set, not a substring search over the raw text. The substring version has two silent
+ *  - `evidence`: the practice's own identity and cited facts, and the snippets of the
+ *    signals it was shown. A number here is a fact ABOUT this practice; it may appear
+ *    anywhere in the brief.
+ *  - `pack`: the vertical pack's OWN cited figures — a case study's metrics, the ROI
+ *    benchmarks. They are real, but they belong to someone else (Texas Dermatology's
+ *    2,000 calls are not the prospect's), so the brief may state them ONLY where the
+ *    prompt permits the proof point: inside a rebuttal.
+ *
+ * Folding both into one set is what let a touch body say "you are fielding roughly 2,000
+ * calls a month and losing 250 new patients" — the pack's numbers, asserted about the
+ * prospect, citing nothing — and pass every gate (P1-3).
+ */
+export interface GroundingParts {
+  evidence: readonly (string | null | undefined)[];
+  pack: readonly (string | null | undefined)[];
+}
+
+/**
+ * The numbers the brief is allowed to state, as SETS of maximal tokens.
+ *
+ * Sets, not a substring search over the raw text. The substring version has two silent
  * failure modes and this has neither:
  *   - `"2,000 calls".includes("200")` is TRUE, so a model could halve a practice's call
  *     volume and pass.
@@ -199,23 +220,25 @@ export function numberTokens(text: string): string[] {
  * Membership in the maximal-token set answers "did anyone actually write this number?",
  * which is the only question worth asking.
  *
- * Built by `synthesize.ts` from the SAME inputs the model was shown — evidence snippets
- * and values, the pack's proof metrics and ROI benchmark labels, the practice's name and
- * location. Wider than the model's input and a fabrication passes; narrower and a true
- * fact is rejected.
+ * `evidence` is built from the SAME inputs the model was shown. Wider than the model's
+ * input and a fabrication passes; narrower and a true fact is rejected. `pack` is the
+ * separately-guarded proof-point set — see `GroundingParts`.
  */
 export interface GroundingCorpus {
-  numbers: ReadonlySet<string>;
+  evidence: ReadonlySet<string>;
+  pack: ReadonlySet<string>;
 }
 
-export function buildGroundingCorpus(
-  parts: readonly (string | null | undefined)[],
-): GroundingCorpus {
-  return { numbers: new Set(numberTokens(parts.filter(Boolean).join(" \n "))) };
+export function buildGroundingCorpus(parts: GroundingParts): GroundingCorpus {
+  return {
+    evidence: new Set(numberTokens(parts.evidence.filter(Boolean).join(" \n "))),
+    pack: new Set(numberTokens(parts.pack.filter(Boolean).join(" \n "))),
+  };
 }
 
+/** Grounded as a fact about the practice — assertable anywhere the brief speaks. */
 export function isNumberGrounded(token: string, corpus: GroundingCorpus): boolean {
-  return corpus.numbers.has(token);
+  return corpus.evidence.has(token);
 }
 
 /**
@@ -228,11 +251,19 @@ export function isNumberGrounded(token: string, corpus: GroundingCorpus): boolea
  * thing", "first call", "second touch" — cost with no measured benefit.
  *
  * The proposed meeting's own length is stripped first; see `MEETING_DURATION`.
+ *
+ * `allowPack` is true ONLY for a rebuttal, the one field where the prompt lets the writer
+ * reach for the pack's proof point. Everywhere else a pack number is a claim about someone
+ * else's practice, dressed as a claim about this one, and is rejected (P1-3).
  */
-export function ungroundedNumbers(text: string, corpus: GroundingCorpus): string[] {
+export function ungroundedNumbers(
+  text: string,
+  corpus: GroundingCorpus,
+  allowPack = false,
+): string[] {
   const withoutOurAsk = text.replace(MEETING_DURATION, " ");
   const ungrounded = numberTokens(withoutOurAsk).filter(
-    (token) => !isNumberGrounded(token, corpus),
+    (token) => !corpus.evidence.has(token) && !(allowPack && corpus.pack.has(token)),
   );
   return [...new Set(ungrounded)];
 }
@@ -255,12 +286,21 @@ export function emDashCount(text: string): number {
   return (text.match(EM_DASH) ?? []).length;
 }
 
+/**
+ * A rebuttal is the ONE field the prompt lets quote the pack's proof point ("agrees first,
+ * then reframes, then points at the pack's proof"), so it is the one field where a pack
+ * number is grounded. Every other field asserts about the practice, and a pack number there
+ * is a fabrication.
+ */
+const REBUTTAL_FIELD = /^objections\[\d+\]\.rebuttal$/;
+
 /** Run every gate over every field of model-authored prose. */
 export function lintVoice(voice: VoiceBrief, corpus: GroundingCorpus): LintResult {
   const violations: Violation[] = [];
 
   for (const { field, text } of voiceProseFields(voice)) {
-    for (const token of ungroundedNumbers(text, corpus)) {
+    const allowPack = REBUTTAL_FIELD.test(field);
+    for (const token of ungroundedNumbers(text, corpus, allowPack)) {
       violations.push({
         kind: "ungrounded-number",
         field,

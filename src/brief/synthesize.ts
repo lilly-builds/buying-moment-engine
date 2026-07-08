@@ -109,27 +109,61 @@ export function headlineCitesASignal(
   return voice.headlineEvidenceIds.some((id) => signalEvidence.has(id));
 }
 
+/** Every way a brief can fail the closure gate, gathered so the reason and the retry agree. */
+interface ClosureFailure {
+  unknown: readonly UnknownCitation[];
+  zeroSignal: boolean;
+  headlineVariantMismatch: boolean;
+  headlineMissesSignal: boolean;
+  personalizationUncited: boolean;
+}
+
+function closureFailed(f: ClosureFailure): boolean {
+  return (
+    f.unknown.length > 0 ||
+    f.headlineVariantMismatch ||
+    f.headlineMissesSignal ||
+    f.personalizationUncited
+  );
+}
+
+/** A one-line diagnosis for the cost row and the log. */
+function closureReason(f: ClosureFailure): string {
+  return [
+    f.unknown.length > 0 ? `cited ${f.unknown.length} evidence id(s) not present in the input` : null,
+    f.headlineVariantMismatch
+      ? f.zeroSignal
+        ? "headline must be null on a zero-signal practice"
+        : "headline must not be null when a signal fired"
+      : null,
+    f.headlineMissesSignal ? "headline does not cite a signal" : null,
+    f.personalizationUncited ? "personalizationSnippet cites no evidence" : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join("; ");
+}
+
 /** Closure + relevance failures, phrased as an edit list the next attempt can act on. */
-function closureCorrections(
-  unknown: readonly UnknownCitation[],
-  zeroSignal: boolean,
-  headlineVariantMismatch: boolean,
-  headlineMissesSignal: boolean,
-): string[] {
-  const corrections = unknown.map(
+function closureCorrections(f: ClosureFailure): string[] {
+  const corrections = f.unknown.map(
     (u) =>
       `- you cited evidence id "${u.evidenceId}", which was not in the EVIDENCE block. Cite only the ids given, and only for sentences they support.`,
   );
-  if (headlineVariantMismatch) {
+  if (f.headlineVariantMismatch) {
     corrections.push(
-      zeroSignal
+      f.zeroSignal
         ? "- NO buying moment has fired for this practice. Set headline to null; do not invent a trigger or a reason to call today."
         : "- a buying moment HAS fired. Write headline as that moment (do not return null) and cite a signal id in headlineEvidenceIds.",
     );
   }
-  if (headlineMissesSignal) {
+  if (f.headlineMissesSignal) {
     corrections.push(
       "- headlineEvidenceIds must include at least one SIGNAL id. The headline is the buying moment, not the practice profile.",
+    );
+  }
+  if (f.personalizationUncited) {
+    corrections.push(
+      "- personalizationSnippet must cite at least one evidence id. It is the detail that proves you actually looked; a line citing nothing is exactly what it must not be.",
     );
   }
   return corrections;
@@ -201,46 +235,41 @@ async function attemptVoice(
 
   const voice = outcome.voice;
 
-  // Gate 2 — CLOSURE. Attribution must be real, the zero-signal variant must MATCH, and a
-  // present headline must cite a SIGNAL rather than a firmographic.
-  const unknown = citationClosure(voice, allowedEvidenceIds(input.facts, signals));
-  // The zero-signal variant is a two-way lock, and both directions were open (P1-1). A
-  // zero-signal practice MUST return `headline: null`; a fired-signal practice MUST return a
-  // headline. Miss the first and the model can ship an invented buying moment on a practice
-  // with no signal at all — headline text, `headlineEvidenceIds: []` — and SHAPE, CLOSURE
-  // and TRUTH all wave it through (a string is valid, `[] ⊆ allowed`, no digits). That is the
-  // single thing the two-stage split exists to make impossible, so it is checked here.
-  const headlineVariantMismatch = factual.zeroSignal !== (voice.headline === null);
-  const headlineMissesSignal =
-    !factual.zeroSignal && voice.headline !== null && !headlineCitesASignal(voice, signals);
-  if (unknown.length > 0 || headlineVariantMismatch || headlineMissesSignal) {
+  // Gate 2 — CLOSURE. Attribution must be real, the zero-signal variant must MATCH, a present
+  // headline must cite a SIGNAL rather than a firmographic, and the personalization must be
+  // grounded in something.
+  const closure: ClosureFailure = {
+    unknown: citationClosure(voice, allowedEvidenceIds(input.facts, signals)),
+    zeroSignal: factual.zeroSignal,
+    // The zero-signal variant is a two-way lock, and both directions were open (P1-1). A
+    // zero-signal practice MUST return `headline: null`; a fired-signal practice MUST return a
+    // headline. Miss the first and the model can ship an invented buying moment on a practice
+    // with no signal at all — SHAPE, CLOSURE and TRUTH all wave it through (a string is valid,
+    // `[] ⊆ allowed`, no digits). It is the single thing the two-stage split exists to prevent.
+    headlineVariantMismatch: factual.zeroSignal !== (voice.headline === null),
+    headlineMissesSignal:
+      !factual.zeroSignal && voice.headline !== null && !headlineCitesASignal(voice, signals),
+    // The personalization snippet is DEFINED as the one specific detail that proves we looked,
+    // "from the EVIDENCE, never from the pack" — so one citing nothing is a fabrication by
+    // omission. This is the ≥1-evidence-id belt (P1-3), scoped to the single field whose whole
+    // contract is to be practice-specific. headline/opener/touches legitimately carry no ids
+    // on the zero-signal and market-generalization paths, so no blanket rule fits them.
+    personalizationUncited: voice.personalizationEvidenceIds.length === 0,
+  };
+  if (closureFailed(closure)) {
     return {
       voice: null,
       gate: "closure",
-      reason: [
-        unknown.length > 0 ? `cited ${unknown.length} evidence id(s) not present in the input` : null,
-        headlineVariantMismatch
-          ? factual.zeroSignal
-            ? "headline must be null on a zero-signal practice"
-            : "headline must not be null when a signal fired"
-          : null,
-        headlineMissesSignal ? "headline does not cite a signal" : null,
-      ]
-        .filter((part): part is string => part !== null)
-        .join("; "),
-      corrections: closureCorrections(
-        unknown,
-        factual.zeroSignal,
-        headlineVariantMismatch,
-        headlineMissesSignal,
-      ),
+      reason: closureReason(closure),
+      corrections: closureCorrections(closure),
       retryable: true,
     };
   }
 
-  // Gate 3 — TRUTH. The corpus is built from the SAME inputs the model was shown; a wider
-  // one lets a fabrication pass, a narrower one rejects a true fact.
-  const lint = lintVoice(voice, buildGroundingCorpus(groundingParts(input)));
+  // Gate 3 — TRUTH. The corpus is built from the SAME inputs the model was shown — the FRESH
+  // signals, not `input.signals` (P2-5) — split so the pack's own figures ground only a
+  // rebuttal. A wider corpus lets a fabrication pass, a narrower one rejects a true fact.
+  const lint = lintVoice(voice, buildGroundingCorpus(groundingParts(input, signals)));
   if (!lint.ok) {
     return {
       voice: null,

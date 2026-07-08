@@ -29,7 +29,14 @@ const EVIDENCE = [
   "Schlessinger MD has served South Florida since 2004.",
 ];
 
-const CORPUS = buildGroundingCorpus(EVIDENCE);
+/**
+ * The pack's OWN cited figures. `600` and `250` are the pack's proof point — real, but they
+ * belong to Texas Dermatology, not the prospect — so they are grounded ONLY inside a rebuttal
+ * and are a fabrication anywhere else (P1-3). They are deliberately NOT in `EVIDENCE`.
+ */
+const PACK = ["Texas Dermatology books 600 appointments and 250 new patients per month."];
+
+const CORPUS = buildGroundingCorpus({ evidence: EVIDENCE, pack: PACK });
 
 function voice(overrides: Partial<VoiceBrief> = {}): VoiceBrief {
   return {
@@ -73,9 +80,16 @@ describe("normalizeForGrounding", () => {
 
 describe("buildGroundingCorpus / isNumberGrounded", () => {
   it("holds each maximal number token the evidence actually wrote", () => {
-    expect([...CORPUS.numbers].sort()).toEqual(
+    expect([...CORPUS.evidence].sort()).toEqual(
       ["13.4", "196", "2000", "2004", "2008", "5315", "711"].sort(),
     );
+  });
+
+  it("keeps the pack's figures in a separate set, not the evidence one", () => {
+    expect([...CORPUS.pack].sort()).toEqual(["250", "600"].sort());
+    // The pack's numbers are NOT evidence numbers: they belong to another practice.
+    expect(isNumberGrounded("250", CORPUS)).toBe(false);
+    expect(isNumberGrounded("600", CORPUS)).toBe(false);
   });
 
   it("matches a number that is present", () => {
@@ -99,7 +113,28 @@ describe("buildGroundingCorpus / isNumberGrounded", () => {
   });
 
   it("drops null and undefined parts rather than stringifying them", () => {
-    expect([...buildGroundingCorpus(["saw 5 of them", null, undefined]).numbers]).toEqual(["5"]);
+    const corpus = buildGroundingCorpus({ evidence: ["saw 5 of them", null, undefined], pack: [] });
+    expect([...corpus.evidence]).toEqual(["5"]);
+  });
+});
+
+describe("ungroundedNumbers — the pack's proof grounds a rebuttal and nothing else (P1-3)", () => {
+  it("flags a pack proof number asserted as a fact about the practice", () => {
+    // The exploit that composed two holes into one: the pack's 250 new patients, stated
+    // about the prospect, citing nothing. With the corpus split it is ungrounded here.
+    expect(ungroundedNumbers("You are losing 250 new patients a month to voicemail.", CORPUS)).toEqual([
+      "250",
+    ]);
+  });
+
+  it("allows the same pack number inside a rebuttal, where the prompt permits the proof", () => {
+    expect(
+      ungroundedNumbers("Texas Dermatology books 250 new patients a month with Elise.", CORPUS, true),
+    ).toEqual([]);
+  });
+
+  it("still flags a number that is in NEITHER set, even inside a rebuttal", () => {
+    expect(ungroundedNumbers("We book 999 new patients a month.", CORPUS, true)).toEqual(["999"]);
   });
 });
 
@@ -263,6 +298,41 @@ describe("lintVoice", () => {
       CORPUS,
     );
     expect(result.ok).toBe(true);
+  });
+
+  it("rejects a pack proof number in a touch body but accepts it in a rebuttal (P1-3)", () => {
+    // 250 is the pack's own figure. Asserted about the prospect it is a fabrication; quoted as
+    // the proof point in a rebuttal it is exactly what the prompt asks for.
+    const inTouch = lintVoice(
+      voice({
+        sequence: {
+          ...voice().sequence,
+          touches: [
+            { touchNumber: 1, channel: "email", subject: "Hi", body: "You are losing 250 new patients a month.", evidenceIds: [] },
+            { touchNumber: 2, channel: "call", subject: "Hi", body: "Second.", evidenceIds: [] },
+            { touchNumber: 3, channel: "email", subject: "Hi", body: "Third.", evidenceIds: [] },
+          ],
+        },
+      }),
+      CORPUS,
+    );
+    expect(inTouch.violations).toContainEqual({
+      kind: "ungrounded-number",
+      field: "sequence.touches[0].body",
+      detail: expect.stringContaining('"250"'),
+    });
+
+    const inRebuttal = lintVoice(
+      voice({
+        objections: [
+          { objection: "Will it work?", rebuttal: "Texas Dermatology books 250 new patients a month." },
+          { objection: "Too expensive", rebuttal: "It pays for itself." },
+          { objection: "Patients hate robots", rebuttal: "They hate hold music more." },
+        ],
+      }),
+      CORPUS,
+    );
+    expect(inRebuttal.ok).toBe(true);
   });
 
   it("flags an em-dash pile-up", () => {
