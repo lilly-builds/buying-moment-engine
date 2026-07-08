@@ -190,11 +190,10 @@ export async function pushPracticeLead(
 ): Promise<PushResult> {
   const provider = args.provider ?? DEFAULT_PROVIDER;
   const existing = await loadCrmLink(db, args.practiceId, provider);
-  // Did the DEAL already exist before this push? That, not "was the company
-  // created", is what makes a lead "pushed". Keying off the company under-logged:
-  // after a partial push (company + contact land, deal 5xxs), the retry saw an
-  // existing companyId, reported `created: false`, and `lead_pushed` was never
-  // logged even though the lead did land.
+  // Did the DEAL already exist before this push? Only a push that CREATES the deal
+  // may seed `crm_links.stage` below — a re-push would clobber the stage the AE has
+  // since moved the deal to. This flag deliberately does NOT gate `lead_pushed`;
+  // see the ground-truth read at the end of this function for why it cannot.
   const dealAlreadyLanded = Boolean(existing?.dealId);
 
   // Persist ids AS EACH object lands, so a hard failure mid-sequence (a non-429
@@ -228,10 +227,15 @@ export async function pushPracticeLead(
     syncedAt: new Date(),
   });
 
-  // Log lead_pushed exactly once per practice, the first time its deal lands. A
-  // re-sync of an already-landed lead must not log a second one (over-count), and
-  // a retry after a partial push must still log the first (under-count).
-  if (!dealAlreadyLanded) {
+  // Log lead_pushed exactly once per practice. Keyed off the GROUND TRUTH
+  // (`roi_events`), never off `dealAlreadyLanded`: the deal id is committed by the
+  // adapter's `onProgress` in a statement of its OWN, before this insert. Crash in
+  // that window and the id is persisted while the event is not — every later retry
+  // then reads a landed deal, skips the insert, and the push that really landed is
+  // lost permanently and silently. Wrapping the final upsert + insert in one
+  // transaction does NOT close that window: `onProgress` already committed, outside
+  // it. Only re-reading the event log does. (Same lesson as `deal_won`.)
+  if (!(await hasRoiEvent(db, args.practiceId, "lead_pushed"))) {
     await db.insert(roiEvents).values({
       eventType: "lead_pushed",
       practiceId: args.practiceId,
@@ -364,14 +368,14 @@ export async function recordStageForPractice(
   // milestone stage logs again), and — because the link row is written before the
   // event, in separate statements — a crash between the two would make every later
   // poll see an unchanged stage and lose the milestone permanently and silently.
-  // `hasMilestone` carries the exactly-once invariant on its own, and it re-reads
+  // `hasRoiEvent` carries the exactly-once invariant on its own, and it re-reads
   // the ground truth (roi_events) rather than a cache of it.
   const milestone = stageMilestone(readback.stage);
   const isCreateStage = readback.stage === INITIAL_DEAL_STAGE_ID;
   if (
     milestone &&
     !isCreateStage &&
-    !(await hasMilestone(db, args.practiceId, milestone))
+    !(await hasRoiEvent(db, args.practiceId, milestone))
   ) {
     await db.insert(roiEvents).values({
       eventType: milestone,
@@ -383,11 +387,24 @@ export async function recordStageForPractice(
   return readback;
 }
 
-/** Has this practice already recorded this milestone? (R12: never double-count.) */
-async function hasMilestone(
+/** ROI events that must be logged AT MOST once per practice (R8 push, R12 tiles). */
+type ExactlyOnceEvent = RoiMilestone | "lead_pushed";
+
+/**
+ * Has this practice already recorded this event? (R8/R12: never double-count, never
+ * lose it.) The exactly-once gate re-reads `roi_events` — the ground truth — rather
+ * than any cached signal of it (a stage column, a persisted deal id), so it survives
+ * a crash between that signal being written and the event landing.
+ *
+ * Still check-then-insert: two CONCURRENT calls for one practice can both read false
+ * and both insert. The DB-level gate is a partial unique index on
+ * `roi_events (practice_id, event_type)`; it lands with U12, when `roi_events` gets a
+ * real consumer and a route drives these concurrently.
+ */
+async function hasRoiEvent(
   db: Database,
   practiceId: string,
-  milestone: RoiMilestone,
+  eventType: ExactlyOnceEvent,
 ): Promise<boolean> {
   const [row] = await db
     .select({ id: roiEvents.id })
@@ -395,7 +412,7 @@ async function hasMilestone(
     .where(
       and(
         eq(roiEvents.practiceId, practiceId),
-        eq(roiEvents.eventType, milestone),
+        eq(roiEvents.eventType, eventType),
       ),
     )
     .limit(1);
