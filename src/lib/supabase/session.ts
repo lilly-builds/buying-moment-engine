@@ -9,12 +9,13 @@ import { isAllowlisted, isPublicPath, parseAllowlist } from "@/src/lib/auth";
  * FAIL CLOSED: if the Supabase-Auth env is missing, non-public routes redirect to
  * /login rather than passing through — otherwise a deploy with DATABASE_URL set
  * but Supabase-Auth env absent would serve the real-contact feed with no login.
- * /login stays reachable so the redirect can't infinite-loop.
+ * /login and /auth/callback stay reachable so the redirect can't infinite-loop.
  *
  * U5 removed `/api/enrich-callback` from this allowlist: PDL is a SYNCHRONOUS
  * request/response API (spec § Stack), so no inbound callback exists. In
- * production /login is the only publicly reachable path; outside production
- * /styleguide joins it, for brand review (see `publicPaths`).
+ * production /login and /auth/callback (the magic-link landing) are the only
+ * publicly reachable paths; outside production /styleguide joins them, for brand
+ * review (see `publicPaths`).
  */
 
 /** Resolved once per request. `publicPaths` opens /styleguide outside production

@@ -10,9 +10,13 @@ describe("isPublicPath (R18)", () => {
   const PROD = true;
   const DEV = false;
 
-  it("always leaves /login reachable, or the redirect loops", () => {
+  it("always leaves /login and the magic-link callback reachable, or the redirect loops", () => {
     for (const env of [PROD, DEV]) {
       expect(isPublicPath("/login", env)).toBe(true);
+      // /auth/callback exchanges the OTP code for a session and re-checks the
+      // allowlist itself — it must be reachable without a session because it is
+      // how you get one. Public in prod too, where real logins happen.
+      expect(isPublicPath("/auth/callback", env)).toBe(true);
     }
   });
 
@@ -47,6 +51,7 @@ describe("isPublicPath (R18)", () => {
 
   it("does not open a path merely because it is prefixed by a public one", () => {
     expect(isPublicPath("/loginsomething", PROD)).toBe(false);
+    expect(isPublicPath("/auth/callbackevil", PROD)).toBe(false);
     expect(isPublicPath("/styleguide-secrets", DEV)).toBe(false);
   });
 });

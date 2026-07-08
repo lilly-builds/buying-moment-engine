@@ -20,7 +20,9 @@ export function LoginForm() {
         email,
         options: {
           emailRedirectTo:
-            typeof window !== "undefined" ? window.location.origin : undefined,
+            typeof window !== "undefined"
+              ? `${window.location.origin}/auth/callback`
+              : undefined,
         },
       });
       if (error) {

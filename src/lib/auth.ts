@@ -25,13 +25,19 @@ export function isAllowlisted(
 /**
  * Routes reachable without a session.
  *
- * `/login` must always stay open or the redirect to /login would loop.
+ * `/login` and `/auth/callback` must always stay open or the redirect to /login
+ * would loop. `/auth/callback` is where Supabase lands the magic-link code — it
+ * exchanges the code for a session and re-checks the allowlist before letting the
+ * visitor anywhere else, so it is safe to reach without an existing session (it is
+ * how you GET one).
  *
  * `/api/enrich-callback` USED to be listed here. U5 deleted that route — PDL is a
  * SYNCHRONOUS request/response API (spec § Stack), so no inbound callback exists —
- * and this merge removes its auth exemption with it. An allowlist entry that names
- * a route nobody serves is dead auth surface: it survives a future re-add of the
- * path under a different owner and silently ships it unauthenticated.
+ * and the main merge removed its auth exemption with it. It stays removed: an
+ * allowlist entry that names a route nobody serves is dead auth surface that would
+ * silently ship the path unauthenticated if it were ever re-added. (The auth
+ * magic-link patch was authored before that cleanup and still listed it; we kept
+ * it out on purpose.)
  *
  * `/styleguide` is open ONLY outside production. It is U2's visual-QA surface: it
  * renders design tokens and empty component variants, and reads nothing from the
@@ -41,7 +47,7 @@ export function isAllowlisted(
  * a Supabase round-trip. If it ever grows a real practice on it, delete this.
  */
 export function publicPaths(isProduction: boolean): string[] {
-  const paths = ["/login"];
+  const paths = ["/login", "/auth/callback"];
   if (!isProduction) paths.push("/styleguide");
   return paths;
 }
