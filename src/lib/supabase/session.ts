@@ -9,10 +9,14 @@ import { isAllowlisted, parseAllowlist } from "@/src/lib/auth";
  * FAIL CLOSED: if the Supabase-Auth env is missing, non-public routes redirect to
  * /login rather than passing through — otherwise a deploy with DATABASE_URL set
  * but Supabase-Auth env absent would serve the real-contact feed with no login.
- * /login and the shared-secret callback stay reachable so it can't infinite-loop.
+ * /login stays reachable so the redirect can't infinite-loop.
+ *
+ * U5 removed `/api/enrich-callback` from this allowlist: PDL is a SYNCHRONOUS
+ * request/response API (spec § Stack), so no inbound callback exists. Nothing is
+ * publicly reachable now except /login.
  */
 
-const PUBLIC_PATHS = ["/login", "/api/enrich-callback"];
+const PUBLIC_PATHS = ["/login"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(

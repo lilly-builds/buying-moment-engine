@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { isAllowlisted, parseAllowlist, requireSession } from "@/src/lib/auth";
-import { verifySharedSecret } from "@/src/lib/secret";
 
 describe("parseAllowlist / isAllowlisted", () => {
   const allowlist = parseAllowlist("Lilly@Opterra.com, ae@eliseai.com");
@@ -40,18 +39,5 @@ describe("requireSession", () => {
     const r = requireSession({ user: { email: "ae@eliseai.com" } }, allowlist);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.email).toBe("ae@eliseai.com");
-  });
-});
-
-describe("verifySharedSecret", () => {
-  it("accepts a matching secret", () => {
-    expect(verifySharedSecret("s3cret", "s3cret")).toBe(true);
-  });
-  it("rejects a mismatch", () => {
-    expect(verifySharedSecret("wrong", "s3cret")).toBe(false);
-  });
-  it("fails closed when either secret is missing", () => {
-    expect(verifySharedSecret(null, "s3cret")).toBe(false);
-    expect(verifySharedSecret("s3cret", undefined)).toBe(false);
   });
 });
