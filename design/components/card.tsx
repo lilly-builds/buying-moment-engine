@@ -11,7 +11,7 @@ import { cn } from "@/design/lib/cn";
  * tier-2 panel wants and what a plain feed row does not.
  */
 
-export type CardVariant = "flat" | "elevated" | "outlined" | "dark";
+export type CardVariant = "flat" | "elevated" | "outlined" | "dark" | "glass";
 export type CardPadding = "none" | "sm" | "md" | "lg";
 
 const VARIANTS: Record<CardVariant, string> = {
@@ -20,6 +20,11 @@ const VARIANTS: Record<CardVariant, string> = {
   outlined: "bg-surface border border-line-soft",
   // Dark section fill — `--new-dark-purple`. Pair with light-tone children.
   dark: "bg-surface-dark text-white",
+  // Frosted glass — translucent white over a coloured surface (the /signals blue hero),
+  // so the background shows through and the card reads as the same material as the glassy
+  // discs. `backdrop-blur` frosts anything passing behind it. Use ONLY over a colour/image;
+  // over plain white it is just a faint panel. Keep dark-tone children for legibility.
+  glass: "bg-white/60 backdrop-blur-md border border-white/70",
 };
 
 const PADDING: Record<CardPadding, string> = {

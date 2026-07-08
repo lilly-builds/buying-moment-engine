@@ -133,6 +133,42 @@
   --shadow-soft: 0 4px 8px -2px #1818191a, 0 2px 4px -2px #1818190f;
   --shadow-card: 0 12px 16px -6px #18181914, 0 4px 6px -4px #18181908;
   --shadow-ring: 0 0 1px #a9a8a6, 0 2px 4px #0000000a;
+
+  /* Motion — the /signals connectors carry a pulse of "signal" from each source
+     card into the data store. pathLength is normalised to 100 on the paths, so the
+     offset travels one full length regardless of the (stretched) viewBox. */
+  --animate-signal-flow: signal-flow 1.8s linear infinite;
+  /* The source cards glide in from the left, one at a time (staggered per-card
+     animation-delay). `both` holds them invisible until their turn. */
+  --animate-card-glide-in: card-glide-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes signal-flow {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes card-glide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Respect reduced-motion: no glide, no travelling pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-signal-flow,
+  .animate-card-glide-in {
+    animation: none;
+  }
 }
 
 /* Font families come from `next/font` in app/layout.tsx, so they resolve through
