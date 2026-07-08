@@ -10,11 +10,17 @@ import type {
 
 /**
  * Stage 2 of the waterfall: PDL fills ONLY the verified gaps Claude can't reliably
- * get — verified work email + LinkedIn URL (spec § Stack). It is metered per
- * MATCHED record (R19), which is also how PDL bills: an unmatched lookup costs
- * nothing, so it records `units = 0` rather than a $0.28 phantom charge.
+ * get — verified work email + LinkedIn URL (spec § Stack). It is metered per BILLED
+ * record (R19) — an HTTP 200 — because that, and not our opinion of the payload, is
+ * what PDL charges for. A true no-match comes back as a 404 and is free, so it
+ * records `units = 0` rather than a $0.28 phantom charge.
  *
- * A cost_events row is written for EVERY completed call, matched or not — that is
+ * `matched` is a SEPARATE, semantic field: did we get a usable, above-threshold
+ * person? A 200 we can't parse, and a 200 below `PDL_MIN_LIKELIHOOD`, are both
+ * `billed: true, matched: false` — real spend, no usable data. Metering on
+ * `matched` would book those at $0 and quietly understate CAC.
+ *
+ * A cost_events row is written for EVERY completed call, billed or not — that is
  * what makes "how many PDL lookups did this practice cost?" answerable from the
  * ledger instead of from a log.
  */
@@ -36,9 +42,10 @@ export async function runPdlPersonEnrich(
       operation: "person.enrich",
       pipelineStep: PIPELINE_STEP_PDL,
       practiceId: deps.practiceId ?? null,
-      units: (result) => (result.matched ? 1 : 0),
+      units: (result) => (result.billed ? 1 : 0),
       unitCostUsd: PDL_USD_PER_MATCHED_RECORD,
       meta: (result) => ({
+        billed: result.billed,
         matched: result.matched,
         likelihood: result.likelihood,
         filledEmail: result.workEmail !== null,
@@ -69,9 +76,10 @@ export async function runPdlCompanyEnrich(
       operation: "company.enrich",
       pipelineStep: PIPELINE_STEP_PDL,
       practiceId: deps.practiceId ?? null,
-      units: (result) => (result.matched ? 1 : 0),
+      units: (result) => (result.billed ? 1 : 0),
       unitCostUsd: PDL_USD_PER_MATCHED_RECORD,
       meta: (result) => ({
+        billed: result.billed,
         matched: result.matched,
         company: request.companyName,
         employeeCount: result.employeeCount,

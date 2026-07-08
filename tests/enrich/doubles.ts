@@ -65,6 +65,16 @@ export class FakeResearchClient implements ResearchClient {
   }
 }
 
+/**
+ * PDL's response body echoes its own HTTP status, so a recorded fixture already
+ * carries the status the meter bills on. A body with no `status` is a shape we do
+ * not recognize — which only ever reaches us on a (billed) 200.
+ */
+export function fixtureHttpStatus(fixture: unknown): number {
+  const status = (fixture as { status?: unknown } | null | undefined)?.status;
+  return typeof status === "number" ? status : 200;
+}
+
 export class FakePdlClient implements PdlClient {
   personCalls: PdlPersonRequest[] = [];
   companyCalls: number = 0;
@@ -72,11 +82,13 @@ export class FakePdlClient implements PdlClient {
   constructor(
     private readonly person: () => Promise<PdlPersonResult>,
     private readonly company: () => Promise<PdlCompanyResult> = async () =>
-      normalizeCompanyResponse({ status: 404 }),
+      normalizeCompanyResponse({ status: 404 }, 404),
   ) {}
 
   static fromFixture(fixture: unknown): FakePdlClient {
-    return new FakePdlClient(async () => normalizePersonResponse(fixture));
+    return new FakePdlClient(async () =>
+      normalizePersonResponse(fixture, fixtureHttpStatus(fixture)),
+    );
   }
 
   /** A PDL outage: BOTH endpoints fail, as they would on a 429 or a network drop. */

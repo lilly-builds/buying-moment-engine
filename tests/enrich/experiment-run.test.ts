@@ -5,7 +5,7 @@ import personMatch from "./fixtures/pdl-person-enrich-match.json";
 import personNotFound from "./fixtures/pdl-person-enrich-404.json";
 import researchFixture from "./fixtures/anthropic-research-response.json";
 import roleOnly from "./fixtures/anthropic-research-role-only.json";
-import { FakePdlClient, FakeResearchClient } from "./doubles";
+import { FakePdlClient, FakeResearchClient, fixtureHttpStatus } from "./doubles";
 import {
   normalizeCompanyResponse,
   normalizePersonResponse,
@@ -36,8 +36,8 @@ function ledger(): { recorder: CostRecorder; rows: CostEventRecord[] } {
 
 function pdlBoth(person: unknown, company: unknown): FakePdlClient {
   return new FakePdlClient(
-    async () => normalizePersonResponse(person),
-    async () => normalizeCompanyResponse(company),
+    async () => normalizePersonResponse(person, fixtureHttpStatus(person)),
+    async () => normalizeCompanyResponse(company, fixtureHttpStatus(company)),
   );
 }
 

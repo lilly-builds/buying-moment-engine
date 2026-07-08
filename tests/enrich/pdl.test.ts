@@ -20,8 +20,9 @@ const PERSON = {
 
 describe("PDL response normalization (published Person Enrichment schema)", () => {
   it("maps a matched record to the verified work email + LinkedIn URL", () => {
-    const result = normalizePersonResponse(personMatch);
+    const result = normalizePersonResponse(personMatch, 200);
     expect(result).toEqual({
+      billed: true,
       matched: true,
       likelihood: 8,
       workEmail: "dana.whitfield@sunshinederm.example",
@@ -30,12 +31,13 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
   });
 
   it("never surfaces recommended_personal_email — business contacts only (D9)", () => {
-    const result = normalizePersonResponse(personMatch);
+    const result = normalizePersonResponse(personMatch, 200);
     expect(JSON.stringify(result)).not.toContain("example-mail.invalid");
   });
 
-  it("ERROR PATH: a 404 no-match yields matched=false, not a throw", () => {
-    expect(normalizePersonResponse(personNotFound)).toEqual({
+  it("ERROR PATH: a 404 no-match yields matched=false, not a throw — and is UNBILLED", () => {
+    expect(normalizePersonResponse(personNotFound, 404)).toEqual({
+      billed: false,
       matched: false,
       likelihood: null,
       workEmail: null,
@@ -44,14 +46,15 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
   });
 
   it("EDGE CASE: a below-threshold likelihood is treated as NO match", () => {
-    const result = normalizePersonResponse(personLowLikelihood);
+    const result = normalizePersonResponse(personLowLikelihood, 200);
     expect(result.matched).toBe(false);
     expect(result.workEmail).toBeNull();
     expect(result.likelihood).toBe(3);
   });
 
   it("maps a matched company record (used only by experiment #1)", () => {
-    expect(normalizeCompanyResponse(companyMatch)).toEqual({
+    expect(normalizeCompanyResponse(companyMatch, 200)).toEqual({
+      billed: true,
       matched: true,
       likelihood: 9,
       employeeCount: 48,
@@ -62,12 +65,52 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
   });
 
   it("EDGE CASE: an unrecognized body degrades to no-match, never a crash", () => {
-    expect(normalizePersonResponse({ unexpected: true }).matched).toBe(false);
-    expect(normalizeCompanyResponse(null).matched).toBe(false);
+    expect(normalizePersonResponse({ unexpected: true }, 200).matched).toBe(false);
+    expect(normalizeCompanyResponse(null, 404).matched).toBe(false);
   });
 });
 
-describe("metering PDL (R19) — billed per MATCHED record", () => {
+describe("BILLED vs MATCHED — PDL charges on the HTTP 200, not on our judgement", () => {
+  it("a 200 whose body we do not recognize is BILLED, and the meter charges units=1", async () => {
+    // Real spend, zero usable data. Metering on `matched` would book this at $0.
+    const unrecognized = { data: { some: "shape we have never seen" } };
+    expect(normalizePersonResponse(unrecognized, 200)).toEqual({
+      billed: true,
+      matched: false,
+      likelihood: null,
+      workEmail: null,
+      linkedinUrl: null,
+    });
+
+    const client = FakePdlClient.fromFixture(unrecognized);
+    const { meter, rows } = recordingMeter();
+    await runPdlPersonEnrich({ client, meter }, PERSON);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].units).toBe(1);
+    expect(rows[0].costUsd).toBeCloseTo(PDL_USD_PER_MATCHED_RECORD, 10);
+    expect(rows[0].meta).toMatchObject({ billed: true, matched: false });
+  });
+
+  it("a 200 below the likelihood threshold is BILLED, and the meter charges units=1", async () => {
+    // PDL returned a person and charged for it; we refuse to USE it (D9). The
+    // refusal is ours, the invoice is theirs.
+    const result = normalizePersonResponse(personLowLikelihood, 200);
+    expect(result.billed).toBe(true);
+    expect(result.matched).toBe(false);
+
+    const client = FakePdlClient.fromFixture(personLowLikelihood);
+    const { meter, rows } = recordingMeter();
+    await runPdlPersonEnrich({ client, meter }, PERSON);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].units).toBe(1);
+    expect(rows[0].costUsd).toBeCloseTo(PDL_USD_PER_MATCHED_RECORD, 10);
+    expect(rows[0].meta).toMatchObject({ billed: true, matched: false, likelihood: 3 });
+  });
+});
+
+describe("metering PDL (R19) — billed per BILLED record (HTTP 200)", () => {
   it("a matched record records units=1 at the published per-record price", async () => {
     const client = FakePdlClient.fromFixture(personMatch);
     const { meter, rows } = recordingMeter();
@@ -99,7 +142,7 @@ describe("metering PDL (R19) — billed per MATCHED record", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].units).toBe(0);
     expect(rows[0].costUsd).toBe(0);
-    expect(rows[0].meta).toMatchObject({ matched: false });
+    expect(rows[0].meta).toMatchObject({ billed: false, matched: false });
   });
 
   it("ERROR PATH: a 429 is unbilled — it throws and records no cost row", async () => {
@@ -126,8 +169,8 @@ describe("metering PDL (R19) — billed per MATCHED record", () => {
 
   it("company enrichment is metered too (experiment #1's paid calls)", async () => {
     const client = new FakePdlClient(
-      async () => normalizePersonResponse(personNotFound),
-      async () => normalizeCompanyResponse(companyMatch),
+      async () => normalizePersonResponse(personNotFound, 404),
+      async () => normalizeCompanyResponse(companyMatch, 200),
     );
     const { meter, rows } = recordingMeter();
 

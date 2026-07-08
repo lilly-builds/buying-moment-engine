@@ -102,6 +102,17 @@ export interface PdlPersonRequest {
  * `provider = 'pdl'` on `contacts` so the brief can say where it came from.
  */
 export interface PdlPersonResult {
+  /**
+   * An HTTP FACT, not a judgement: PDL bills EVERY 200 and returns 404 for a true
+   * no-match. Metering keys on `billed`, NEVER on `matched` — a 200 whose body we
+   * fail to recognize, or whose `likelihood` falls below `PDL_MIN_LIKELIHOOD`, was
+   * still charged, and a $0 cost_events row for it is money vanishing from CAC.
+   */
+  billed: boolean;
+  /**
+   * A SEMANTIC judgement: did we get a usable, above-threshold person back? Drives
+   * the waterfall's gap-fill; it must never drive the meter.
+   */
   matched: boolean;
   likelihood: number | null;
   workEmail: string | null;
@@ -121,6 +132,8 @@ export interface PdlCompanyRequest {
  * is forbidden from stating.
  */
 export interface PdlCompanyResult {
+  /** See `PdlPersonResult.billed`: PDL bills every 200, and 404s a true no-match. */
+  billed: boolean;
   matched: boolean;
   likelihood: number | null;
   employeeCount: number | null;

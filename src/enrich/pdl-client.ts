@@ -22,11 +22,16 @@ import {
  * Company Enrichment schemas.
  *
  * Status handling, and why it matters for R19:
- *  - 200 -> a matched record. PDL bills this. Metered at units = 1.
- *  - 404 -> no match. PDL does NOT bill this. Metered at units = 0 (the row is
- *    still written — the call happened, it just cost nothing).
+ *  - 200 -> PDL BILLED this, full stop. `billed = true`, metered at units = 1 —
+ *    even when the body is a shape we don't recognize, and even when `likelihood`
+ *    is below threshold and we semantically call it a no-match.
+ *  - 404 -> a true no-match. PDL does NOT bill this. `billed = false`, units = 0
+ *    (the row is still written — the call happened, it just cost nothing).
  *  - 429 -> rate limited, NOT billed. Throws, so the meter records nothing.
  *  - anything else / network timeout -> throws, unbilled.
+ *
+ * So `billed` is the HTTP status; `matched` is our judgement about the payload.
+ * Conflating them understates CAC on exactly the calls that went wrong.
  */
 
 const personResponseSchema = z.object({
@@ -52,14 +57,15 @@ const companyResponseSchema = z.object({
   locations: z.array(z.unknown()).nullish(),
 });
 
-const NO_MATCH: PdlPersonResult = {
+/** `billed` is supplied by the caller from the HTTP status — never guessed here. */
+const NO_MATCH: Omit<PdlPersonResult, "billed"> = {
   matched: false,
   likelihood: null,
   workEmail: null,
   linkedinUrl: null,
 };
 
-const NO_COMPANY_MATCH: PdlCompanyResult = {
+const NO_COMPANY_MATCH: Omit<PdlCompanyResult, "billed"> = {
   matched: false,
   likelihood: null,
   employeeCount: null,
@@ -68,24 +74,57 @@ const NO_COMPANY_MATCH: PdlCompanyResult = {
   website: null,
 };
 
+/** HTTP 200 is the billing event. Every other status either 404s free or throws. */
+function isBilled(httpStatus: number): boolean {
+  return httpStatus === 200;
+}
+
+/**
+ * Read a BILLED 200's body without throwing. A 200 that isn't JSON at all (an
+ * edge/proxy HTML page) was still charged, so it must reach the normalizer — which
+ * degrades it to `billed: true, matched: false` — rather than throw past the meter.
+ * The undefined is not a swallowed error: it is the "unrecognized body" the
+ * normalizer's safe-parse is written to handle.
+ */
+async function readJsonBody(res: Response): Promise<unknown> {
+  const raw = await res.text();
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What one PDL request actually returned: the status we bill on, and the payload. */
+interface PdlHttpResponse {
+  httpStatus: number;
+  body: unknown;
+}
+
 /**
  * Normalize a person-enrich body. PURE — the fixture-driven tests call this
  * directly. A match below `PDL_MIN_LIKELIHOOD` is treated as NO match: a guessed
  * work email is worse than no email (D9 — we never contact a practice, and the
- * AE must never be handed a fabricated address).
+ * AE must never be handed a fabricated address). It is still `billed`: PDL charged
+ * for the 200 regardless of what we decided to do with the payload.
  *
  * `recommended_personal_email` is deliberately IGNORED. The spec's contract is
  * public BUSINESS contacts only; a personal inbox is not one.
  */
-export function normalizePersonResponse(body: unknown): PdlPersonResult {
+export function normalizePersonResponse(
+  body: unknown,
+  httpStatus: number,
+): PdlPersonResult {
+  const billed = isBilled(httpStatus);
   const parsed = personResponseSchema.safeParse(body);
-  if (!parsed.success) return NO_MATCH;
+  if (!parsed.success) return { ...NO_MATCH, billed };
   const { status, likelihood, data } = parsed.data;
-  if (status !== 200 || !data) return NO_MATCH;
+  if (status !== 200 || !data) return { ...NO_MATCH, billed };
   if (likelihood != null && likelihood < PDL_MIN_LIKELIHOOD) {
-    return { ...NO_MATCH, likelihood };
+    return { ...NO_MATCH, billed, likelihood };
   }
   return {
+    billed,
     matched: true,
     likelihood: likelihood ?? null,
     workEmail: data.work_email ?? null,
@@ -94,12 +133,17 @@ export function normalizePersonResponse(body: unknown): PdlPersonResult {
 }
 
 /** Normalize a company-enrich body. PURE. Used only by experiment #1. */
-export function normalizeCompanyResponse(body: unknown): PdlCompanyResult {
+export function normalizeCompanyResponse(
+  body: unknown,
+  httpStatus: number,
+): PdlCompanyResult {
+  const billed = isBilled(httpStatus);
   const parsed = companyResponseSchema.safeParse(body);
-  if (!parsed.success) return NO_COMPANY_MATCH;
+  if (!parsed.success) return { ...NO_COMPANY_MATCH, billed };
   const data = parsed.data;
-  if (data.status !== 200) return NO_COMPANY_MATCH;
+  if (data.status !== 200) return { ...NO_COMPANY_MATCH, billed };
   return {
+    billed,
     matched: true,
     likelihood: data.likelihood ?? null,
     employeeCount: data.employee_count ?? null,
@@ -113,7 +157,7 @@ async function pdlGet(
   url: string,
   params: Record<string, string>,
   apiKey: string,
-): Promise<unknown> {
+): Promise<PdlHttpResponse> {
   const target = new URL(url);
   for (const [key, value] of Object.entries(params)) {
     target.searchParams.set(key, value);
@@ -123,20 +167,20 @@ async function pdlGet(
     signal: AbortSignal.timeout(PDL_FETCH_TIMEOUT_MS),
   });
 
-  if (res.status === 404) return { status: 404 };
+  if (res.status === 404) return { httpStatus: 404, body: { status: 404 } };
   if (res.status === 429) {
     const retryAfter = res.headers.get("retry-after");
     throw new PdlRateLimitError(retryAfter ? Number(retryAfter) : null);
   }
   if (!res.ok) throw new PdlRequestError(res.status, res.statusText);
-  return res.json();
+  return { httpStatus: res.status, body: await readJsonBody(res) };
 }
 
 /** Production binding. `apiKey` is injected, never read from the module scope. */
 export function pdlClient(apiKey: string): PdlClient {
   return {
     async enrichPerson(request: PdlPersonRequest): Promise<PdlPersonResult> {
-      const body = await pdlGet(
+      const { httpStatus, body } = await pdlGet(
         PDL_PERSON_ENRICH_URL,
         {
           name: request.fullName,
@@ -145,14 +189,18 @@ export function pdlClient(apiKey: string): PdlClient {
         },
         apiKey,
       );
-      return normalizePersonResponse(body);
+      return normalizePersonResponse(body, httpStatus);
     },
 
     async enrichCompany(request: PdlCompanyRequest): Promise<PdlCompanyResult> {
       const params: Record<string, string> = { name: request.companyName };
       if (request.website) params.website = request.website;
-      const body = await pdlGet(PDL_COMPANY_ENRICH_URL, params, apiKey);
-      return normalizeCompanyResponse(body);
+      const { httpStatus, body } = await pdlGet(
+        PDL_COMPANY_ENRICH_URL,
+        params,
+        apiKey,
+      );
+      return normalizeCompanyResponse(body, httpStatus);
     },
   };
 }
