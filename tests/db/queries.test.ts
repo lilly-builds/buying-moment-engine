@@ -88,4 +88,31 @@ describe("derived signal-count queries", () => {
     expect(feed[1].id).toBe(one.id);
     expect(feed[1].signalCount).toBe(1);
   });
+
+  it("a classified, enriched practice with ZERO fired signals stays OUT of the feed (R1)", async () => {
+    // Exactly the row U8's pull mode creates: someone pastes a practice name, the
+    // waterfall enriches it and tags a vertical, but no signal fires. It is a real
+    // practice with a real brief — and it is NOT at a buying moment, so the push
+    // feed must not carry it. (Its zero-signal brief page is a separate surface.)
+    const noSignals = await upsertPractice(t.db, {
+      name: "Quiet Derm",
+      geoKey: "boise-id",
+      vertical: "dermatology",
+    });
+    const fired = await upsertPractice(t.db, {
+      name: "Busy Derm",
+      geoKey: "austin-tx",
+      vertical: "dermatology",
+    });
+    await upsertSignal(t.db, {
+      practiceId: fired.id,
+      kind: "staffing_spike",
+      evidenceId: await makeEvidence("https://jobs.example.com/busy"),
+      detectedAt: DETECTED,
+    });
+
+    const feed = await feedPractices(t.db);
+    expect(feed.map((r) => r.id)).toEqual([fired.id]);
+    expect(feed.map((r) => r.name)).not.toContain("Quiet Derm");
+  });
 });

@@ -34,25 +34,64 @@ import {
  * Conflating them understates CAC on exactly the calls that went wrong.
  */
 
+/**
+ * On a FREE plan, PDL replaces restricted contact fields with a boolean PRESENCE
+ * FLAG rather than the value. Per their docs:
+ *
+ *   "Free plans... do not have access to contact fields like emails, phone numbers,
+ *    and street addresses and will instead appear as `true` if the value exists or
+ *    `false` if it does not."
+ *
+ * So there are THREE states, not two, and conflating them is a real product error:
+ *   - a string  → the value, and we may use it
+ *   - `true`    → PDL HAS it, withheld until the plan is upgraded ("paying gets it")
+ *   - `false`   → PDL DOES NOT HAVE IT. Upgrading buys nothing.
+ *
+ * Typing this as `z.string()` made the whole payload fail to parse, and the caller
+ * reported the person as unmatched — our bug, sold as the vendor's missing data.
+ *
+ * Verified live (2026-07-08), one record carrying both booleans at once:
+ *   satya nadella → work_email=false, personal_emails=true, mobile_phone=true,
+ *                   linkedin_url="linkedin.com/in/satyanadella"  (a plain string)
+ * `linkedin_url` is NOT a restricted field; it comes back on the free plan.
+ */
+const restrictedString = z.union([z.string(), z.boolean()]).nullish();
+
+/** The value, when we are actually allowed to have it. */
+function fieldValue(v: string | boolean | null | undefined): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+/**
+ * `true` means "exists, but your plan withholds it" — the ONLY case where paying
+ * more would produce a value. `false` means PDL has nothing, so an upgrade is money
+ * for nothing. Getting this polarity backwards is how "PDL needs a paid plan"
+ * becomes a purchasing decision built on a misread boolean.
+ */
+function isWithheldByPlan(v: string | boolean | null | undefined): boolean {
+  return v === true;
+}
+
 const personResponseSchema = z.object({
   status: z.number(),
   likelihood: z.number().nullish(),
   data: z
     .object({
-      work_email: z.string().nullish(),
-      recommended_personal_email: z.string().nullish(),
-      linkedin_url: z.string().nullish(),
+      work_email: restrictedString,
+      recommended_personal_email: restrictedString,
+      linkedin_url: restrictedString,
     })
     .loose()
     .nullish(),
 });
 
+/** Same licence convention as the person payload — a `false` must not break the parse. */
 const companyResponseSchema = z.object({
   status: z.number(),
   likelihood: z.number().nullish(),
-  employee_count: z.number().nullish(),
-  industry: z.string().nullish(),
-  website: z.string().nullish(),
+  employee_count: z.union([z.number(), z.boolean()]).nullish(),
+  industry: restrictedString,
+  website: restrictedString,
   location: z.unknown().nullish(),
   locations: z.array(z.unknown()).nullish(),
 });
@@ -60,9 +99,14 @@ const companyResponseSchema = z.object({
 /** `billed` is supplied by the caller from the HTTP status — never guessed here. */
 const NO_MATCH: Omit<PdlPersonResult, "billed"> = {
   matched: false,
+  unparseable: false,
+  parseError: null,
   likelihood: null,
   workEmail: null,
   linkedinUrl: null,
+  // A no-match / unparsed payload tells us nothing about what PDL holds.
+  emailWithheldByPlan: false,
+  linkedinWithheldByPlan: false,
 };
 
 const NO_COMPANY_MATCH: Omit<PdlCompanyResult, "billed"> = {
@@ -105,14 +149,25 @@ interface PdlHttpResponse {
 }
 
 /**
- * Normalize a person-enrich body. PURE — the fixture-driven tests call this
- * directly. A match below `PDL_MIN_LIKELIHOOD` is treated as NO match: a guessed
- * work email is worse than no email (D9 — we never contact a practice, and the
- * AE must never be handed a fabricated address). It is still `billed`: PDL charged
- * for the 200 regardless of what we decided to do with the payload.
+ * Normalize a person-enrich body. PURE — the fixture-driven tests call this directly.
  *
- * `recommended_personal_email` is deliberately IGNORED. The spec's contract is
- * public BUSINESS contacts only; a personal inbox is not one.
+ * FOUR outcomes, deliberately distinct. Collapsing any two of them is how a $0.28
+ * charge becomes an invisible "the vendor had no data":
+ *
+ *  - `unparseable`  — a 200 whose shape we do not understand. LOUD. Never silently a
+ *                     no-match: that reports OUR bug as THEIR missing data. (This is
+ *                     exactly what `work_email: false` used to trigger.)
+ *  - no match (404) — PDL genuinely has no record. Not billed.
+ *  - below threshold— a real record we CHOSE to reject; a guessed work email is worse
+ *                     than none (D9: the AE must never be handed a fabricated address).
+ *                     Billed, because PDL answered.
+ *  - matched        — a usable record. Per-field, a restricted value may be absent for
+ *                     two different reasons: PDL holds nothing (`false`), or PDL holds
+ *                     it and the free plan withholds it (`true`). Only the latter is
+ *                     fixable by paying. See `isWithheldByPlan`.
+ *
+ * `recommended_personal_email` is deliberately IGNORED — the spec's contract is public
+ * BUSINESS contacts only; a personal inbox is not one.
  */
 export function normalizePersonResponse(
   body: unknown,
@@ -120,7 +175,16 @@ export function normalizePersonResponse(
 ): PdlPersonResult {
   const billed = isBilled(httpStatus);
   const parsed = personResponseSchema.safeParse(body);
-  if (!parsed.success) return { ...NO_MATCH, billed };
+  if (!parsed.success) {
+    return {
+      ...NO_MATCH,
+      billed,
+      unparseable: true,
+      parseError: parsed.error.issues
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; "),
+    };
+  }
   const { status, likelihood, data } = parsed.data;
   if (status !== 200 || !data) return { ...NO_MATCH, billed };
   if (likelihood != null && likelihood < PDL_MIN_LIKELIHOOD) {
@@ -129,9 +193,14 @@ export function normalizePersonResponse(
   return {
     billed,
     matched: true,
+    unparseable: false,
+    parseError: null,
     likelihood: likelihood ?? null,
-    workEmail: data.work_email ?? null,
-    linkedinUrl: data.linkedin_url ?? null,
+    workEmail: fieldValue(data.work_email),
+    linkedinUrl: fieldValue(data.linkedin_url),
+    // `true` = PDL has it, upgrade to see it. `false` = PDL has nothing.
+    emailWithheldByPlan: isWithheldByPlan(data.work_email),
+    linkedinWithheldByPlan: isWithheldByPlan(data.linkedin_url),
   };
 }
 
@@ -149,10 +218,12 @@ export function normalizeCompanyResponse(
     billed,
     matched: true,
     likelihood: data.likelihood ?? null,
-    employeeCount: data.employee_count ?? null,
+    // A licence-withheld `false` must read as "unknown", never as a value.
+    employeeCount:
+      typeof data.employee_count === "number" ? data.employee_count : null,
     locationsCount: data.locations?.length ?? null,
-    industry: data.industry ?? null,
-    website: data.website ?? null,
+    industry: fieldValue(data.industry),
+    website: fieldValue(data.website),
   };
 }
 

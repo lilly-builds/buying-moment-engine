@@ -84,8 +84,17 @@ export const PDL_MIN_LIKELIHOOD = 6;
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
-/** Mirrors DETECTOR_FETCH_TIMEOUT_MS in `src/detectors/`. Research is slower. */
-export const ENRICH_FETCH_TIMEOUT_MS = 120_000;
+/**
+ * Agentic research is NOT a plain API call. One request runs up to
+ * WEB_SEARCH_MAX_USES searches + WEB_FETCH_MAX_USES page fetches SERVER-SIDE before
+ * returning a single token, so it is bounded by the web, not by Anthropic.
+ *
+ * The old value (120_000) was copied from DETECTOR_FETCH_TIMEOUT_MS, where one plain
+ * HTTP call really does finish in seconds. It aborted the research call on every
+ * practice of a 10-practice run, at 121s each — the ceiling, not the work, was the
+ * limit. Raised to Anthropic's own 10-minute cap for a non-streaming request.
+ */
+export const ENRICH_FETCH_TIMEOUT_MS = 600_000;
 export const PDL_FETCH_TIMEOUT_MS = 20_000;
 
 /** `cost_events.pipeline_step` values — the scoreboard slices spend on these. */

@@ -25,9 +25,14 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
     expect(result).toEqual({
       billed: true,
       matched: true,
+      unparseable: false,
+      parseError: null,
       likelihood: 8,
       workEmail: "dana.whitfield@sunshinederm.example",
       linkedinUrl: "linkedin.com/in/dana-whitfield-example",
+      // A plan that returns the STRING is not withholding anything.
+      emailWithheldByPlan: false,
+      linkedinWithheldByPlan: false,
     });
   });
 
@@ -40,9 +45,13 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
     expect(normalizePersonResponse(personNotFound, 404)).toEqual({
       billed: false,
       matched: false,
+      unparseable: false, // a 404 is understood perfectly; it just has no record
+      parseError: null,
       likelihood: null,
       workEmail: null,
       linkedinUrl: null,
+      emailWithheldByPlan: false, // a no-match tells us nothing about what PDL holds
+      linkedinWithheldByPlan: false,
     });
   });
 
@@ -78,9 +87,15 @@ describe("BILLED vs MATCHED — PDL charges on the HTTP 200, not on our judgemen
     expect(normalizePersonResponse(unrecognized, 200)).toEqual({
       billed: true,
       matched: false,
+      // We do not understand this payload. Say so, out loud, in the result — a
+      // silent no-match here reports our own bug as the vendor's missing data.
+      unparseable: true,
+      parseError: expect.any(String),
       likelihood: null,
       workEmail: null,
       linkedinUrl: null,
+      emailWithheldByPlan: false,
+      linkedinWithheldByPlan: false,
     });
 
     const client = FakePdlClient.fromFixture(unrecognized);
@@ -247,5 +262,80 @@ describe("metering PDL (R19) — billed per BILLED record (HTTP 200)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].operation).toBe("company.enrich");
     expect(rows[0].units).toBe(1);
+  });
+});
+
+/**
+ * REGRESSION — the free-tier licence convention.
+ *
+ * PDL returns the literal boolean `false` for a field your plan is not licensed for.
+ * Typing `work_email` as `z.string()` made the whole payload fail to parse, and the
+ * normalizer reported the person as unmatched — so a real, BILLED match (likelihood 9,
+ * 77 fields, a usable LinkedIn URL) was thrown away and recorded as "PDL had no data."
+ *
+ * Payload shape captured from a live positive-control call, 2026-07-08.
+ */
+describe("licence-gated fields (`false`) must not be read as 'no data'", () => {
+  const freeTierMatch = {
+    status: 200,
+    likelihood: 9,
+    data: {
+      full_name: "sean thorne",
+      job_title: "president",
+      work_email: false, // ← not licensed on the free tier
+      recommended_personal_email: false,
+      linkedin_url: "linkedin.com/in/seanthorne",
+    },
+  };
+
+  it("parses a free-tier 200 as a MATCH, keeping the LinkedIn URL it did return", () => {
+    const r = normalizePersonResponse(freeTierMatch, 200);
+    expect(r.unparseable).toBe(false);
+    expect(r.matched).toBe(true);
+    expect(r.billed).toBe(true);
+    expect(r.linkedinUrl).toBe("linkedin.com/in/seanthorne");
+  });
+
+  it("`false` means PDL HOLDS NOTHING — paying would buy nothing", () => {
+    const r = normalizePersonResponse(freeTierMatch, 200);
+    expect(r.workEmail).toBeNull();
+    // PDL docs: on a free plan a restricted field is `true` if the value exists and
+    // `false` if it does not. So `false` is NOT "upgrade to see it".
+    expect(r.emailWithheldByPlan).toBe(false);
+  });
+
+  it("`true` means PDL HOLDS IT and the plan withholds it — paying WOULD reveal it", () => {
+    // Live shape (2026-07-08): one record carrying a string, a `true`, and a `false`.
+    const mixed = {
+      status: 200,
+      likelihood: 9,
+      data: {
+        work_email: true, // exists, withheld by plan
+        recommended_personal_email: true,
+        linkedin_url: "linkedin.com/in/satyanadella", // unrestricted -> a real string
+      },
+    };
+    const r = normalizePersonResponse(mixed, 200);
+    expect(r.matched).toBe(true);
+    expect(r.workEmail).toBeNull(); // we still have no value...
+    expect(r.emailWithheldByPlan).toBe(true); // ...but paying would produce one
+    expect(r.linkedinUrl).toBe("linkedin.com/in/satyanadella");
+    expect(r.linkedinWithheldByPlan).toBe(false);
+  });
+
+  it("a 200 we genuinely cannot parse is LOUD, never a silent no-match", () => {
+    const garbage = { status: 200, data: { work_email: { nested: "object" } } };
+    const r = normalizePersonResponse(garbage, 200);
+    expect(r.unparseable).toBe(true);
+    expect(r.parseError).toBeTruthy();
+    expect(r.billed).toBe(true); // PDL charged for it either way
+    expect(r.matched).toBe(false);
+  });
+
+  it("a true 404 is a no-match, unbilled, and NOT flagged unparseable", () => {
+    const r = normalizePersonResponse({ status: 404 }, 404);
+    expect(r.matched).toBe(false);
+    expect(r.unparseable).toBe(false);
+    expect(r.billed).toBe(false);
   });
 });

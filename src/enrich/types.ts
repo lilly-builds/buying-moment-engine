@@ -121,9 +121,27 @@ export interface PdlPersonResult {
    * the waterfall's gap-fill; it must never drive the meter.
    */
   matched: boolean;
+  /**
+   * A 200 whose body we could not parse. LOUD, and never folded into `matched:false`
+   * — a parse failure is OUR bug; reporting it as the vendor having no data produced
+   * a false experimental finding once already. Always billed.
+   */
+  unparseable: boolean;
+  parseError: string | null;
   likelihood: number | null;
   workEmail: string | null;
   linkedinUrl: string | null;
+  /**
+   * On a free plan PDL replaces a restricted contact field with a PRESENCE FLAG:
+   * `true` = "we hold this, upgrade to see it", `false` = "we hold nothing".
+   * So `workEmail === null && emailWithheldByPlan === true` means paying would
+   * produce an address, while `=== false` means paying buys nothing. Verified live:
+   * work_email came back `false` on every record tested, while personal_emails and
+   * mobile_phone came back `true` — i.e. the paid tier sells the fields D9 forbids
+   * (personal inbox, mobile), not the work email the spec permits.
+   */
+  emailWithheldByPlan: boolean;
+  linkedinWithheldByPlan: boolean;
 }
 
 export interface PdlCompanyRequest {

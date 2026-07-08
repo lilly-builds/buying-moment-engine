@@ -1,0 +1,102 @@
+[
+  {
+    "key": "westlake-dermatology",
+    "name": "Westlake Dermatology & Cosmetic Surgery",
+    "city": "Austin",
+    "state": "TX",
+    "geoKey": "austin-tx",
+    "websiteUrl": "https://www.westlakedermatology.com/",
+    "locationsCount": 22,
+    "verticalHint": "dermatology"
+  },
+  {
+    "key": "eye-consultants-of-atlanta",
+    "name": "Eye Consultants of Atlanta",
+    "city": "Atlanta",
+    "state": "GA",
+    "geoKey": "atlanta-ga",
+    "websiteUrl": "https://www.eyeconsultants.net/",
+    "locationsCount": 20,
+    "verticalHint": "ophthalmology"
+  },
+  {
+    "key": "tennessee-orthopaedic-alliance",
+    "name": "Tennessee Orthopaedic Alliance",
+    "city": "Nashville",
+    "state": "TN",
+    "geoKey": "nashville-tn",
+    "websiteUrl": "https://toa.com/",
+    "locationsCount": 23,
+    "verticalHint": "orthopedics"
+  },
+  {
+    "key": "virginia-womens-center",
+    "name": "Virginia Women's Center",
+    "city": "Richmond",
+    "state": "VA",
+    "geoKey": "richmond-va",
+    "websiteUrl": "https://virginiawomenscenter.com/",
+    "locationsCount": 5,
+    "verticalHint": "womens_health"
+  },
+  {
+    "key": "panorama-orthopedics-spine",
+    "name": "Panorama Orthopedics & Spine Center",
+    "city": "Golden",
+    "state": "CO",
+    "geoKey": "golden-co",
+    "websiteUrl": "https://www.panoramaortho.com/",
+    "locationsCount": 4,
+    "verticalHint": "orthopedics"
+  },
+  {
+    "key": "treasure-valley-dermatology",
+    "name": "Treasure Valley Dermatology & Skin Cancer Center",
+    "city": "Boise",
+    "state": "ID",
+    "geoKey": "boise-id",
+    "websiteUrl": "https://dermatologyboise.com/",
+    "locationsCount": 2,
+    "verticalHint": "dermatology"
+  },
+  {
+    "key": "charleston-womens-wellness",
+    "name": "Charleston Women's Wellness Center",
+    "city": "Charleston",
+    "state": "SC",
+    "geoKey": "charleston-sc",
+    "websiteUrl": "https://cwwcenter.com/",
+    "locationsCount": 2,
+    "verticalHint": "womens_health"
+  },
+  {
+    "key": "milwaukee-orthopaedic-group",
+    "name": "Milwaukee Orthopaedic Group Limited",
+    "city": "Milwaukee",
+    "state": "WI",
+    "geoKey": "milwaukee-wi",
+    "websiteUrl": "https://www.milwaukeeorthopaedics.com/",
+    "locationsCount": 2,
+    "verticalHint": "orthopedics"
+  },
+  {
+    "key": "schlessinger-md-dermatology",
+    "name": "Schlessinger MD Dermatology & Cosmetic Surgery",
+    "city": "Omaha",
+    "state": "NE",
+    "geoKey": "omaha-ne",
+    "websiteUrl": "https://www.schlessingermd.com/",
+    "locationsCount": 1,
+    "verticalHint": "dermatology"
+  },
+  {
+    "key": "wnc-ophthalmology",
+    "name": "WNC Ophthalmology, PLLC",
+    "city": "Asheville",
+    "state": "NC",
+    "geoKey": "asheville-nc",
+    "websiteUrl": "https://www.wnceyes.com/",
+    "locationsCount": 1,
+    "verticalHint": "ophthalmology"
+  }
+]

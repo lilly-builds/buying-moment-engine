@@ -50,6 +50,13 @@ export async function runPdlPersonEnrich(
         likelihood: result.likelihood,
         filledEmail: result.workEmail !== null,
         filledLinkedin: result.linkedinUrl !== null,
+        // `true` = PDL holds it and the plan withholds it (paying would help).
+        // `false` = PDL holds nothing (paying buys nothing). Not the same fact.
+        emailWithheldByPlan: result.emailWithheldByPlan,
+        linkedinWithheldByPlan: result.linkedinWithheldByPlan,
+        // A billed 200 we could not parse is OUR bug. Make it loud in the ledger.
+        unparseable: result.unparseable,
+        parseError: result.parseError,
         // Human field, never an opaque id.
         person: request.fullName,
         company: request.companyName,
