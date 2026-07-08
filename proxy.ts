@@ -9,7 +9,11 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything except Next internals and static asset files.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Everything except Next internals and static asset files. Video/audio
+    // extensions belong here for the same reason the image ones do: a static
+    // file in /public is not an app route, and running a <video>'s Range
+    // requests through the Supabase session refresh is pure waste. (The intro
+    // on /signals streams `/media/*.mp4`.)
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov|m4v|mp3|wav)$).*)",
   ],
 };

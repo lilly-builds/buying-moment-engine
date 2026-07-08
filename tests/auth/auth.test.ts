@@ -38,15 +38,17 @@ describe("isPublicPath (R18)", () => {
     }
   });
 
-  it("opens /styleguide in dev for brand review", () => {
+  it("opens /styleguide and /signals in dev for design review", () => {
     expect(isPublicPath("/styleguide", DEV)).toBe(true);
+    expect(isPublicPath("/signals", DEV)).toBe(true);
   });
 
-  it("KEEPS /styleguide behind auth in production", () => {
-    // U2's styleguide reads nothing from the database, but R18 says the deployed
-    // app serves no page to a non-allowlisted visitor. This is the line that
-    // keeps the dev convenience from leaking into prod.
+  it("KEEPS the dev-only visual surfaces behind auth in production", () => {
+    // Neither reads the database, but R18 says the deployed app serves no page to
+    // a non-allowlisted visitor. This is the line that keeps the dev convenience
+    // from leaking into prod.
     expect(isPublicPath("/styleguide", PROD)).toBe(false);
+    expect(isPublicPath("/signals", PROD)).toBe(false);
   });
 
   it("does not open a path merely because it is prefixed by a public one", () => {

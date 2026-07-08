@@ -39,16 +39,18 @@ export function isAllowlisted(
  * magic-link patch was authored before that cleanup and still listed it; we kept
  * it out on purpose.)
  *
- * `/styleguide` is open ONLY outside production. It is U2's visual-QA surface: it
- * renders design tokens and empty component variants, and reads nothing from the
- * database — there is no lead, contact, or signal on it. Keeping it gated in
+ * `/styleguide` and `/signals` are open ONLY outside production. Both are visual
+ * surfaces that read NOTHING from the database — the styleguide renders tokens and
+ * empty component variants; /signals is the Data Sources intro (static source
+ * labels + an animation, no lead/contact/signal on it). Keeping them gated in
  * production preserves R18 (the deployed app never serves a page to a
- * non-allowlisted visitor); opening it in dev means brand review doesn't require
- * a Supabase round-trip. If it ever grows a real practice on it, delete this.
+ * non-allowlisted visitor); opening them in dev means brand/design review doesn't
+ * require a Supabase round-trip. If either ever grows a real practice on it, drop
+ * it from this list.
  */
 export function publicPaths(isProduction: boolean): string[] {
   const paths = ["/login", "/auth/callback"];
-  if (!isProduction) paths.push("/styleguide");
+  if (!isProduction) paths.push("/styleguide", "/signals");
   return paths;
 }
 
