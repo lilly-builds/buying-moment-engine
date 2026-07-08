@@ -1,66 +1,60 @@
 import { getDb } from "@/db/client";
-import { feedPractices, type FeedRow } from "@/db/queries";
+import { feedPractices } from "@/db/queries";
+import { isFresh } from "@/src/engine/freshness";
+import { toVerticalSlug } from "@/src/ui/signal-display";
+import { TopNav } from "@/design/components";
+import { Feed, type FeedItem } from "./feed";
 
 // Read live data at request time — never at build time — so `next build` and a
-// keyless deploy both succeed and render the empty state.
+// keyless deploy both succeed and render the (designed, empty) feed.
 export const dynamic = "force-dynamic";
 
-async function loadFeed(): Promise<FeedRow[]> {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The push feed home (U8). Server component: it does the one query and shapes the
+ * rows; the `<Feed>` client island filters and renders. Time-sensitive values
+ * (age, freshness) are computed HERE against a single `now`, so a row cannot
+ * disagree with itself between the count and the clock.
+ */
+async function loadFeed(): Promise<FeedItem[]> {
+  const now = new Date();
+  let rows;
   try {
-    return await feedPractices(getDb());
+    rows = await feedPractices(getDb(), now);
   } catch {
-    // No DATABASE_URL or DB unreachable -> render the designed empty state.
+    // No DATABASE_URL, or the DB is unreachable -> the designed empty state, never
+    // a crash. The demo must render on a keyless clone.
     return [];
   }
-}
 
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-10 py-16 text-center dark:border-zinc-700">
-      <h2 className="text-lg font-semibold">No practices in the feed yet</h2>
-      <p className="max-w-md text-sm text-zinc-600 dark:text-zinc-400">
-        The signal detectors haven&apos;t surfaced any buying moments yet. Once a
-        detector run writes signals, ranked practices appear here.
-      </p>
-    </div>
-  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    vertical: toVerticalSlug(row.vertical),
+    signalKinds: row.signals.map((signal) => signal.kind),
+    freshestAgeDays: Math.max(
+      0,
+      Math.floor((now.getTime() - row.freshest.detectedAt.getTime()) / DAY_MS),
+    ),
+    freshestKind: row.freshest.kind,
+    freshestIsFresh: isFresh(row.freshest.expiresAt, now),
+  }));
 }
 
 export default async function Home() {
-  const practices = await loadFeed();
+  const items = await loadFeed();
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-16">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">GTM Maestro</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Practices at a buying moment, ranked by signal count.
-        </p>
-      </header>
-
-      {practices.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {practices.map((p) => (
-            <li
-              key={p.id}
-              className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
-            >
-              <div className="flex flex-col">
-                <span className="font-medium">{p.name}</span>
-                <span className="text-xs text-zinc-500">
-                  {[p.city, p.state].filter(Boolean).join(", ") || "—"} ·{" "}
-                  {p.vertical}
-                </span>
-              </div>
-              <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white dark:bg-white dark:text-zinc-900">
-                {p.signalCount} signal{p.signalCount === 1 ? "" : "s"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </main>
+    <>
+      <TopNav />
+      <main className="flex flex-1 flex-col">
+        {/* Content density, not marketing rhythm: the feed breathes at gap-8, not
+            py-section. The gradient-backed container supplies its own padding. */}
+        <div className="mx-auto w-full max-w-page px-gutter py-8">
+          <Feed items={items} />
+        </div>
+      </main>
+    </>
   );
 }
