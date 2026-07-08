@@ -14,9 +14,16 @@ import { gradients } from "@/design/tokens";
  * when the ball goes off screen." The video IS the data-store graphic from her Canva
  * mockup; the source cards and connectors sit over it exactly where the mockup places them.
  *
- * The composition is a designed hero canvas, not a feed screen, so it uses the marketing
- * rhythm (big display type, a gradient surface) rather than the dense gap scale — this is
- * the one place py-section-style generosity is correct.
+ * LAYOUT (matches the mockup's proportions, not a full-bleed video):
+ *   - The video is a CONTAINED element on the right — natural 16:9, never object-cover —
+ *     vertically centred, its right edge near the viewport edge so the ball still rolls
+ *     off the real screen. Its background is #f6f6f6, within rounding of the page's
+ *     `surface-subtle` (#f5f5f7), so the stack reads as floating with no visible box.
+ *   - The three source cards sit on the left at the mockup's vertical rhythm, narrower
+ *     than the gap between them and the stack — long connectors bridge that gap.
+ *   - The title lands bottom-right.
+ * Marketing rhythm (big display type, an airy surface), not the feed's dense gap scale —
+ * correct for a hero intro.
  *
  * Robustness the vision needs to survive contact with a browser:
  *   - Autoplay is muted + playsInline (every browser blocks sound-on autoplay); if the
@@ -47,6 +54,19 @@ const SOURCES: ReadonlyArray<{ signal: string; source: string }> = [
   { signal: "Job Listings", source: "Adzuna" },
   { signal: "Google Reviews", source: "Google Maps" },
   { signal: "Acquisition News", source: "GDELT" },
+];
+
+/** Connector curves, in the 0–100 viewBox that `preserveAspectRatio="none"` stretches to
+ *  fill the canvas (so coords read as viewport percentages). Each runs from a card's right
+ *  edge (~33%) to the LEFT RIM of its disc in the stack (~67%), at the three card rows and
+ *  the three disc heights measured off the rendered frame — so the line lands ON the
+ *  graphic, not in the gap before it. Tuned for the desktop hero; they fade as the discs
+ *  merge, so they never dangle once the stack becomes the ball.
+ *    Job Listings   -> top disc     · Google Reviews -> middle disc · Acquisition -> bottom */
+const CONNECTORS = [
+  "M 33 20 C 50 20, 53 42, 67 42",
+  "M 33 50 C 52 50, 55 53, 67 53",
+  "M 33 80 C 50 80, 53 64, 67 64",
 ];
 
 export function SignalsIntro() {
@@ -94,12 +114,24 @@ export function SignalsIntro() {
     <main className="relative min-h-dvh overflow-hidden bg-surface-subtle">
       {/* The whole canvas fades on exit; the feed is already prefetched underneath. */}
       <div
-        className={`transition-opacity duration-500 ${leaving ? "opacity-0" : "opacity-100"}`}
+        className={`relative flex min-h-dvh flex-col items-center justify-center gap-10 px-gutter py-12 transition-opacity duration-500 lg:block lg:p-0 ${
+          leaving ? "opacity-0" : "opacity-100"
+        }`}
       >
-        {/* --- The animation: the data store. Lilly's graphic, now moving. --- */}
+        {/* --- The animation: the data store. Contained on the right, natural 16:9. --- */}
         <video
           ref={videoRef}
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+          className="pointer-events-none order-2 w-full max-w-[560px] lg:absolute lg:right-[2%] lg:top-1/2 lg:order-none lg:w-[48%] lg:max-w-none lg:-translate-y-1/2"
+          // Feather the frame edges to nothing so the stack FLOATS on the page instead of
+          // sitting in a visible #f6f6f6 rectangle. The discs live in the middle ~60%, so
+          // an ellipse opaque to 58% and clear by 88% keeps them sharp and dissolves the
+          // background box (and the ball as it rolls out — reads as leaving the screen).
+          style={{
+            WebkitMaskImage:
+              "radial-gradient(ellipse 62% 72% at 50% 50%, #000 58%, transparent 88%)",
+            maskImage:
+              "radial-gradient(ellipse 62% 72% at 50% 50%, #000 58%, transparent 88%)",
+          }}
           src="/media/buying-moment-signals.mp4"
           poster="/media/buying-moment-signals-poster.jpg"
           muted
@@ -110,45 +142,42 @@ export function SignalsIntro() {
           aria-hidden="true"
         />
 
-        {/* --- The source cards + connectors, over the stack. Fade out as the ball forms. --- */}
+        {/* --- Source cards + connectors, over the stack. Fade out as the ball forms. --- */}
         <div
-          className={`pointer-events-none absolute inset-0 transition-opacity duration-700 ${
+          className={`contents transition-opacity duration-700 lg:pointer-events-none lg:absolute lg:inset-0 lg:block ${
             overlayVisible ? "opacity-100" : "opacity-0"
           }`}
         >
-          {/* Connectors, desktop only: three curved lines from each card to the stack, as
-              in the mockup. preserveAspectRatio=none lets the viewBox track the canvas so
-              the ends stay anchored to the card rows as the viewport flexes. */}
+          {/* Connectors, desktop only. preserveAspectRatio=none lets the viewBox track the
+              canvas so the ends stay anchored to the card rows as the viewport flexes. */}
           <svg
             className="absolute inset-0 hidden h-full w-full lg:block"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             aria-hidden="true"
           >
-            {[
-              "M 30 20 C 42 20, 40 45, 52 45",
-              "M 30 50 C 44 50, 46 50, 55 50",
-              "M 30 80 C 42 80, 44 58, 53 58",
-            ].map((d) => (
+            {CONNECTORS.map((d) => (
               <path
                 key={d}
                 d={d}
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="0.25"
+                // non-scaling-stroke reads strokeWidth in SCREEN px, so this is a crisp
+                // ~1.1px line rather than the hairline 0.2 user-units resolved to before.
+                strokeWidth="1.1"
                 vectorEffect="non-scaling-stroke"
-                className="text-ink-faint"
+                className="text-ink-body"
               />
             ))}
           </svg>
 
-          {/* Cards. On desktop they sit at the three connector heights; on narrow screens
-              they fall into a simple centered column above the fold. */}
-          <div className="flex flex-col gap-6 px-gutter pt-16 lg:absolute lg:left-[6%] lg:top-0 lg:h-full lg:w-[30%] lg:justify-center lg:px-0 lg:pt-0">
+          {/* Cards: narrow, left, at the mockup's vertical rhythm (justify-between spreads
+              them to the top/middle/bottom of a generously inset column). */}
+          <div className="order-1 flex w-full max-w-[440px] flex-col gap-6 lg:absolute lg:left-[8%] lg:top-[15%] lg:bottom-[15%] lg:order-none lg:w-[25%] lg:max-w-none lg:justify-between lg:gap-0">
             {SOURCES.map(({ signal, source }) => (
               <div
                 key={signal}
-                className="rounded-card px-8 py-6 text-center shadow-soft"
+                className="rounded-card px-6 py-5 text-center shadow-soft"
                 style={{ backgroundImage: gradients.brandSoft }}
               >
                 <p className="font-display text-h5 text-ink">{signal}</p>
@@ -159,15 +188,15 @@ export function SignalsIntro() {
             ))}
           </div>
 
-          {/* The title — bottom-right, big Inter Tight, exactly as the mockup lands it. */}
-          <h1 className="px-gutter pb-10 pt-8 text-center font-display text-h2 text-ink lg:absolute lg:right-[5%] lg:bottom-[7%] lg:px-0 lg:text-right">
+          {/* The title — bottom-right, big Inter Tight, as the mockup lands it. */}
+          <h1 className="order-3 text-center font-display text-h1 text-ink lg:absolute lg:right-[4%] lg:bottom-[6%] lg:text-right">
             Buying Moment Signals
           </h1>
         </div>
       </div>
 
-      {/* Skip is always available and always interactive (the overlay above is
-          pointer-events-none so the video never eats the click). */}
+      {/* Skip is always available and always interactive (the overlay is pointer-events-none
+          on desktop so the video never eats the click). */}
       <div className="absolute right-6 top-6 z-10">
         <Button variant="secondary" size="sm" onClick={toFeed}>
           {manual ? "Enter the feed" : "Skip"}
