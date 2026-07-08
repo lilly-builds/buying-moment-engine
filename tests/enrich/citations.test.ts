@@ -176,28 +176,139 @@ describe("verifyFindings — the snippet must SUPPORT the value, not merely exis
     );
   });
 
+  describe("the value must appear as a WHOLE SPAN — a substring is not a word", () => {
+    // EHR vendor names nest inside one another, which is the worst case in the language:
+    // `Epic` ⊂ `Epicare`, `Athena` ⊂ `AthenaHealth`, `EMA` ⊂ `ModMedEMA`. A plain
+    // `includes()` reports every one of these as a verified quotation.
+    const onPage = (snippet: string) => new Map([[PORTAL, `# Portal\n\n${snippet}`]]);
+
+    it.each([
+      ["Epic", "We use Epicare for scheduling."],
+      ["Athena", "Our AthenaHealth portal is live."],
+      ["EMA", "Records live in ModMedEMA today."],
+    ])("DROPS %o cited to a snippet that only says it inside a longer word", (value, snippet) => {
+      const fabricated: CitedFact = { value, sourceUrl: PORTAL, snippet };
+      const result = verifyFindings(findings({ ehr: fabricated }), onPage(snippet));
+      expect(result.dropped[0]).toMatchObject({ reason: "value-not-in-snippet", value });
+    });
+
+    it("DROPS role 'COO' cited to '## Cosmetic coordinators' — on the REAL captured page", () => {
+      // Found by review, against `SCHLESSINGER_TEAM_TEXT`. `"coo"` is a substring of
+      // `"coordinators"`, so a plain `includes()` verified a fabricated C-suite title,
+      // the contact survived on it, and `waterfall.ts` then paid PDL to enrich
+      // `(practice, role="COO")`. Substring, not word — which is why it is a word check.
+      const result = verifyFindings(
+        findings({
+          decisionMaker: {
+            name: null,
+            role: fact("## Cosmetic coordinators", TEAM, "COO"),
+            email: null,
+            linkedinUrl: null,
+          },
+        }),
+        pages(),
+      );
+
+      expect(result.verified.decisionMaker).toBeNull();
+      expect(result.dropped[0]).toMatchObject({
+        field: "decisionMaker.role",
+        reason: "value-not-in-snippet",
+        value: "COO",
+      });
+    });
+
+    it("DROPS a yearFounded whose digits are a prefix of a longer number", () => {
+      const snippet = "Founded 19934 patients ago.";
+      const bad: CitedFact = { value: "1993", sourceUrl: PORTAL, snippet };
+      expect(
+        verifyFindings(findings({ firmographics: { yearFounded: bad } }), onPage(snippet))
+          .dropped[0],
+      ).toMatchObject({ reason: "value-not-in-snippet" });
+    });
+
+    it("DROPS an email whose local-part is a suffix of the address on the page", () => {
+      const snippet = "Contact xdana@sunshinederm.example today";
+      const bad: CitedFact = {
+        value: "dana@sunshinederm.example",
+        sourceUrl: PORTAL,
+        snippet,
+      };
+      const result = verifyFindings(
+        findings({
+          decisionMaker: {
+            name: null,
+            role: { value: "Practice Manager", sourceUrl: PORTAL, snippet: "The Practice Manager" },
+            email: bad,
+            linkedinUrl: null,
+          },
+        }),
+        new Map([[PORTAL, `# Portal\n\n${snippet}\n\nThe Practice Manager`]]),
+      );
+      expect(result.dropped.map((d) => d.field)).toEqual(["decisionMaker.email"]);
+    });
+
+    it("the boundary is only required where the VALUE's own edge is a word character", () => {
+      // A value that already carries punctuation at an edge cannot be asked to sit next
+      // to a non-word character there. Requiring it unconditionally would false-drop.
+      const cases: Array<[string, string]> = [
+        ["(512) 328-3376", "Call us at (512) 328-3376 today."],
+        ["ModMed EMA", "Our patient portal is powered by ModMed EMA."],
+        ["2004", "We have served South Florida since 2004."],
+        ["Daniel Schlessinger", "Dr. Daniel Schlessinger is a board-certified dermatologist"],
+      ];
+      for (const [value, snippet] of cases) {
+        const good: CitedFact = { value, sourceUrl: PORTAL, snippet };
+        expect(
+          verifyFindings(findings({ ehr: good }), onPage(snippet)).dropped,
+          `${value} should verify against ${snippet}`,
+        ).toEqual([]);
+      }
+    });
+  });
+
   it("a LABEL value need not appear in its snippet — it is the model's word FOR it", () => {
-    // Measured across all three fixtures: containment is FALSE for every label field on
-    // real data. Enforcing it here would delete true facts, which is R2 in a new costume.
+    // Containment is FALSE for these on real data, because the value's KIND differs from
+    // prose (an inflection, a URL, a summary). Enforcing it would delete true facts —
+    // R2 in a new costume.
     const specialty: CitedFact = {
       value: "Orthopedics",
       sourceUrl: HOME,
       snippet: "Omaha dermatologist since 1993",
     };
-    const tooling: CitedFact = {
-      value: "Podium reviews",
+    const moment: CitedFact = {
+      value: "They just opened a fourth office",
       sourceUrl: HOME,
       snippet: "Omaha dermatologist since 1993",
     };
 
     const result = verifyFindings(
-      findings({ firmographics: { specialty }, incumbentTooling: [tooling] }),
+      findings({ firmographics: { specialty }, buyingMomentContext: [moment] }),
       held(),
     );
 
     expect(result.verified.firmographics.specialty).toEqual(specialty);
-    expect(result.verified.incumbentTooling).toEqual([tooling]);
+    expect(result.verified.buyingMomentContext).toEqual([moment]);
     expect(result.dropped).toEqual([]);
+  });
+
+  it("incumbentTooling is a QUOTATION: a vendor name the snippet never prints is dropped", () => {
+    // R1's own defect, on a different field name. `{value:"Epic", snippet:"…via Podium."}`
+    // used to reach `practice_facts` as `incumbent_tooling_1` with `dropped: []`.
+    const podiumPage = new Map([[PORTAL, "# Reviews\n\nReviews collected via Podium."]]);
+    const snippet = "Reviews collected via Podium.";
+
+    const good: CitedFact = { value: "Podium", sourceUrl: PORTAL, snippet };
+    expect(verifyFindings(findings({ incumbentTooling: [good] }), podiumPage).verified
+      .incumbentTooling).toEqual([good]);
+
+    const fabricated: CitedFact = { value: "Epic", sourceUrl: PORTAL, snippet };
+    const bad = verifyFindings(findings({ incumbentTooling: [fabricated] }), podiumPage);
+    expect(bad.verified.incumbentTooling).toEqual([]);
+    expect(bad.dropped[0]).toMatchObject({
+      field: "incumbentTooling[0]",
+      reason: "value-not-in-snippet",
+      value: "Epic",
+    });
   });
 
   it("names every surviving LABEL field on `paraphrased`, and no QUOTATION field", () => {
@@ -207,7 +318,7 @@ describe("verifyFindings — the snippet must SUPPORT the value, not merely exis
       findings({
         firmographics: { specialty: label("Dermatology"), website: label("schlessingermd.com") },
         ehr: { value: "ModMed EMA", sourceUrl: PORTAL, snippet: PORTAL_SPAN },
-        incumbentTooling: [label("A portal")],
+        incumbentTooling: [{ value: "ModMed EMA", sourceUrl: PORTAL, snippet: PORTAL_SPAN }],
         buyingMomentContext: [label("They run a portal")],
       }),
       held(),
@@ -218,17 +329,34 @@ describe("verifyFindings — the snippet must SUPPORT the value, not merely exis
       "buyingMomentContext[0]",
       "firmographics.specialty",
       "firmographics.website",
-      "incumbentTooling[0]",
     ]);
     expect(result.paraphrased).not.toContain("ehr");
+    expect(result.paraphrased).not.toContain("incumbentTooling[0]");
   });
 
   it("a DROPPED fact never lands on `paraphrased` — it names survivors only", () => {
     const offPage: CitedFact = { value: "Anything", sourceUrl: PORTAL, snippet: "Not on the page." };
-    const result = verifyFindings(findings({ incumbentTooling: [offPage] }), held());
+    const result = verifyFindings(findings({ buyingMomentContext: [offPage] }), held());
 
-    expect(result.verified.incumbentTooling).toEqual([]);
+    expect(result.verified.buyingMomentContext).toEqual([]);
     expect(result.paraphrased).toEqual([]);
+  });
+
+  it("`paraphrased` indexes `verified`, `dropped` indexes the MODEL'S output", () => {
+    // `verified.buyingMomentContext` is compacted by the drop, so the survivor moves from
+    // input [1] to output [0]. A `paraphrased` entry naming `[1]` would tell U6 that
+    // output slot 0 is a quotation — and it would render a paraphrase in quote marks,
+    // the precise leak this field exists to prevent.
+    const dropped: CitedFact = { value: "Zocdoc", sourceUrl: PORTAL, snippet: "Not on the page." };
+    const kept: CitedFact = { value: "A summary", sourceUrl: PORTAL, snippet: PORTAL_SPAN };
+
+    const result = verifyFindings(findings({ buyingMomentContext: [dropped, kept] }), held());
+
+    expect(result.verified.buyingMomentContext).toEqual([kept]);
+    expect(result.paraphrased).toEqual(["buyingMomentContext[0]"]); // where it LANDED
+    expect(result.dropped[0]?.field).toBe("buyingMomentContext[0]"); // where it CAME FROM
+    // The two index spaces genuinely differ; the survivor was input [1].
+    expect(result.verified.buyingMomentContext[0]).toBe(kept);
   });
 
   it("a contact that COLLAPSES takes its paraphrased linkedinUrl with it", () => {
@@ -412,14 +540,16 @@ describe("verifyFindings — the decision-maker collapses correctly", () => {
 
 describe("verifyFindings — the shape it hands to the waterfall", () => {
   it("keeps only the verified members of each array, preserving order", () => {
-    const a = fact(VERBATIM_SPAN, TEAM, "a");
-    const b = fact("This sentence is not on any page.", TEAM, "b");
-    const c = fact(CURLY_QUOTE_SPAN, TEAM, "c");
+    // `incumbentTooling` is a QUOTATION list, so each surviving value is a real span of
+    // its own snippet. The middle one dies at the SNIPPET gate, before its value matters.
+    const a = fact(VERBATIM_SPAN, TEAM, "dermatologist");
+    const b = fact("This sentence is not on any page.", TEAM, "Zocdoc");
+    const c = fact(CURLY_QUOTE_SPAN, TEAM, "commitment");
 
     const result = verifyFindings(findings({ incumbentTooling: [a, b, c] }), pages());
     expect(result.verified.incumbentTooling).toEqual([a, c]);
     expect(result.dropped).toEqual([
-      { field: "incumbentTooling[1]", reason: "snippet-not-verbatim", value: "b", sourceUrl: TEAM, snippet: b.snippet },
+      { field: "incumbentTooling[1]", reason: "snippet-not-verbatim", value: "Zocdoc", sourceUrl: TEAM, snippet: b.snippet },
     ]);
   });
 

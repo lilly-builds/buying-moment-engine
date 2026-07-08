@@ -95,16 +95,15 @@ export interface DroppedFact {
  * `"…served South Florida since 2004."` The containment check applies, and
  * `extract-prompt.ts` rule 5 makes the contract satisfiable by demanding it.
  *
- * **LABEL** — the value is the model's own word FOR what the snippet says, and is
- * *supposed* not to appear in it. Measured across all three fixtures:
+ * **LABEL** — the value is the model's own word FOR what the snippet says, and *cannot*
+ * appear in it. Only where the value's very kind differs from prose:
  *
- * | field | `value` ⊂ its own `snippet`? |
+ * | field | why it cannot be contained |
  * |---|---|
- * | `firmographics.specialty` | no — `"Orthopedics"` vs `"…orthopedic practice."` |
- * | `firmographics.website` | no — a URL vs a prose sentence |
- * | `incumbentTooling[]` | no — `"Podium reviews"` vs `"Reviews collected via Podium."` |
- * | `decisionMaker.linkedinUrl` | no — scheme + `www.` absent from the page's prose |
- * | `buyingMomentContext[]` | no — a summary of the announcement |
+ * | `firmographics.specialty` | `"Orthopedics"` vs `"…orthopedic practice."` — an inflection |
+ * | `firmographics.website` | a URL vs a prose sentence |
+ * | `decisionMaker.linkedinUrl` | scheme + `www.` are absent from the page's prose |
+ * | `buyingMomentContext[]` | a summary of an announcement, by construction |
  *
  * Applying containment to those would drop every one of them. That is R2's mistake in
  * a new costume: a check run against a substrate that was never promised to satisfy it.
@@ -112,9 +111,21 @@ export interface DroppedFact {
  * they are named in `VerificationResult.paraphrased` and must never be rendered inside
  * quotation marks.
  *
- * Before adding a field here, measure it against real fixture data. Guessing `quotation`
- * for a label field silently deletes true facts; guessing `label` for a quotation field
- * silently ships fabrications.
+ * ─── `incumbentTooling` is a QUOTATION, and it took a review to see it ────────
+ *
+ * It was first classified LABEL on one measurement: `"Podium reviews"` ⊄ `"Reviews
+ * collected via Podium."` But the vendor NAME — `Podium` — is a contiguous span of that
+ * snippet. Containment failed because the model appended a category word, and the prompt
+ * licensed it. That is a value-FORMAT choice, not a property of the substrate — and the
+ * exemption it bought let `{value: "Epic", snippet: "Reviews collected via Podium."}`
+ * reach `practice_facts` with `dropped: []`. R1's exact defect, on a different field name.
+ * The prompt now asks for the vendor as printed, and the field is checked.
+ *
+ * The lesson generalizes: **if containment fails, ask whether the SUBSTRATE forbids it or
+ * merely the value format you asked for.** Only the first justifies a LABEL. Measure
+ * against real fixture data before deciding — guessing `quotation` for a label field
+ * silently deletes true facts; guessing `label` for a quotation field silently ships
+ * fabrications, which is worse, because nothing goes red.
  */
 export type FactClass = "quotation" | "label";
 
@@ -182,6 +193,41 @@ export function normalizeForCitation(text: string): string {
     .trim();
 }
 
+/** Any letter or digit, in any script. Both sides are already lowercased. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/**
+ * Is `value` present in `snippet` as a WHOLE SPAN, not merely as a run of characters?
+ *
+ * `snippet.includes(value)` is a substring test, and a substring is not a word. It reports
+ * that `"Epic"` appears in `"We use Epicare for scheduling."`, that `"Athena"` appears in
+ * `"our AthenaHealth portal"`, and that `"1993"` appears in `"19934"`. Those are exactly
+ * the fabrication this check exists to stop, shrunk to fit through it — and EHR vendors
+ * are the worst case in the language, because their names nest inside one another.
+ *
+ * So a match must not be flanked by a word character. The boundary is required only on a
+ * side where the VALUE's own edge is a word character: a value of `"(512) 328-3376"` or
+ * `"Dermatology, PC."` cannot be asked to sit next to a non-word character it already
+ * carries.
+ *
+ * Measured on every QUOTATION fact in all three fixtures plus the captured Schlessinger
+ * page: **15/15 true facts still verify, 0 false drops** — and 5 fabrications that the
+ * plain substring test waved through are now caught. Strictness is the feature, and this
+ * is the direction to be strict in.
+ */
+function containsAsSpan(snippet: string, value: string): boolean {
+  const boundLeft = WORD_CHAR.test(value[0]);
+  const boundRight = WORD_CHAR.test(value[value.length - 1]);
+
+  for (let i = snippet.indexOf(value); i !== -1; i = snippet.indexOf(value, i + 1)) {
+    const end = i + value.length;
+    const okLeft = !boundLeft || i === 0 || !WORD_CHAR.test(snippet[i - 1]);
+    const okRight = !boundRight || end === snippet.length || !WORD_CHAR.test(snippet[end]);
+    if (okLeft && okRight) return true;
+  }
+  return false;
+}
+
 /**
  * Everything the verification pass needs, in one object, so a new call site cannot
  * silently forget to honour `keepUnheld`.
@@ -228,9 +274,19 @@ function factRef(field: string, fact: CitedFact, reason: DropReason): DroppedFac
  * out of its snippets; only `extract-prompt.ts` makes that promise. Enforcing a contract
  * the caller never agreed to is precisely how R2 turned true facts into "fabrication".
  * Where we hold nothing, we claim nothing.
+ *
+ * ─── Two field paths, because they index two different arrays ─────────────────
+ *
+ * `inPath` is where the fact sat in the MODEL'S output; `keptPath` is where it will sit
+ * in `verified`. For a scalar they are the same string. For a list they diverge the
+ * moment one member drops, because `verified.incumbentTooling` is COMPACTED: input `[1]`
+ * becomes output `[0]`. A drop record is a statement about what the model sent, so it
+ * carries `inPath`. `paraphrased` and `unverifiable` are statements about what SURVIVED
+ * — U6 reads them to decide how to render `verified` — so they carry `keptPath`.
  */
 function verifyFact(
-  field: string,
+  inPath: string,
+  keptPath: string,
   fact: CitedFact,
   cls: FactClass,
   ctx: VerifyContext,
@@ -240,10 +296,10 @@ function verifyFact(
     // The agentic path cites the open web. We cannot check it; we also cannot call it
     // a lie. Keep it, and say out loud that it is unproven.
     if (ctx.keepUnheld) {
-      ctx.unverifiable.push(factRef(field, fact, "url-not-held"));
+      ctx.unverifiable.push(factRef(keptPath, fact, "url-not-held"));
       return fact;
     }
-    ctx.dropped.push(factRef(field, fact, "url-not-held"));
+    ctx.dropped.push(factRef(inPath, fact, "url-not-held"));
     return null;
   }
 
@@ -252,20 +308,20 @@ function verifyFact(
   // through and prove nothing. Zod's `min(1)` accepts `"   "`; this does not.
   if (snippet === "" || !page.includes(snippet)) {
     // We HOLD this page and the snippet is not on it. No mode forgives that.
-    ctx.dropped.push(factRef(field, fact, "snippet-not-verbatim"));
+    ctx.dropped.push(factRef(inPath, fact, "snippet-not-verbatim"));
     return null;
   }
 
   if (cls === "label") {
     // Proven citation, model-authored wording. Kept, and named as paraphrase.
-    ctx.paraphrased.push(field);
+    ctx.paraphrased.push(keptPath);
     return fact;
   }
 
   // The exhibit is real. Does it say what the brief is about to print?
   const value = normalizeForCitation(fact.value);
-  if (value === "" || !snippet.includes(value)) {
-    ctx.dropped.push(factRef(field, fact, "value-not-in-snippet"));
+  if (value === "" || !containsAsSpan(snippet, value)) {
+    ctx.dropped.push(factRef(inPath, fact, "value-not-in-snippet"));
     return null;
   }
   return fact;
@@ -276,7 +332,8 @@ function verifyFirmographics(firmographics: Firmographics, ctx: VerifyContext): 
   for (const field of FIRMOGRAPHIC_FIELDS) {
     const fact = firmographics[field];
     if (fact === undefined) continue;
-    const ok = verifyFact(`firmographics.${field}`, fact, FIRMOGRAPHIC_CLASS[field], ctx);
+    const path = `firmographics.${field}`;
+    const ok = verifyFact(path, path, fact, FIRMOGRAPHIC_CLASS[field], ctx);
     if (ok) verified[field] = ok;
   }
   return verified;
@@ -302,11 +359,12 @@ function verifyDecisionMaker(
   // `linkedinUrl` alone is a LABEL: the page prints `linkedin.com/in/x`, the value we
   // store carries the scheme the `href` needs. Everything else about a contact is a
   // name the page states, and a brief that gets one wrong calls the wrong person.
-  const okName = name ? verifyFact("decisionMaker.name", name, "quotation", ctx) : null;
-  const okRole = verifyFact("decisionMaker.role", role, "quotation", ctx);
-  const okEmail = email ? verifyFact("decisionMaker.email", email, "quotation", ctx) : null;
+  const q = (p: string, f: CitedFact) => verifyFact(p, p, f, "quotation", ctx);
+  const okName = name ? q("decisionMaker.name", name) : null;
+  const okRole = q("decisionMaker.role", role);
+  const okEmail = email ? q("decisionMaker.email", email) : null;
   const okLinkedin = linkedinUrl
-    ? verifyFact("decisionMaker.linkedinUrl", linkedinUrl, "label", ctx)
+    ? verifyFact("decisionMaker.linkedinUrl", "decisionMaker.linkedinUrl", linkedinUrl, "label", ctx)
     : null;
 
   if (!okRole) {
@@ -329,13 +387,26 @@ function verifyDecisionMaker(
   return { name: okName, role: okRole, email: okEmail, linkedinUrl: okLinkedin };
 }
 
+/**
+ * `verified.<list>` is COMPACTED — a dropped member shifts every later survivor left. So
+ * `kept.length` at the moment of the check IS the index this fact will occupy in the
+ * output, while `i` is where the model put it. Hand `verifyFact` both: drops reference the
+ * input, `paraphrased`/`unverifiable` reference the output. Filtering on the input index
+ * (as a `.filter()` one-liner must) makes `paraphrased` name a slot that does not exist
+ * and miss the one that does — the exact leak it was added to close.
+ */
 function verifyList(
   field: string,
   facts: CitedFact[],
   cls: FactClass,
   ctx: VerifyContext,
 ): CitedFact[] {
-  return facts.filter((fact, i) => verifyFact(`${field}[${i}]`, fact, cls, ctx) !== null);
+  const kept: CitedFact[] = [];
+  facts.forEach((fact, i) => {
+    const ok = verifyFact(`${field}[${i}]`, `${field}[${kept.length}]`, fact, cls, ctx);
+    if (ok) kept.push(ok);
+  });
+  return kept;
 }
 
 /**
@@ -377,8 +448,10 @@ export function verifyFindings(
 
   const verified: ResearchFindings = {
     firmographics: verifyFirmographics(findings.firmographics, ctx),
-    ehr: findings.ehr ? verifyFact("ehr", findings.ehr, "quotation", ctx) : null,
-    incumbentTooling: verifyList("incumbentTooling", findings.incumbentTooling, "label", ctx),
+    ehr: findings.ehr ? verifyFact("ehr", "ehr", findings.ehr, "quotation", ctx) : null,
+    // A vendor NAME, exactly like `ehr`. Leaving it a label shipped R1's own defect on a
+    // different field: `{value: "Epic", snippet: "Reviews collected via Podium."}`.
+    incumbentTooling: verifyList("incumbentTooling", findings.incumbentTooling, "quotation", ctx),
     decisionMaker: verifyDecisionMaker(findings.decisionMaker, ctx),
     buyingMomentContext: verifyList(
       "buyingMomentContext",

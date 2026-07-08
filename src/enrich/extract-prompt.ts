@@ -26,6 +26,16 @@ import type { ExtractRequest } from "./types";
  * says which fields are exempt, so the model does not omit a `specialty` it is right
  * about just because it summarized the page's wording.
  *
+ * ⚠️ Rule 8's list is a SEARCH VOCABULARY, never an output vocabulary, and the two are one
+ * edit away from contradicting rule 5. An earlier draft said only "in order of preference:
+ * practice manager, … or the OWNER-PHYSICIAN" — so the model dutifully returned
+ * `role: "Owner-Physician"` for Dr. Joel Schlessinger, whose real team page prints no role
+ * noun anywhere. `role` is a QUOTATION field, so the verifier dropped it, the dropped role
+ * collapsed the whole contact, and the drop row read `value-not-in-snippet` — the drift
+ * alarm accusing the model of fabricating a role it had been *instructed* to produce. That
+ * is E8 round 1's `decisionMaker: none` regression, reintroduced by the verifier. If you
+ * touch rule 8, re-read rule 5 in the same breath.
+ *
  * Every rule here is a REQUEST. `citations.ts` is the enforcement, and it caught a
  * stitched snippet in both E8 rounds. Never let this file be mistaken for the guarantee.
  *
@@ -40,12 +50,17 @@ HARD RULES — these are constraints, not preferences:
 2. "sourceUrl" MUST be copied EXACTLY from the "=== SOURCE: <url> ===" header of the page the fact came from.
 3. "snippet" MUST be a VERBATIM, CONTIGUOUS substring of that page's text — copy and paste it. Do not paraphrase, do not fix typos, do not join across a gap. Keep it under 200 characters.
 4. If a fact is not stated in the supplied text, return null (or omit it from an array). CRITICAL: if you cannot find a single CONTIGUOUS verbatim span that by itself proves the fact, OMIT THE FACT. Never stitch a snippet together from separate parts of a page. A count you had to tally yourself is not citable — omit it.
-5. QUOTED FIELDS — "ehr", "yearFounded", and the decision-maker's "name", "role" and "email". For these, the "value" MUST appear CHARACTER-FOR-CHARACTER inside the "snippet" you supply for it. Copy it out of the snippet. If no single contiguous span of the page contains the value, OMIT the fact — do not supply a nearby sentence instead.
+5. QUOTED FIELDS — "ehr", "incumbentTooling", "yearFounded", and the decision-maker's "name", "role" and "email". For these, the "value" MUST appear CHARACTER-FOR-CHARACTER inside the "snippet" you supply for it, as a WHOLE WORD or phrase — not as letters inside a longer word. Copy it out of the snippet. If no single contiguous span of the page contains the value, OMIT the fact — do not supply a nearby sentence instead.
    VALID:   {"value": "ModMed EMA", "snippet": "Our patient portal is powered by ModMed EMA."}
    INVALID: {"value": "Epic",       "snippet": "Our patient portal is powered by ModMed EMA."}   <- the snippet is real and it does not say Epic. This fact will be discarded.
-6. LABELLED FIELDS — "specialty", "website", "linkedinUrl", "incumbentTooling" and "buyingMomentContext". For these the "value" is your own short label for what the snippet says, so it need NOT appear inside the snippet. The snippet must still be a verbatim span of the cited page. Example: {"value": "Orthopedics", "snippet": "Metro Ortho Group is Denver's largest independent orthopedic practice."}
+   INVALID: {"value": "Epic",       "snippet": "We use Epicare for scheduling."}                 <- "Epic" is only letters inside "Epicare". Return "Epicare".
+   For "incumbentTooling", the value is the tool's NAME exactly as the page prints it — "Podium", not "Podium reviews".
+6. LABELLED FIELDS — "specialty", "website", "linkedinUrl" and "buyingMomentContext". For these the "value" is your own short label for what the snippet says, so it need NOT appear inside the snippet. The snippet must still be a verbatim span of the cited page. Example: {"value": "Orthopedics", "snippet": "Metro Ortho Group is Denver's largest independent orthopedic practice."}
 7. Do NOT report how many locations or how many providers the practice has. Those are tallies with no single sentence that proves them. Code counts them from the evidence you cite.
-8. "decisionMaker" is the person who would buy front-desk / patient-communication software. In order of preference: practice manager, practice administrator, director of operations, COO, CEO, practice founder, or the OWNER-PHYSICIAN. A founding or owner physician named on an About or Team page IS a valid decision-maker — name them. Only if no individual is named anywhere should you set "name" to null and return the role alone.
+8. "decisionMaker" is the person who would buy front-desk / patient-communication software. Choose WHO in this order of preference: practice manager, practice administrator, director of operations, COO, CEO, practice founder, or the OWNER-PHYSICIAN. A founding or owner physician named on an About or Team page IS a valid decision-maker — name them.
+   The words in that list tell you who to LOOK FOR. They are not the value you return. "role" is a QUOTED field (rule 5): return that person's title or credential COPIED VERBATIM from the page — "Practice Administrator", "Chief Operating Officer", "MD". Never return a category word from the list above unless the page actually prints it.
+   If the page names a person but prints no title or credential anywhere for them, return "decisionMaker": null — do not invent a title.
+   If the page states a role but names no individual ("report directly to the Office Manager"), return that role verbatim with "name": null. That is the correct degradation, not a failure.
 9. "buyingMomentContext" is timing intelligence a static data vendor cannot have: a new location, an acquisition or PE deal, a front-desk hiring push, a publicly announced expansion or new service line. Only what a page states.
 10. Business information only. Never a patient. Staff appear only in their professional capacity.
 11. The only firmographics fields are "specialty", "website" and "yearFounded". Set a field to null unless a page states it.
