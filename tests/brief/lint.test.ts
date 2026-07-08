@@ -12,6 +12,7 @@ import {
   longSentences,
   normalizeForGrounding,
   ungroundedNumbers,
+  wordNumbersToDigits,
 } from "@/src/brief/lint";
 import type { VoiceBrief } from "@/src/brief/schema";
 
@@ -159,15 +160,44 @@ describe("ungroundedNumbers", () => {
     expect(ungroundedNumbers("40% here, 40% there.", CORPUS)).toEqual(["40"]);
   });
 
-  it("is blind to written-out numbers — a recorded limit, not a passing test", () => {
-    expect(ungroundedNumbers("Across your twelve locations.", CORPUS)).toEqual([]);
+  it("now catches written-out numbers — the model reaches for the word form under pressure (P2-7)", () => {
+    expect(ungroundedNumbers("Across your twelve locations.", CORPUS)).toEqual(["12"]);
+    expect(ungroundedNumbers("You lose forty percent of new-patient calls.", CORPUS)).toEqual(["40"]);
   });
 
-  // ─── the meeting-duration exemption, and the three ways it must NOT leak ──────
+  it("leaves the pronoun 'one' alone, and ordinals with it (P2-7)", () => {
+    // "one" is a pronoun far more often than a count; ordinals only look like cardinals.
+    expect(ungroundedNumbers("One reply is one click away. On our second call, we talk.", CORPUS)).toEqual([]);
+  });
+
+  it("folds a scaled word-number and catches it when ungrounded (P2-7)", () => {
+    expect(ungroundedNumbers("You field three thousand calls a month.", CORPUS)).toEqual(["3000"]);
+  });
+
+  // ─── the meeting-duration exemption, and the ways it must NOT leak ────────────
   it("allows the length of the meeting we are proposing", () => {
     expect(ungroundedNumbers("Worth a 15-minute call next week?", CORPUS)).toEqual([]);
     expect(ungroundedNumbers("Grab a 20 minute chat?", CORPUS)).toEqual([]);
     expect(ungroundedNumbers("Book a 15 min intro.", CORPUS)).toEqual([]);
+  });
+
+  it("exempts the length only when it is one we would actually propose (P2-6)", () => {
+    // The old pattern took ANY number before a meeting noun. A fabricated duration about the
+    // prospect ("a 12 minute call") is not our ask, and is no longer laundered.
+    expect(ungroundedNumbers("Patients sit through a 12 minute call before anyone picks up.", CORPUS)).toEqual(["12"]);
+    expect(ungroundedNumbers("Every new patient waits on a 9 minute call.", CORPUS)).toEqual(["9"]);
+    expect(ungroundedNumbers("Your team burns a 7 minute call on every reschedule.", CORPUS)).toEqual(["7"]);
+  });
+
+  it("exempts our ask stated as words, in minutes or seconds (P2-7)", () => {
+    expect(ungroundedNumbers("Mind if I take thirty seconds?", CORPUS)).toEqual([]);
+    expect(ungroundedNumbers("A fifteen-minute look at your call flow next week?", CORPUS)).toEqual([]);
+    expect(ungroundedNumbers("Give me twenty minutes and I will show you.", CORPUS)).toEqual([]);
+  });
+
+  it("still flags a duration stated as a claim about THEIR time, even in words (P2-7)", () => {
+    // "we save thirty seconds a call" is a statistic — no ask verb governs it.
+    expect(ungroundedNumbers("We save thirty seconds on every call you take.", CORPUS)).toEqual(["30"]);
   });
 
   it("does not let the exemption launder a statistic — no unit means no exemption", () => {
@@ -185,6 +215,27 @@ describe("ungroundedNumbers", () => {
     // adjective is singular ("a 15-minute call"); a claim about their time is not.
     expect(ungroundedNumbers("We save 30 minutes call handling time daily.", CORPUS)).toEqual(["30"]);
     expect(ungroundedNumbers("Staff lose 45 minutes call triage each morning.", CORPUS)).toEqual(["45"]);
+  });
+});
+
+describe("wordNumbersToDigits", () => {
+  it("folds units, tens, compounds and scales into digits", () => {
+    expect(wordNumbersToDigits("forty percent")).toBe("40 %");
+    expect(wordNumbersToDigits("twenty-five")).toBe("25");
+    expect(wordNumbersToDigits("twenty five")).toBe("25");
+    expect(wordNumbersToDigits("two thousand calls")).toBe("2000 calls");
+    expect(wordNumbersToDigits("fifteen-minute look")).toBe("15-minute look");
+  });
+
+  it("leaves 'one' and ordinals untouched", () => {
+    expect(wordNumbersToDigits("one reply, second touch, third call")).toBe(
+      "one reply, second touch, third call",
+    );
+  });
+
+  it("does not fold a number-word buried inside another word", () => {
+    // Word boundaries keep "often" and "Twentynine Palms" intact.
+    expect(wordNumbersToDigits("often in Twentynine Palms")).toBe("often in Twentynine Palms");
   });
 });
 

@@ -152,22 +152,33 @@ const EM_DASH = /—/g;
  * contain, and the exemption is scoped as narrowly as English allows.
  *
  * Three conditions, and every one of them is load-bearing:
- *   1. a digits run,
+ *   1. a length we would actually PROPOSE — 10/15/20/25/30/45/60 minutes, an allowlist. An
+ *      arbitrary number that merely precedes a meeting noun is not our ask: "a 12 minute
+ *      call" is a fabricated duration about the prospect, and it is now caught (P2-6).
  *   2. a **singular** minutes-unit (`minute` / `min`, never `minutes` / `mins`),
- *   3. a meeting noun immediately after it.
+ *   3. a short-session noun immediately after it.
  *
- * Condition 2 is not pedantry, it is the whole guard. A duration ADJECTIVE is singular —
- * "a 15-minute call" — while a claim about the practice's own time is plural: "we save
- * 30 minutes call handling time daily". Allowing the plural form exempted that sentence
- * and laundered a fabricated statistic straight through the truth gate. Caught by probing
- * the exemption rather than by reading it; pinned by tests both ways.
+ * Condition 2 is not pedantry, it is a guard. A duration ADJECTIVE is singular — "a
+ * 15-minute call" — while a claim about the practice's own time is plural: "we save 30
+ * minutes call handling time daily". Allowing the plural form laundered that fabricated
+ * statistic straight through the truth gate.
  *
- * A bare allowlist of `{10,15,20,30,45}` would have laundered "cut no-shows 45%" too.
- * This pattern cannot: `45%` has no unit, `45 minutes of hold time` has no meeting noun,
- * and `30 minutes call handling` has no singular unit.
+ * Word-forms reach here already folded to digits (`wordNumbersToDigits` runs first), so the
+ * live CTA "a fifteen-minute look" arrives as "a 15-minute look" — which is why "look" and
+ * "review" are in the noun list (P2-7). Neither `45%` (no unit), `45 minutes of hold time`
+ * (plural + no session noun), nor "a 30-minute savings" (not a session noun) is exempted.
  */
 const MEETING_DURATION =
-  /\b\d{1,3}\s?-?\s?(?:minute|min)\s+(?:call|chat|conversation|meeting|demo|intro|introduction|walkthrough)\b/gi;
+  /\b(?:10|15|20|25|30|45|60)\s?-?\s?(?:minute|min)\s+(?:call|chat|conversation|meeting|demo|intro|introduction|walkthrough|look|review|overview|window)\b/gi;
+
+/**
+ * "Mind if I take thirty seconds?" — the length of our ASK, governed by an ask verb, not a
+ * claim about the practice. The verb is the whole distinction: "take 30 seconds" is our ask,
+ * "we save 30 seconds a call" is a statistic, and "save" / "lose" / "waste" are not ask verbs.
+ * Word-forms arrive folded to digits, so "take thirty seconds" is "take 30 seconds" here.
+ */
+const OUR_ASK_DURATION =
+  /\b(?:take|give|spare|grab|steal|need)\s+(?:me\s+|you\s+|us\s+)?(?:5|10|15|20|30|45|60|90)\s?-?\s?(?:second|sec|minute|min)s?\b/gi;
 
 /**
  * Both sides of the number comparison get this, identically. Any transform applied to
@@ -182,9 +193,53 @@ export function normalizeForGrounding(text: string): string {
     .trim();
 }
 
-/** Every maximal number token in `text`, normalized. `"2,000 of 5,315"` -> `["2000","5315"]`. */
+// ─── word-numbers → digits, so a spelled-out statistic cannot slip past the digit gate ──
+//
+// The digit-only guard had a documented hole — "false precision travels as digits" — and the
+// first live call walked straight through it: constrained by the number ban, the model wrote
+// "thirty seconds" and "fifteen-minute" as WORDS, and nothing would have stopped "forty
+// percent" (P2-7). So number-words are folded to digits before extraction — on BOTH the prose
+// and the corpus, since this runs inside `numberTokens`, keeping the two sides identical.
+//
+// `one` is left alone on purpose: it is overwhelmingly a pronoun ("one thing", "one reply
+// away"), not a count. Ordinals ("second", "third") are cardinals' look-alikes and are left
+// alone too — only cardinal words map. Word boundaries keep "often"/"Twentynine" intact.
+const TENS: Record<string, number> = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+const UNITS: Record<string, number> = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const SCALES: Record<string, number> = { hundred: 100, thousand: 1000, million: 1_000_000 };
+/** "one" IS allowed as the ones part of a compound ("twenty-one"); only standalone "one" is a pronoun. */
+const COMPOUND_UNITS: Record<string, number> = { one: 1, ...UNITS };
+
+const COMPOUND_WORD =
+  /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-](one|two|three|four|five|six|seven|eight|nine)\b/gi;
+const TENS_WORD = /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/gi;
+const UNIT_WORD =
+  /\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)\b/gi;
+const SCALED_NUMBER = /\b(\d+)[\s-]+(hundred|thousand|million)\b/gi;
+const BARE_SCALE = /\b(hundred|thousand|million)\b/gi;
+const PERCENT_WORD = /\bpercent\b/gi;
+
+export function wordNumbersToDigits(text: string): string {
+  return text
+    .replace(COMPOUND_WORD, (_m, tens: string, unit: string) =>
+      String(TENS[tens.toLowerCase()] + COMPOUND_UNITS[unit.toLowerCase()]),
+    )
+    .replace(TENS_WORD, (_m, tens: string) => String(TENS[tens.toLowerCase()]))
+    .replace(UNIT_WORD, (_m, unit: string) => String(UNITS[unit.toLowerCase()]))
+    .replace(SCALED_NUMBER, (_m, n: string, scale: string) => String(Number(n) * SCALES[scale.toLowerCase()]))
+    .replace(BARE_SCALE, (_m, scale: string) => String(SCALES[scale.toLowerCase()]))
+    .replace(PERCENT_WORD, "%");
+}
+
+/** Every maximal number token in `text`, with word-numbers folded in first. */
 export function numberTokens(text: string): string[] {
-  return normalizeForGrounding(text).match(NUMBER_TOKEN) ?? [];
+  return normalizeForGrounding(wordNumbersToDigits(text)).match(NUMBER_TOKEN) ?? [];
 }
 
 /**
@@ -242,15 +297,13 @@ export function isNumberGrounded(token: string, corpus: GroundingCorpus): boolea
 }
 
 /**
- * Digits only — and that is a real, recorded limit, not an oversight.
+ * Every number in `text` — digit OR word — that the corpus does not contain.
  *
- * A written-out number ("three locations") slips past this check. We accept that: false
- * precision travels as digits, and a model that writes "three" has not invented a
- * statistic so much as a vague claim. The prompt separately forbids counting anything.
- * Widening this to number-words would need a wordlist and would start rejecting "one
- * thing", "first call", "second touch" — cost with no measured benefit.
- *
- * The proposed meeting's own length is stripped first; see `MEETING_DURATION`.
+ * Word-numbers are folded to digits first (`wordNumbersToDigits`), because the model reaches
+ * for the word form under exactly the pressure meant to stop it (P2-7). Then the two things
+ * the brief may say WITHOUT evidence are stripped: the length of the meeting we propose
+ * (`MEETING_DURATION`) and the length of our ask (`OUR_ASK_DURATION`). What remains and is
+ * ungrounded is a fabricated statistic.
  *
  * `allowPack` is true ONLY for a rebuttal, the one field where the prompt lets the writer
  * reach for the pack's proof point. Everywhere else a pack number is a claim about someone
@@ -261,7 +314,9 @@ export function ungroundedNumbers(
   corpus: GroundingCorpus,
   allowPack = false,
 ): string[] {
-  const withoutOurAsk = text.replace(MEETING_DURATION, " ");
+  const withoutOurAsk = wordNumbersToDigits(text)
+    .replace(MEETING_DURATION, " ")
+    .replace(OUR_ASK_DURATION, " ");
   const ungrounded = numberTokens(withoutOurAsk).filter(
     (token) => !corpus.evidence.has(token) && !(allowPack && corpus.pack.has(token)),
   );
