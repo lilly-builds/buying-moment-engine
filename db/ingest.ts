@@ -11,8 +11,9 @@ import {
 /**
  * Idempotent ingestion (R17). ON CONFLICT DO NOTHING on every unique key — a real
  * record is never blindly overwritten. Valid signals are promoted raw -> normalized
- * with EXACT-match resolution only; fuzzy entity resolution, Clay enrichment, and
- * vertical classification are U5's job, not this rail's.
+ * with EXACT-match resolution only; fuzzy entity resolution (`src/engine/resolver.ts`),
+ * the Claude -> PDL enrichment waterfall (`src/enrich/`), and vertical
+ * classification (`src/engine/verticals.ts`) are U5's job, not this rail's.
  */
 
 export type IngestResult =
@@ -58,19 +59,39 @@ function readNumericAsText(source: unknown, key: string): string | null {
   return null;
 }
 
+/**
+ * Canonical JSON: object keys sorted at EVERY depth, arrays left in order (their
+ * order is data). Two payloads that differ only in key order therefore hash
+ * identically, so the fallback dedupe hash is key-order-independent — without
+ * this, `{a,b}` and `{b,a}` would ingest as two distinct raw rows.
+ */
 function stableStringify(input: unknown): string {
   try {
-    return JSON.stringify(input) ?? String(input);
+    return canonicalJson(input);
   } catch {
     return String(input);
   }
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Row)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`);
+    return `{${entries.join(",")}}`;
+  }
+  // Primitives (and Date, via toJSON) round-trip through JSON.stringify.
+  return JSON.stringify(value) ?? String(value);
+}
+
 function dedupeHashOf(input: unknown): string {
   const provided = readString(input, "dedupeHash");
   if (provided) return provided;
-  // TODO(U5): the fallback uses key-order-sensitive JSON.stringify — canonicalize
-  // (sorted keys) before U3/U4 lean on the fallback hash for dedupe.
   return createHash("sha256").update(stableStringify(input)).digest("hex");
 }
 
@@ -190,7 +211,8 @@ export interface UpsertSignalArgs {
   kind: DetectorKind;
   evidenceId: string;
   confidence?: string | null;
-  detectedAt?: Date | null;
+  /** Required (U5): `signals.detected_at` is NOT NULL — provenance on every fact (R17). */
+  detectedAt: Date;
   expiresAt?: Date | null;
   signalSource?: string | null;
 }
@@ -208,7 +230,7 @@ export async function upsertSignal(db: Database, args: UpsertSignalArgs) {
       kind: args.kind,
       evidenceId: args.evidenceId,
       confidence: args.confidence ?? null,
-      detectedAt: args.detectedAt ?? null,
+      detectedAt: args.detectedAt,
       expiresAt: args.expiresAt ?? null,
       signalSource: args.signalSource ?? null,
     })

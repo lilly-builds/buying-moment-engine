@@ -34,6 +34,7 @@ describe("data-layer round-trip", () => {
       practiceId: practice.id,
       kind: "staffing_spike",
       evidenceId: ev.id,
+      detectedAt: new Date("2026-07-01T00:00:00Z"),
       signalSource: "greenhouse",
     });
 
