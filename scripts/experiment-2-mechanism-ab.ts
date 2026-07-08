@@ -81,7 +81,8 @@ interface MechanismRecord {
   costUsd: number;
   factsVerified: number;
   factsDropped: number;
-  drops: Array<Pick<DroppedFact, "field" | "reason">>;
+  /** The snippet is the finding. A drop count says "one"; the snippet says WHAT. */
+  drops: Array<Pick<DroppedFact, "field" | "reason" | "snippet" | "sourceUrl">>;
   decisionMaker: "named" | "role_only" | "none";
   /** What WOULD have escalated. Costs nothing to observe; $1.27 to act on. */
   escalationTrigger: "thin-scrape" | "extract-failed" | "no-verified-facts" | null;
@@ -196,7 +197,12 @@ async function runEntry(entry: CohortEntry, apiKey: string): Promise<MechanismRe
     ok: factsVerified > 0,
     factsVerified,
     factsDropped: dropped.length,
-    drops: dropped.map((d) => ({ field: d.field, reason: d.reason })),
+    drops: dropped.map((d) => ({
+      field: d.field,
+      reason: d.reason,
+      snippet: d.snippet,
+      sourceUrl: d.sourceUrl,
+    })),
     decisionMaker: (verified.decisionMaker === null
       ? "none"
       : verified.decisionMaker.name
