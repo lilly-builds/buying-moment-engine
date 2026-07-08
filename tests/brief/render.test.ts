@@ -163,6 +163,36 @@ describe("renderBrief", () => {
       "No buying moment detected yet",
     );
   });
+
+  it("shows the constant even if a zero-signal brief somehow carries a voice headline (P1-1 belt)", () => {
+    // The synthesizer's closure gate makes this brief unwritable. render.ts is the belt: if
+    // one ever slipped past — a hand-edited row, a schema bump — the card must still not
+    // render a moment on a practice that had none. `factual.zeroSignal` wins over the prose.
+    const { factual } = assembleFactual(input([]), NOW);
+    expect(factual.zeroSignal).toBe(true);
+    const rendered = renderBrief({ factual, voice: VOICE }, [], NOW);
+    expect(rendered.headline).toBe("No buying moment detected yet");
+  });
+
+  it("drops back to the constant once every signal has expired (P1-2, the KTD)", () => {
+    // Written when a moment WAS firing, opened after it aged out. The headline is the loudest
+    // claim on the card and must not outlive its evidence.
+    const { factual } = assembleFactual(input([signal("staffing_spike", LIVE)]), NOW);
+    expect(factual.zeroSignal).toBe(false);
+    const afterExpiry = new Date("2026-10-01T00:00:00Z");
+    const rendered = renderBrief({ factual, voice: VOICE }, [signal("staffing_spike", LIVE)], afterExpiry);
+    expect(rendered.live.signalCount).toBe(0);
+    expect(rendered.headline).toBe("No buying moment detected yet");
+    expect(rendered.stale).toBe(true);
+  });
+
+  it("is not stale, and keeps the moment, while its signals are still live", () => {
+    const rows = [signal("staffing_spike", LIVE)];
+    const { factual } = assembleFactual(input(rows), NOW);
+    const rendered = renderBrief({ factual, voice: VOICE }, rows, NOW);
+    expect(rendered.stale).toBe(false);
+    expect(rendered.headline).toBe("They are hiring for the front desk");
+  });
 });
 
 describe("isBriefStale", () => {

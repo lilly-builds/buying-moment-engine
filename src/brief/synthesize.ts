@@ -112,12 +112,21 @@ export function headlineCitesASignal(
 /** Closure + relevance failures, phrased as an edit list the next attempt can act on. */
 function closureCorrections(
   unknown: readonly UnknownCitation[],
+  zeroSignal: boolean,
+  headlineVariantMismatch: boolean,
   headlineMissesSignal: boolean,
 ): string[] {
   const corrections = unknown.map(
     (u) =>
       `- you cited evidence id "${u.evidenceId}", which was not in the EVIDENCE block. Cite only the ids given, and only for sentences they support.`,
   );
+  if (headlineVariantMismatch) {
+    corrections.push(
+      zeroSignal
+        ? "- NO buying moment has fired for this practice. Set headline to null; do not invent a trigger or a reason to call today."
+        : "- a buying moment HAS fired. Write headline as that moment (do not return null) and cite a signal id in headlineEvidenceIds.",
+    );
+  }
   if (headlineMissesSignal) {
     corrections.push(
       "- headlineEvidenceIds must include at least one SIGNAL id. The headline is the buying moment, not the practice profile.",
@@ -192,18 +201,39 @@ async function attemptVoice(
 
   const voice = outcome.voice;
 
-  // Gate 2 — CLOSURE. Attribution must be real, and the headline's must be relevant.
+  // Gate 2 — CLOSURE. Attribution must be real, the zero-signal variant must MATCH, and a
+  // present headline must cite a SIGNAL rather than a firmographic.
   const unknown = citationClosure(voice, allowedEvidenceIds(input.facts, signals));
-  const headlineMissesSignal = !factual.zeroSignal && !headlineCitesASignal(voice, signals);
-  if (unknown.length > 0 || headlineMissesSignal) {
+  // The zero-signal variant is a two-way lock, and both directions were open (P1-1). A
+  // zero-signal practice MUST return `headline: null`; a fired-signal practice MUST return a
+  // headline. Miss the first and the model can ship an invented buying moment on a practice
+  // with no signal at all — headline text, `headlineEvidenceIds: []` — and SHAPE, CLOSURE
+  // and TRUTH all wave it through (a string is valid, `[] ⊆ allowed`, no digits). That is the
+  // single thing the two-stage split exists to make impossible, so it is checked here.
+  const headlineVariantMismatch = factual.zeroSignal !== (voice.headline === null);
+  const headlineMissesSignal =
+    !factual.zeroSignal && voice.headline !== null && !headlineCitesASignal(voice, signals);
+  if (unknown.length > 0 || headlineVariantMismatch || headlineMissesSignal) {
     return {
       voice: null,
       gate: "closure",
-      reason:
-        unknown.length > 0
-          ? `cited ${unknown.length} evidence id(s) not present in the input`
-          : "headline does not cite a signal",
-      corrections: closureCorrections(unknown, headlineMissesSignal),
+      reason: [
+        unknown.length > 0 ? `cited ${unknown.length} evidence id(s) not present in the input` : null,
+        headlineVariantMismatch
+          ? factual.zeroSignal
+            ? "headline must be null on a zero-signal practice"
+            : "headline must not be null when a signal fired"
+          : null,
+        headlineMissesSignal ? "headline does not cite a signal" : null,
+      ]
+        .filter((part): part is string => part !== null)
+        .join("; "),
+      corrections: closureCorrections(
+        unknown,
+        factual.zeroSignal,
+        headlineVariantMismatch,
+        headlineMissesSignal,
+      ),
       retryable: true,
     };
   }

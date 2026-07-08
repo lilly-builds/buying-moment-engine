@@ -193,6 +193,38 @@ describe("synthesizeBrief", () => {
     expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
   });
 
+  it("kills a zero-signal brief whose model invented a buying moment (P1-1)", async () => {
+    // Zero signals, but the model returns a headline anyway, citing nothing. SHAPE passes
+    // (a string is valid), CLOSURE's old id check passes ([] ⊆ allowed), TRUTH passes (no
+    // digits). The variant lock is the only thing that catches it — and it must.
+    const ids = await seedGoldenPractice(t.db, { withSignals: false });
+    const invented = (req: VoiceRequest) => ({
+      ...goodVoice(req),
+      headline: "They just opened a second location",
+      headlineEvidenceIds: [],
+    });
+    const { deps: d } = deps(t, FakeVoiceClient.always(invented));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "closure", attempts: 2 });
+    expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
+  });
+
+  it("kills a fired-signal brief whose model returned a null headline (P1-1, the inverse)", async () => {
+    // A moment fired, so the card's spine is the timing thesis — a null headline would render
+    // "No buying moment detected yet" over live signals, the same lie in the other direction.
+    const ids = await seedGoldenPractice(t.db);
+    const nulled = (req: VoiceRequest) => ({
+      ...goodVoice(req),
+      headline: null,
+      headlineEvidenceIds: [],
+    });
+    const { deps: d } = deps(t, FakeVoiceClient.always(nulled));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "closure" });
+  });
+
   it("kills a brief whose headline cites a firmographic instead of a signal", async () => {
     // Closure alone would pass this: the id is real. But the headline is the buying moment,
     // and "founded in 2004" is not one. The timing thesis is the spine of the card (D1).

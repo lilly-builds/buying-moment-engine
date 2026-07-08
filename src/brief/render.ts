@@ -105,28 +105,44 @@ export interface RenderedBrief {
   voice: VoiceBrief;
   /** Read live from `signals`, never from the stored JSON. */
   live: LiveSignalView;
-  /** `voice.headline`, or the deterministic constant on the zero-signal variant. */
+  /** The live headline: the model's when a moment is firing, the constant otherwise. */
   headline: string;
+  /**
+   * The fresh signal set has diverged from what the prose was written against — a new
+   * signal fired, or one expired past its window. A UI gates a "regenerate this brief"
+   * affordance on this. It is a READ, not a scheduler (Lilly's ruling): nothing here
+   * regenerates anything, and the card still renders honestly until it does.
+   */
+  stale: boolean;
 }
 
 /**
  * Merge a stored brief with the live signal view.
  *
- * The headline resolution is the one place the two tiers touch: the model writes it when
- * a moment fired, and code supplies the constant when none did. `voice.headline` is null
- * on the zero-signal variant precisely so this cannot silently fall through to prose about
- * a buying moment that never happened.
+ * The headline is the loudest claim on the card, so it is defended twice — code decides it,
+ * the model never gets the final say. It falls back to the honest constant when the brief
+ * was WRITTEN with no moment (`factual.zeroSignal` — belt behind the synthesizer's own
+ * gate, P1-1) OR when every signal it was written against has since EXPIRED
+ * (`live.signalCount === 0` — the KTD verbatim: "a stored brief must never claim a buying
+ * moment that has expired", P1-2). Only a brief with a moment still live shows the model's
+ * headline; and `voice.headline` is null on the zero-signal variant anyway, so even that
+ * path cannot fall through to invented urgency.
  */
 export function renderBrief(
   brief: StoredBrief,
   signalRows: readonly SignalRow[],
   now: Date,
 ): RenderedBrief {
+  const live = liveSignalView(signalRows, now);
   return {
     factual: brief.factual,
     voice: brief.voice,
-    live: liveSignalView(signalRows, now),
-    headline: brief.voice.headline ?? brief.factual.headline ?? ZERO_SIGNAL_HEADLINE,
+    live,
+    headline:
+      brief.factual.zeroSignal || live.signalCount === 0
+        ? ZERO_SIGNAL_HEADLINE
+        : (brief.voice.headline ?? ZERO_SIGNAL_HEADLINE),
+    stale: isBriefStale(brief.factual, signalRows, now),
   };
 }
 
