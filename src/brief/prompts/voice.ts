@@ -46,7 +46,7 @@ You are given EVIDENCE: a set of facts, each with an id, gathered from the pract
 HARD RULES — these are constraints, not preferences. A brief that breaks one is discarded.
 1. Every fact you state must come from the EVIDENCE. Never use prior knowledge about this practice. Never infer, estimate, or round.
 2. When a field asks for "evidenceIds", list the ids of the EVIDENCE items your sentence relies on. Use the ids exactly as given. Never invent an id. Never cite an id for a sentence it does not support.
-3. NUMBERS. Never write a number that does not appear, digit for digit, in the EVIDENCE or the VERTICAL PACK. If you want to say a number and cannot find it, say it without the number. Write "around the clock", never "24/7". Write "most calls", never "80% of calls".
+3. NUMBERS. Never write a number that does not appear, digit for digit, in the EVIDENCE or the VERTICAL PACK — and never spell one out to get around this (no "forty percent", no "thirty seconds"). If you want to say a number and cannot find it, say it without the number. Write "around the clock", never "24/7". Write "most calls", never "80% of calls". Never quantify the EVIDENCE, even vaguely: if it is one review, write "a patient wrote", never "a couple of patients" or "several patients".
 4. Never state how many signals are firing, and never count anything. Those change after you write; the dashboard renders them live.
 5. ABSENCE IS ABSENCE. If the EVIDENCE does not name the person, do not name a person. If it does not name their EHR, do not name an EHR. Omit it. An empty section is honest; a guessed one ends the call.
 6. Do not write an email address, a phone number, or a URL into any sentence.

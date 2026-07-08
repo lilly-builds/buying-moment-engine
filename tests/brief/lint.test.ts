@@ -12,6 +12,7 @@ import {
   longSentences,
   normalizeForGrounding,
   ungroundedNumbers,
+  vagueQuantifiers,
   wordNumbersToDigits,
 } from "@/src/brief/lint";
 import type { VoiceBrief } from "@/src/brief/schema";
@@ -268,6 +269,18 @@ describe("aiTells", () => {
   });
 });
 
+describe("vagueQuantifiers (P2-8)", () => {
+  it("finds each fuzzy count, case-insensitively", () => {
+    expect(vagueQuantifiers("I saw A Couple Of patients and several others.")).toEqual(
+      expect.arrayContaining(["a couple", "several"]),
+    );
+  });
+
+  it("does not fire on a precise, honest phrasing", () => {
+    expect(vagueQuantifiers("A patient wrote that they could not get through.")).toEqual([]);
+  });
+});
+
 describe("longSentences", () => {
   it("passes a normal sentence", () => {
     expect(longSentences("The front desk is underwater.")).toEqual([]);
@@ -384,6 +397,38 @@ describe("lintVoice", () => {
       CORPUS,
     );
     expect(inRebuttal.ok).toBe(true);
+  });
+
+  it("flags a fuzzy count in a field that speaks about the practice (P2-8)", () => {
+    // The live opener: "I saw a couple of patients mention…" — from exactly one review.
+    const result = lintVoice(
+      voice({ callOpener: "I saw a couple of patients mention they could not get through." }),
+      CORPUS,
+    );
+    expect(result.violations).toContainEqual({
+      kind: "vague-quantifier",
+      field: "callOpener",
+      detail: expect.stringContaining("a couple"),
+    });
+  });
+
+  it("does NOT flag a market generalization in a touch body (P2-8)", () => {
+    // "several practices your size" is a claim about the MARKET, not this practice, and a
+    // touch body is out of scope. Only headline/callOpener/personalizationSnippet are checked.
+    const result = lintVoice(
+      voice({
+        sequence: {
+          ...voice().sequence,
+          touches: [
+            { touchNumber: 1, channel: "email", subject: "Hi", body: "Several practices your size miss calls at lunch.", evidenceIds: [] },
+            { touchNumber: 2, channel: "call", subject: "Hi", body: "Second.", evidenceIds: [] },
+            { touchNumber: 3, channel: "email", subject: "Hi", body: "Third.", evidenceIds: [] },
+          ],
+        },
+      }),
+      CORPUS,
+    );
+    expect(result.violations.filter((v) => v.kind === "vague-quantifier")).toEqual([]);
   });
 
   it("flags an em-dash pile-up", () => {

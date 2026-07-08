@@ -29,7 +29,9 @@ export type ViolationKind =
   /** A sentence long enough that an AE skimming it will lose the thread. */
   | "long-sentence"
   /** Em-dash pile-up — the single most recognizable tell in current AI prose. */
-  | "em-dash-overuse";
+  | "em-dash-overuse"
+  /** A fuzzy count ("a couple of patients") overclaiming from thin evidence. */
+  | "vague-quantifier";
 
 export interface Violation {
   kind: ViolationKind;
@@ -329,6 +331,36 @@ export function aiTells(text: string): string[] {
   return AI_TELLS.filter((tell) => normalized.includes(tell));
 }
 
+/**
+ * Fuzzy counts that overclaim from thin evidence. The live opener read "I saw a couple of
+ * patients mention…" when we supplied exactly ONE review (P2-8). No other gate can see it:
+ * closure checks THAT the review exists, never HOW MANY, and there is no digit for the truth
+ * gate to catch. This is not banned outright — a touch body's "most practices never see the
+ * calls that ring out" is a legitimate market generalization — so `lintVoice` applies it only
+ * to the fields that speak about THIS practice.
+ */
+const VAGUE_QUANTIFIERS: readonly string[] = [
+  "a couple",
+  "a few",
+  "several",
+  "dozens of",
+  "many of your",
+  "a handful of",
+];
+
+/** The fields whose subject is the practice itself, where an invented quantity is a lie. */
+const QUANTIFIER_SCOPED_FIELDS: ReadonlySet<string> = new Set([
+  "headline",
+  "callOpener",
+  "personalizationSnippet",
+]);
+
+/** Vague quantifiers present in `text`, in list order so the report is stable. */
+export function vagueQuantifiers(text: string): string[] {
+  const normalized = text.toLowerCase().replace(WHITESPACE_RUN, " ");
+  return VAGUE_QUANTIFIERS.filter((q) => normalized.includes(q));
+}
+
 /** Sentences over the word ceiling, returned as their word counts. */
 export function longSentences(text: string): number[] {
   return text
@@ -383,6 +415,15 @@ export function lintVoice(voice: VoiceBrief, corpus: GroundingCorpus): LintResul
         field,
         detail: `${dashes} em dashes; use at most ${MAX_EM_DASHES_PER_FIELD} and prefer a full stop`,
       });
+    }
+    if (QUANTIFIER_SCOPED_FIELDS.has(field)) {
+      for (const quantifier of vagueQuantifiers(text)) {
+        violations.push({
+          kind: "vague-quantifier",
+          field,
+          detail: `remove "${quantifier}" — do not quantify the evidence; if it is one review, write "a patient", not "${quantifier}"`,
+        });
+      }
     }
   }
 
