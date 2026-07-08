@@ -27,6 +27,11 @@ import type {
  * real money — Anthropic billed the request. Parsing inside `fn` would turn that
  * into a throw, the meter would record nothing, and measured CAC would understate
  * spend exactly on the calls that went wrong.
+ *
+ * The same rule binds the client: a billed 200 whose envelope we cannot parse comes
+ * back as a resolved `ResearchResponse` carrying `unpricedReason`, and that lands in
+ * `meta` as `{ unpriced: true, reason }`. A cost row saying "a paid call happened and
+ * we could not price it" beats no row at all, which is money that vanishes.
  */
 
 export interface ResearchDeps {
@@ -55,6 +60,9 @@ export async function runResearch(
       meta: (res) => ({
         ...anthropicCostBreakdown(res.usage),
         practiceName: request.practiceName,
+        ...(res.unpricedReason === undefined
+          ? {}
+          : { unpriced: true, reason: res.unpricedReason }),
       }),
     },
     () => deps.client.research(request),

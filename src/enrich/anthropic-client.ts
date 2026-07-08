@@ -15,6 +15,7 @@ import {
 import { buildResearchPrompt, RESEARCH_SYSTEM_PROMPT } from "./research-prompt";
 import {
   AnthropicRequestError,
+  ZERO_USAGE,
   type ClaudeUsage,
   type ResearchClient,
   type ResearchRequest,
@@ -80,22 +81,78 @@ export function normalizeUsage(
   };
 }
 
-/** Parse a raw Messages-API body into our `ResearchResponse`. Pure. */
+/** `meta.reason` on a cost row we could not price. Asserted by the tests. */
+export const UNPARSEABLE_ENVELOPE = "unparseable-envelope";
+
+/**
+ * Anthropic returns `usage` even on a response whose content blocks we do not
+ * recognize, so a body that fails the full envelope schema can still be PRICED.
+ * Returns null only when the usage block itself is unsalvageable.
+ */
+function salvageUsage(body: unknown): ClaudeUsage | null {
+  if (typeof body !== "object" || body === null || !("usage" in body)) return null;
+  const parsed = usageSchema.safeParse((body as { usage: unknown }).usage);
+  return parsed.success ? normalizeUsage(parsed.data) : null;
+}
+
+function salvageModel(body: unknown): string {
+  if (typeof body === "object" && body !== null && "model" in body) {
+    const model = (body as { model: unknown }).model;
+    if (typeof model === "string" && model.length > 0) return model;
+  }
+  return RESEARCH_MODEL;
+}
+
+/**
+ * Parse a raw Messages-API body into our `ResearchResponse`. Pure, and it NEVER
+ * throws: every body handed to it came back on a 200, which Anthropic has already
+ * billed. Throwing here would unwind past the cost meter and record nothing —
+ * the exact failure `src/roi/cost-meter.ts` documents as forbidden ("errors that
+ * DID cost money must surface as a resolved result, not a throw").
+ *
+ * Three tiers, most to least information:
+ *  1. the full envelope parses -> text + usage + model.
+ *  2. only `usage` survives -> no text, but the call is priced correctly.
+ *  3. nothing survives -> zeroed usage + `unpricedReason`, so the ledger still
+ *     carries a row saying a paid call happened that we could not price.
+ *
+ * An empty `text` is "no findings" downstream (`research-schema.ts` reports
+ * "no JSON object found"), never a crash.
+ */
 export function parseMessagesResponse(body: unknown): ResearchResponse {
   const parsed = messagesResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new AnthropicRequestError(
-      200,
-      `unrecognized Messages API response shape: ${parsed.error.issues
-        .map((i) => i.path.join("."))
-        .join(", ")}`,
-    );
+  if (parsed.success) {
+    return {
+      text: collectText(parsed.data.content),
+      usage: normalizeUsage(parsed.data.usage),
+      model: parsed.data.model,
+    };
   }
+
+  const usage = salvageUsage(body);
+  if (usage) return { text: "", usage, model: salvageModel(body) };
+
   return {
-    text: collectText(parsed.data.content),
-    usage: normalizeUsage(parsed.data.usage),
-    model: parsed.data.model,
+    text: "",
+    usage: ZERO_USAGE,
+    model: salvageModel(body),
+    unpricedReason: UNPARSEABLE_ENVELOPE,
   };
+}
+
+/**
+ * Read a BILLED 200's body without throwing. A 200 that is not JSON at all was
+ * still charged, so it must reach `parseMessagesResponse` — which degrades it to
+ * an unpriced-but-recorded call — rather than throw past the meter. The undefined
+ * is not a swallowed error: it is the "unrecognized body" tier 3 exists to handle.
+ */
+async function readJsonBody(res: Response): Promise<unknown> {
+  const raw = await res.text();
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildRequestBody(request: ResearchRequest) {
@@ -134,10 +191,13 @@ export function anthropicResearchClient(apiKey: string): ResearchClient {
         body: JSON.stringify(buildRequestBody(request)),
         signal: AbortSignal.timeout(ENRICH_FETCH_TIMEOUT_MS),
       });
+      // Non-2xx is an UNBILLED call: throw, and the meter correctly records
+      // nothing. Past this line the request is billed, so nothing may throw —
+      // `parseMessagesResponse` degrades instead.
       if (!res.ok) {
         throw new AnthropicRequestError(res.status, res.statusText);
       }
-      return parseMessagesResponse(await res.json());
+      return parseMessagesResponse(await readJsonBody(res));
     },
   };
 }

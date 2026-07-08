@@ -81,6 +81,13 @@ export interface ResearchResponse {
   text: string;
   usage: ClaudeUsage;
   model: string;
+  /**
+   * Set ONLY when a billed 200 could not be priced from its own body — we could
+   * not even salvage its `usage` block. The meter writes the reason into the
+   * cost_events row: "a call happened and we could not price it" is strictly
+   * better than no row at all, which is money that vanishes.
+   */
+  unpricedReason?: string;
 }
 
 export interface ResearchClient {

@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import researchFixture from "./fixtures/anthropic-research-response.json";
 import { FakeResearchClient, recordingMeter } from "./doubles";
 import {
+  anthropicResearchClient,
   buildRequestBody,
   collectText,
   normalizeUsage,
+  UNPARSEABLE_ENVELOPE,
 } from "@/src/enrich/anthropic-client";
 import {
+  ANTHROPIC_INPUT_USD_PER_TOKEN,
+  ANTHROPIC_OUTPUT_USD_PER_TOKEN,
   anthropicCallCostUsd,
   RESEARCH_MODEL,
   WEB_FETCH_TOOL_TYPE,
@@ -251,6 +255,89 @@ describe("metering the research call (R19)", () => {
     await expect(runResearch({ client, meter }, REQUEST)).rejects.toThrow(
       /timed out/,
     );
+    expect(rows).toHaveLength(0);
+  });
+});
+
+/**
+ * The real HTTP client, over a stubbed `fetch`. These drive the boundary the meter
+ * wraps, because that is where the money is: a 200 is BILLED whatever its body says,
+ * so a parse failure there must never throw past the meter.
+ */
+describe("a BILLED Anthropic 200 always writes a cost row (R19)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(status: number, body: string): void {
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(body, {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+  }
+
+  const client = () => anthropicResearchClient("test-key-not-a-real-secret");
+
+  it("a 200 with a garbage body is recorded as an UNPRICED call, never a throw", async () => {
+    // An edge/proxy handed back HTML with a 200. Anthropic still billed the call.
+    stubFetch(200, "<html><body>200 OK</body></html>");
+    const { meter, rows } = recordingMeter();
+
+    const outcome = await runResearch({ client: client(), meter }, REQUEST);
+
+    expect(outcome.ok).toBe(false);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].units).toBe(1);
+    expect(rows[0].costUsd).toBe(0);
+    expect(rows[0].meta).toMatchObject({
+      unpriced: true,
+      reason: UNPARSEABLE_ENVELOPE,
+    });
+  });
+
+  it("a 200 with valid usage but unrecognized content blocks is PRICED from that usage", async () => {
+    stubFetch(
+      200,
+      JSON.stringify({
+        model: RESEARCH_MODEL,
+        // A block shape this client has never seen: no `type` discriminator.
+        content: [{ kind: "some_future_block", payload: {} }],
+        usage: {
+          input_tokens: 1000,
+          output_tokens: 500,
+          server_tool_use: { web_search_requests: 2 },
+        },
+      }),
+    );
+    const { meter, rows } = recordingMeter();
+
+    const outcome = await runResearch({ client: client(), meter }, REQUEST);
+
+    // No text to parse -> honest "no findings", not a crash.
+    expect(outcome.ok).toBe(false);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].costUsd).toBeCloseTo(
+      1000 * ANTHROPIC_INPUT_USD_PER_TOKEN +
+        500 * ANTHROPIC_OUTPUT_USD_PER_TOKEN +
+        2 * WEB_SEARCH_USD_PER_REQUEST,
+      10,
+    );
+    expect(rows[0].meta).toMatchObject({ inputTokens: 1000, outputTokens: 500 });
+    // It was priced, so it is NOT flagged unpriced.
+    expect(rows[0].meta).not.toHaveProperty("unpriced");
+  });
+
+  it("ERROR PATH: a 500 is UNBILLED — it throws and writes NO cost row", async () => {
+    stubFetch(500, JSON.stringify({ type: "error" }));
+    const { meter, rows } = recordingMeter();
+
+    await expect(
+      runResearch({ client: client(), meter }, REQUEST),
+    ).rejects.toThrow(AnthropicRequestError);
     expect(rows).toHaveLength(0);
   });
 });
