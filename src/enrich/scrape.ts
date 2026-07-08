@@ -91,6 +91,12 @@ function failed(reason: ScrapeFailure): ScrapeResult {
 interface RawPage {
   status: number;
   html: string;
+  /**
+   * `res.url` — where the bytes ACTUALLY came from. With `redirect: "follow"` this is
+   * the end of the redirect chain, which may be a host we never asked about and whose
+   * `robots.txt` we have therefore never read. Discarding it is R3.
+   */
+  finalUrl: string;
 }
 
 /**
@@ -109,7 +115,18 @@ async function fetchOnce(
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (isTransientStatus(res.status)) throw new TransientHttpError(res.status, url);
-  return { status: res.status, html: res.ok ? await res.text() : "" };
+  // A real `fetch` always populates `res.url`; a hand-built `new Response()` does not.
+  // Falling back to the requested URL means "no redirect", which is the honest reading.
+  return { status: res.status, html: res.ok ? await res.text() : "", finalUrl: res.url || url };
+}
+
+/** `null` when the response carried no usable final URL. */
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
 }
 
 /** `null` = we gave up on this page. Never throws: one bad page is not a bad practice. */
@@ -138,6 +155,10 @@ async function fetchPage(
 /**
  * Once per origin, and never retried: a missing `robots.txt` MEANS allow, so a
  * retry would spend wall-clock to reach the answer we already have.
+ *
+ * `res.url` is deliberately NOT read here, unlike in `fetchOnce`. RFC 9309 §2.3.1.2 says
+ * a redirected `robots.txt` still governs the authority that was ASKED — so a redirect is
+ * exactly what we want followed, and the policy still belongs to `origin`.
  */
 async function fetchRobots(
   deps: ScrapeDeps,
@@ -207,7 +228,8 @@ export async function scrapePractice(
   const site = normalizeSiteUrl(websiteUrl);
   if (!site) return failed("invalid-url");
 
-  const policy = await fetchRobots(deps, site.origin, log);
+  let origin = site.origin;
+  let policy = await fetchRobots(deps, origin, log);
 
   let homeUrl = site.base;
   if (!isAllowed(policy, new URL(homeUrl).pathname)) {
@@ -233,11 +255,31 @@ export async function scrapePractice(
     return failed(blocked ? "blocked" : "unreachable");
   }
 
-  const { buckets } = discoverLinks(home.html, site.origin);
+  // R3. We followed a redirect to get here, and it may have carried us to a different
+  // host — an acquired practice 301'ing to its parent DSO, or the everyday apex -> `www.`
+  // hop. Two things are then wrong at once: we hold a page whose `robots.txt` we never
+  // read, and `discoverLinks` is about to resolve relative links against a host that no
+  // longer serves them. Re-read the rules, re-base the crawl, and only then continue.
+  //
+  // NOT simply `blocked`: `https://toa.com/` -> `https://www.toa.com` is extremely common,
+  // and refusing it to be safe would silently delete real practices from the pipeline.
+  const landed = normalizeSiteUrl(home.finalUrl);
+  if (landed && landed.origin !== origin) {
+    log("scrape.redirected_off_origin", { from: homeUrl, to: landed.base });
+    origin = landed.origin;
+    homeUrl = landed.base;
+    policy = await fetchRobots(deps, origin, log);
+    if (!isAllowed(policy, new URL(homeUrl).pathname)) {
+      log("scrape.robots_denied_homepage", { url: homeUrl });
+      return failed("blocked");
+    }
+  }
+
+  const { buckets } = discoverLinks(home.html, origin);
   const targets = BUCKET_ORDER.flatMap((bucket) => {
     const path = buckets[bucket].find((candidate) => isAllowed(policy, candidate));
     if (path === undefined) return [];
-    const url = `${site.origin}${path}`;
+    const url = `${origin}${path}`;
     return url === homeUrl ? [] : [{ bucket, url }];
   });
 
@@ -255,6 +297,16 @@ export async function scrapePractice(
     if (outcome.status !== "fulfilled") continue;
     const { url, page } = outcome.value;
     if (page === null || page.status < 200 || page.status >= 300) continue;
+
+    // A page that redirected off-origin is text from a host whose rules we never read.
+    // Keying it under the URL we requested would also break KTD-3: the citation would
+    // name a page that does not serve those words. A same-origin redirect is fine — the
+    // URL we hold still resolves to the text we hold.
+    const landedOrigin = originOf(page.finalUrl);
+    if (landedOrigin !== null && landedOrigin !== origin) {
+      log("scrape.page_left_origin", { requested: url, landed: page.finalUrl });
+      continue;
+    }
     entries.push([url, cleanHtml(page.html)]);
   }
 

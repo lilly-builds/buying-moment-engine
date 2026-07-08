@@ -61,6 +61,19 @@ const html = (body: string): Route => () => new Response(body, { status: 200 });
 const status = (code: number): Route => () => new Response("", { status: code });
 const robots = (body: string): Route => () => new Response(body, { status: 200 });
 
+/**
+ * What `redirect: "follow"` actually hands back: a 200 whose `url` is the FINAL address,
+ * not the one we asked for. `new Response()` leaves `url` empty — the one property the
+ * production code has to read to notice it has been moved — so it is stamped on here.
+ */
+const redirectedTo =
+  (finalUrl: string, body: string, code = 200): Route =>
+  () => {
+    const res = new Response(body, { status: code });
+    Object.defineProperty(res, "url", { value: finalUrl });
+    return res;
+  };
+
 /** Nothing sleeps, nothing jitters, nothing logs. */
 const DEPS = { sleep: async () => {}, jitter: () => 0, logger: () => {} };
 
@@ -250,5 +263,124 @@ describe("scrapePractice — the citation substrate", () => {
     });
     const result = await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
     expect(result.pagesHeld).toBe(7);
+  });
+});
+
+/**
+ * R3. `redirect: "follow"` means the 200 in your hand may have come from a host you never
+ * asked about — and whose `robots.txt` you therefore never read. Every assertion here is
+ * on the FETCHER'S CALL LIST, because "we obeyed the rules" is a claim about the requests
+ * we made, not about the bytes we kept.
+ */
+describe("scrapePractice — a redirect can move the origin under us", () => {
+  const WWW = "https://www.sunshinederm.example";
+  const DSO = "https://parent-dso.example";
+
+  /** A homepage with RELATIVE bucket links, so discovery re-bases with the origin. */
+  const linkedHome = (): string =>
+    `<body><h1>Practice</h1>${Array.from(
+      { length: 4 },
+      (_, i) => `<p>Homepage paragraph ${i} with plenty of words to clear the floor.</p>`,
+    ).join("")}<a href="/OurTeam">Team</a><a href="/about-us">About</a></body>`;
+
+  it("re-fetches robots.txt for the origin a cross-origin redirect LANDS on", async () => {
+    // An acquired practice's domain now 301s to its parent DSO, which disallows the very
+    // path we land on. Before this, we followed, took the 200, and held the body — having
+    // never read that host's rules.
+    const fetcher = new FakeFetcher({
+      [`${ORIGIN}/robots.txt`]: status(404),
+      [ORIGIN]: redirectedTo(`${DSO}/locations/sunshine`, linkedHome()),
+      [`${DSO}/robots.txt`]: robots("User-agent: *\nDisallow: /locations/"),
+    });
+
+    const result = await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
+
+    expect(fetcher.calls).toContain(`${DSO}/robots.txt`);
+    expect(result.reason).toBe("blocked");
+    expect(result.pagesHeld).toBe(0);
+    // And we never went crawling around the DSO on the strength of the old host's rules.
+    expect(fetcher.calls).not.toContain(`${DSO}/OurTeam`);
+    expect(fetcher.calls).not.toContain(`${ORIGIN}/OurTeam`);
+  });
+
+  it("apex -> www is followed, not lost: the origin re-bases and the practice survives", async () => {
+    // `https://toa.com/` -> `https://www.toa.com` is extremely common. Marking it
+    // `blocked` to be safe would silently delete practices, so the redirect is honoured
+    // and only the ORIGIN moves.
+    const fetcher = new FakeFetcher({
+      [`${ORIGIN}/robots.txt`]: status(404),
+      [ORIGIN]: redirectedTo(`${WWW}/`, linkedHome()),
+      [`${WWW}/robots.txt`]: status(404),
+      [`${WWW}/OurTeam`]: html(page("team")),
+      [`${WWW}/about-us`]: html(page("about")),
+    });
+
+    const result = await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
+
+    expect(result.reason).toBeUndefined();
+    expect(result.pagesHeld).toBe(3);
+    // Keyed by the host that actually served the text — KTD-3's provenance.
+    expect([...result.pages.keys()].sort()).toEqual(
+      [WWW, `${WWW}/OurTeam`, `${WWW}/about-us`].sort(),
+    );
+    // Discovery re-based: relative links resolved against the NEW origin, not the old.
+    expect(fetcher.calls).not.toContain(`${ORIGIN}/OurTeam`);
+  });
+
+  it("reads robots.txt once per ORIGIN — twice across a redirect, never once per page", async () => {
+    const fetcher = new FakeFetcher({
+      [`${ORIGIN}/robots.txt`]: status(404),
+      [ORIGIN]: redirectedTo(`${WWW}/`, linkedHome()),
+      [`${WWW}/robots.txt`]: status(404),
+      [`${WWW}/OurTeam`]: html(page("team")),
+      [`${WWW}/about-us`]: html(page("about")),
+    });
+
+    await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
+
+    expect(fetcher.callsTo(`${ORIGIN}/robots.txt`)).toBe(1);
+    expect(fetcher.callsTo(`${WWW}/robots.txt`)).toBe(1);
+  });
+
+  it("honours the LANDING origin's robots.txt for the pages it then crawls", async () => {
+    const fetcher = new FakeFetcher({
+      [`${ORIGIN}/robots.txt`]: status(404),
+      [ORIGIN]: redirectedTo(`${WWW}/`, linkedHome()),
+      [`${WWW}/robots.txt`]: robots("User-agent: *\nDisallow: /OurTeam"),
+      [`${WWW}/OurTeam`]: html(page("team")),
+      [`${WWW}/about-us`]: html(page("about")),
+    });
+
+    const result = await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
+
+    // The old origin's (permissive) robots.txt must not license a crawl of the new one.
+    expect(fetcher.calls).not.toContain(`${WWW}/OurTeam`);
+    expect(result.pages.has(`${WWW}/OurTeam`)).toBe(false);
+    expect(result.pagesHeld).toBe(2);
+  });
+
+  it("DROPS a bucket page that redirects off-origin — we never read that host's rules", async () => {
+    // `/careers` 302s to a jobs board. Holding its text under `sunshinederm.example/careers`
+    // would key a page by a URL that does not serve it, and cite a host we never asked.
+    const fetcher = fullSite({
+      [`${ORIGIN}/careers`]: redirectedTo("https://jobs.example/sunshine", page("jobs")),
+    });
+
+    const result = await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
+
+    expect(result.pages.has(`${ORIGIN}/careers`)).toBe(false);
+    expect(result.pages.has("https://jobs.example/sunshine")).toBe(false);
+    expect(result.pagesHeld).toBe(6);
+  });
+
+  it("KEEPS a bucket page that redirects WITHIN the origin — the URL still serves the text", async () => {
+    const fetcher = fullSite({
+      [`${ORIGIN}/OurTeam`]: redirectedTo(`${ORIGIN}/our-team`, page("team")),
+    });
+
+    const result = await scrapePractice({ fetch: fetcher.fetch, ...DEPS }, ORIGIN);
+
+    expect(result.pagesHeld).toBe(7);
+    expect(result.pages.get(`${ORIGIN}/OurTeam`)).toContain("team paragraph 0");
   });
 });
