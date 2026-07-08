@@ -1,0 +1,34 @@
+{
+  "articles": [
+    {
+      "url": "https://healthbizjournal.example.com/2026/06/28/riverside-partners-acquires-sunshine-family-dental",
+      "url_mobile": "",
+      "title": "Riverside Partners Acquires Sunshine Family Dental in Regional Expansion Deal",
+      "seendate": "20260628T140000Z",
+      "socialimage": "https://healthbizjournal.example.com/img/1.jpg",
+      "domain": "healthbizjournal.example.com",
+      "language": "English",
+      "sourcecountry": "United States"
+    },
+    {
+      "url": "https://vetindustrynews.example.com/2026/06/29/meadowbrook-animal-hospital-opens-second-location",
+      "url_mobile": "",
+      "title": "Meadowbrook Animal Hospital Opens Second Location After Growth Capital Raise",
+      "seendate": "20260629T090000Z",
+      "socialimage": "https://vetindustrynews.example.com/img/2.jpg",
+      "domain": "vetindustrynews.example.com",
+      "language": "English",
+      "sourcecountry": "United States"
+    },
+    {
+      "url": "https://generalhealthnews.example.com/2026/06/27/diet-heart-disease-study",
+      "url_mobile": "",
+      "title": "New Study Finds Link Between Diet and Heart Disease Risk",
+      "seendate": "20260627T080000Z",
+      "socialimage": "https://generalhealthnews.example.com/img/3.jpg",
+      "domain": "generalhealthnews.example.com",
+      "language": "English",
+      "sourcecountry": "United States"
+    }
+  ]
+}
