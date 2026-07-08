@@ -20,6 +20,16 @@ export type IngestResult =
   | { status: "duplicate" }
   | { status: "rejected"; reason: string };
 
+export interface IngestOptions {
+  /**
+   * U3 freshness seam. When supplied, the promoted signal's `expires_at` is
+   * computed from (kind, detectedAt) inside the same atomic promotion. Omitted
+   * (the U1 default) leaves `expires_at` null. Idempotent: the expiry is a pure
+   * function of its inputs, so a re-run would recompute the identical value.
+   */
+  computeExpiresAt?: (kind: DetectorKind, detectedAt: Date) => Date;
+}
+
 type Row = Record<string, unknown>;
 
 function isRecord(value: unknown): value is Row {
@@ -67,6 +77,7 @@ function dedupeHashOf(input: unknown): string {
 export async function ingestRawSignal(
   db: Database,
   input: unknown,
+  options: IngestOptions = {},
 ): Promise<IngestResult> {
   const dedupeHash = dedupeHashOf(input);
   const validation = validateRawSignal(input);
@@ -129,6 +140,8 @@ export async function ingestRawSignal(
       kind: data.detectorKind,
       evidenceId: ev.id,
       detectedAt: data.detectedAt,
+      expiresAt:
+        options.computeExpiresAt?.(data.detectorKind, data.detectedAt) ?? null,
       signalSource: data.detectorKind,
     });
     return { status: "ingested", practiceId: practice.id, signalId: sig.id };

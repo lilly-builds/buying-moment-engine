@@ -1,0 +1,38 @@
+{
+  "status": "OK",
+  "result": {
+    "place_id": "ChIJN1t_tDeuEmsRUsoyG83frY4",
+    "name": "Sunshine Dermatology",
+    "url": "https://maps.google.com/?cid=1234567890",
+    "reviews": [
+      {
+        "author_name": "Jane D.",
+        "rating": 1,
+        "text": "I've been trying for weeks — I can't get through on the phone at all, and when I do get through I'm always on hold.",
+        "relative_time_description": "a month ago",
+        "time": 1719792000
+      },
+      {
+        "author_name": "Marcus T.",
+        "rating": 5,
+        "text": "I called and the staff were lovely, got me in same day.",
+        "relative_time_description": "2 weeks ago",
+        "time": 1720483200
+      },
+      {
+        "author_name": "Priya K.",
+        "rating": 2,
+        "text": "Left on hold 20 minutes before I gave up. Great in person but their phones are a nightmare.",
+        "relative_time_description": "3 weeks ago",
+        "time": 1719878400
+      },
+      {
+        "author_name": "Devon R.",
+        "rating": 5,
+        "text": "Best dermatologist in town, highly recommend!",
+        "relative_time_description": "1 week ago",
+        "time": 1721001600
+      }
+    ]
+  }
+}
