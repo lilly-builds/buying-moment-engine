@@ -63,3 +63,35 @@ export const crmLinks = pgTable(
   },
   (t) => [unique("crm_links_practice_provider_uq").on(t.practiceId, t.provider)],
 ).enableRLS();
+
+/**
+ * crm_connections (R8, U10) — per-tenant OAuth tokens for the CRM binding. ONE
+ * "Connect HubSpot" grant per portal covers CRM + send + analytics. Tokens are
+ * stored ENCRYPTED at rest (AES-256-GCM via `src/crm/token-crypto.ts`); the
+ * plaintext token never touches a column and is never logged (D9). The access
+ * token is short-lived (~30 min) and refreshed proactively off `expires_at`;
+ * the refresh token is long-lived. Per-tenant keying is (provider, portal_id) —
+ * HubSpot's hub/portal id identifies the connected account.
+ */
+export const crmConnections = pgTable(
+  "crm_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull().default("hubspot"),
+    // Tenant key: the HubSpot portal/hub id the grant belongs to.
+    portalId: text("portal_id").notNull(),
+    // AES-256-GCM ciphertext — NEVER plaintext, NEVER logged (D9).
+    accessTokenEnc: text("access_token_enc").notNull(),
+    refreshTokenEnc: text("refresh_token_enc").notNull(),
+    // When the ACCESS token expires — drives proactive refresh.
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // Space-delimited granted scopes (audit which capabilities this grant covers).
+    scopes: text("scopes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // One connection per (provider, portal) — re-connecting UPDATES, never dupes.
+  (t) => [
+    unique("crm_connections_provider_portal_uq").on(t.provider, t.portalId),
+  ],
+).enableRLS();
