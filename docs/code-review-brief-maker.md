@@ -1,10 +1,11 @@
 # Code review — U6 brief synthesizer
 
-**Branch:** `wave-3-u6` (15 commits on top of `wave-3-u5`) · **Date:** 2026-07-08
+**Branch:** `wave-3-u6` (17 commits on top of `wave-3-u5`) · **Date:** 2026-07-08
 **Status:** built and gated. **All P1/P2/P3 findings below are FIXED** (see Resolution). Still NOT merged,
 no PR opened — a human opens the PR.
-**Gates:** `tsc --noEmit` clean · `eslint` clean (0 errors) · `npm test` **737 passed, 2 consecutive full runs**.
-**Live path exercised once:** one real Opus 4.8 call — HTTP 200, all three gates passed, **$0.0581**, 28.0s.
+**Gates:** `tsc --noEmit` clean · `eslint` clean (0 errors) · `npm test` **740 passed, consecutive full runs**.
+**Live path re-verified on the streaming build:** real Opus 4.8 calls — HTTP 200, `stream:true` +
+structured outputs accepted, priced correctly, all three gates pass on the first attempt, **~$0.059**, ~24s.
 **Fresh-eyes review:** a skeptic subagent that did not write the code reviewed `b37ddb9` and reproduced
 **five** defects; the live call and a re-read surfaced four more. All nine are addressed below.
 
@@ -35,17 +36,28 @@ showed a headline whose *own* signal had expired while an unrelated one kept the
 violation, now fixed); **finding 3** — a vague time-ask tripped the P2-8 lint (a false positive, now
 exempted).
 
-**Two items remain on the record, neither a blocker:**
-- **Accepted residual (finding 2).** An allowlisted meeting length + a session noun ("a 15-minute call")
-  is exempt from the number gate regardless of whose meeting it is, so "your team burns a 15-minute call
-  on every reschedule" is not flagged. This is strictly narrower than the pre-P2-6 behaviour and is the
-  tradeoff the review chose; distinguishing our proposal from their statistic needs subject/verb parsing,
-  out of scope for U6. Semantic support is the human sample review at U15.
-- **One live call owed before the U15 seeding run (finding 4).** `stream: true` was added to a request
-  that also carries `output_config.format` (structured outputs). The reuse of `consumeSseStream` is
-  covered by the enrich suite against real SSE fixtures, and `buildVoiceRequestBody` is unit-pinned, but
-  streamed-structured-output has not been exercised end-to-end against the live API. This worktree's
-  `.env.local` has no usable `ANTHROPIC_API_KEY`, so it could not be run here.
+**Verified live (finding 4, now closed).** Several real streamed Opus 4.8 calls against a synthetic
+dermatology practice: `stream: true` alongside `output_config.format` is accepted, the SSE parses to valid
+structured JSON, and the call is priced correctly (no `unpricedReason`, no `streamError`) — ~$0.059, ~24s,
+in ~4,300 / out ~1,500. The very first call also **proved the P1-3 corpus split against the real model**:
+unprompted, it wrote the pack's `2,000 / 250 / 130` into a touch body, and the truth gate rejected them.
+
+That live call surfaced two follow-ups, both fixed in `056db80`:
+- **Tokenizer false-positive.** `NUMBER_TOKEN` greedily kept a trailing comma, so "since 2004, and…" read
+  as `"2004,"` and failed to match the grounded `"2004"` — a true fact wrongly rejected. Fixed to
+  `\d+(?:\.\d+)?` (digit-grouping commas are already stripped upstream). Re-verified live: "served Omaha
+  since 2004," is no longer flagged.
+- **Prompt/lint disagreement.** The corpus split confined the pack's proof/ROI figures to a rebuttal, but
+  the prompt still told the model those numbers were "safe to use" and to lead touch 2 with the proof
+  point — so a compliant brief failed truth and burned a retry. The prompt now says the pack's figures may
+  be quoted ONLY in a rebuttal; elsewhere the proof is told without its numbers. Re-verified live: a fresh
+  brief leads touch 2 with the proof *story*, no figures, and passes all three gates on attempt 1.
+
+**One accepted residual (finding 2), not a blocker.** An allowlisted meeting length + a session noun
+("a 15-minute call") is exempt from the number gate regardless of whose meeting it is, so "your team burns
+a 15-minute call on every reschedule" is not flagged. Strictly narrower than the pre-P2-6 behaviour and the
+tradeoff the review chose; distinguishing our proposal from their statistic needs subject/verb parsing, out
+of scope for U6. Semantic support is the human sample review at U15.
 
 The nine findings below are the ORIGINAL review, kept verbatim for the record. Read them for the
 reproductions and the reasoning; the tables above are the current state.
