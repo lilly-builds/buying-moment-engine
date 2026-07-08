@@ -31,16 +31,16 @@ export const MEETING_STAGE_ID = "appointmentscheduled";
  * ⚠️ SEMANTIC GAP (for U12): HubSpot's default pipeline has no "lead surfaced"
  * stage — its first stage is literally "Appointment Scheduled". So a pushed lead
  * necessarily starts in the same stage that `stageMilestone` reads as a booked
- * meeting. `pushPracticeLead` therefore RECORDS this stage on the crm_link when it
- * CREATES the deal, and `recordStageForPractice` logs each milestone at most once
- * per practice — so a pushed lead never books a phantom meeting, and a rescheduled
- * one never books a second.
+ * meeting. `recordStageForPractice` therefore never counts a deal ARRIVING in the
+ * stage it was created in — not on the first poll, and not when an AE moves a deal
+ * back to it. Reaching a stage the tool put the deal in is not the AE booking a
+ * meeting.
  *
- * The consequence, stated honestly: on the default pipeline `meeting_booked` fires
- * for a practice only if its deal was created outside the appointment stage, which
- * it never is — so the tile reads zero. Giving it a real number needs a dedicated
- * pipeline whose first stage means "surfaced, not yet worked". That is a U12
- * decision, not something to fake here.
+ * The consequence, stated honestly: while `INITIAL_DEAL_STAGE_ID === MEETING_STAGE_ID`
+ * the `meeting_booked` tile reads ZERO. Giving it a real number needs a dedicated
+ * pipeline whose first stage means "surfaced, not yet worked" — at which point the
+ * guard releases itself, because the two constants diverge. That is a U12 decision,
+ * not something to fake here.
  */
 export const INITIAL_DEAL_STAGE_ID = MEETING_STAGE_ID;
 

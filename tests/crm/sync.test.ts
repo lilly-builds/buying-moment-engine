@@ -469,28 +469,22 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
     expect(meeting).toHaveLength(0);
   });
 
-  it("logs meeting_booked when the deal reaches the appointment stage", async () => {
+  it("the appointment stage NEVER books a meeting — it is the stage we create deals in", async () => {
+    // Honest consequence, documented in stages.ts: on HubSpot's DEFAULT pipeline
+    // the first stage is "Appointment Scheduled", which is where the tool puts
+    // every deal it creates. So meeting_booked reads zero. Giving that tile a real
+    // number needs a pipeline whose first stage means "surfaced, not yet worked"
+    // (U12) — at which point this guard releases itself. We do not fake it.
     const practiceId = await seedPractice(t);
     await upsertCrmLink(t.db, { practiceId, dealId: "dl_3" });
-    const mock = hubspotApiMock({
-      deal: {
-        dealstage: "appointmentscheduled",
-        createdate: "2026-07-01T00:00:00Z",
-      },
-    });
-    const adapter = createHubSpotAdapter({
-      fetch: mock.fetch,
-      getAccessToken: async () => "tok",
-      sleep: async () => {},
-    });
 
-    await recordStageForPractice(t.db, adapter, { practiceId });
+    await pollAt(t, practiceId, "appointmentscheduled");
 
     const meeting = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(meeting).toHaveLength(1);
+    expect(meeting).toHaveLength(0);
   });
 
   it("pushing a lead then polling its stage logs NO phantom meeting", async () => {
@@ -523,31 +517,62 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
     expect(pushed).toHaveLength(1);
   });
 
-  it("a deal moved BACK into the appointment stage does not book a second meeting", async () => {
-    // Meeting rescheduled: appointmentscheduled -> qualifiedtobuy -> back again.
-    // Comparing against the previous stage only catches a repeated poll; the
-    // invariant we need is "first time, ever".
-    const practiceId = await seedPractice(t);
-    await upsertCrmLink(t.db, { practiceId, dealId: "dl_revisit" });
+  /** Poll the practice's stage once, with the deal reading back at `dealstage`. */
+  async function pollAt(t: TestDb, practiceId: string, dealstage: string) {
+    const mock = hubspotApiMock({
+      deal: { dealstage, createdate: "2026-07-01T00:00:00Z" },
+    });
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+    return recordStageForPractice(t.db, adapter, { practiceId });
+  }
 
-    const stages = ["appointmentscheduled", "qualifiedtobuy", "appointmentscheduled"];
-    for (const dealstage of stages) {
-      const mock = hubspotApiMock({
-        deal: { dealstage, createdate: "2026-07-01T00:00:00Z" },
-      });
-      const adapter = createHubSpotAdapter({
-        fetch: mock.fetch,
-        getAccessToken: async () => "tok",
-        sleep: async () => {},
-      });
-      await recordStageForPractice(t.db, adapter, { practiceId });
-    }
+  it("PUSHED lead, advanced, then moved BACK to the create stage books NO meeting", async () => {
+    // The path production actually takes. `pushPracticeLead` seeds the created
+    // stage, so poll #1 is silent — which means a "differs from last poll" guard
+    // never primes, and the backwards move looks like a fresh transition into the
+    // meeting stage. No meeting was ever booked: the deal simply returned to the
+    // stage the tool created it in.
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+
+    await pollAt(t, practiceId, "appointmentscheduled"); // first poll
+    await pollAt(t, practiceId, "qualifiedtobuy"); // AE advances it
+    await pollAt(t, practiceId, "appointmentscheduled"); // AE moves it back
 
     const meeting = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(meeting).toHaveLength(1);
+    expect(meeting).toHaveLength(0);
+  });
+
+  it("a crash between the stage write and the event insert does not lose deal_won", async () => {
+    // `upsertCrmLink` commits the stage before the roi_events insert, and they are
+    // not one statement. A guard keyed on "stage differs from last poll" would see
+    // an unchanged stage on every later poll and lose the win permanently. The
+    // exactly-once invariant must re-read roi_events, not a cache of it.
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_crash" });
+    // Simulate the interrupted poll: stage persisted, event never written.
+    await upsertCrmLink(t.db, { practiceId, stage: "closedwon" });
+
+    await pollAt(t, practiceId, "closedwon");
+
+    const won = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "deal_won"));
+    expect(won).toHaveLength(1);
   });
 
   it("a won deal reopened and re-won does not log a second deal_won", async () => {
@@ -627,7 +652,7 @@ describe("ROI event double-count guards (review fixes)", () => {
     expect(events).toHaveLength(1);
   });
 
-  it("recordStageForPractice logs a milestone only on a stage TRANSITION, not on a repeated same-stage poll", async () => {
+  it("recordStageForPractice logs each milestone at most once, however often it is polled", async () => {
     const practiceId = await seedPractice(t);
     await upsertCrmLink(t.db, { practiceId, dealId: "dl_1" });
 
@@ -650,19 +675,20 @@ describe("ROI event double-count guards (review fixes)", () => {
       sleep: async () => {},
     });
 
-    // First poll: stored stage was null → transition → ONE meeting_booked.
+    // The appointment stage is the stage the tool CREATES deals in, so it is never
+    // a milestone — polling it logs nothing, however many times.
     await recordStageForPractice(t.db, adapter, { practiceId });
-    // Second poll: SAME stage → no new milestone (would double-count otherwise).
     await recordStageForPractice(t.db, adapter, { practiceId });
 
     const bookedAfterRepeat = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(bookedAfterRepeat).toHaveLength(1);
+    expect(bookedAfterRepeat).toHaveLength(0);
 
-    // Stage CHANGES → a second (distinct) milestone IS logged.
+    // A real milestone stage IS logged — once, no matter how often it is polled.
     stage = "closedwon";
+    await recordStageForPractice(t.db, adapter, { practiceId });
     await recordStageForPractice(t.db, adapter, { practiceId });
 
     const won = await t.db
@@ -670,12 +696,12 @@ describe("ROI event double-count guards (review fixes)", () => {
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "deal_won"));
     expect(won).toHaveLength(1);
-    // The earlier same-stage poll never added a second meeting_booked.
+    // The appointment-stage polls never added a meeting_booked.
     const bookedFinal = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(bookedFinal).toHaveLength(1);
+    expect(bookedFinal).toHaveLength(0);
   });
 });
 

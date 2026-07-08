@@ -5,7 +5,6 @@ import {
   getActiveConnection,
   loadCrmLink,
   loadConnection,
-  roiCycleTimeReadback,
   storeConnection,
   upsertCrmLink,
 } from "@/db/crm";
@@ -338,11 +337,6 @@ export async function recordStageForPractice(
     throw new Error(`no ${provider} link for practice ${args.practiceId}`);
   }
 
-  // Capture the stored stage BEFORE upsertCrmLink below overwrites it. On a freshly
-  // pushed lead this is the stage the deal was CREATED in.
-  const priorReadback = await roiCycleTimeReadback(db, args.practiceId, provider);
-  const priorStage = priorReadback?.stage ?? null;
-
   const readback = await adapter.recordStage(ref);
 
   await upsertCrmLink(db, {
@@ -353,19 +347,30 @@ export async function recordStageForPractice(
     cycleTimeDays: readback.cycleTimeDays,
   });
 
-  // Three guards, each load-bearing for R12's numbers:
-  //   1. milestone, not any stage — `stageMilestone` returns null for mid-pipeline
-  //      steps and for `closedlost`, so walking the pipeline does not book four
-  //      "meetings" and a lost deal is never counted as a win.
-  //   2. a MOVE, not the stage we put the deal in — a lead we just created sits in
-  //      HubSpot's first stage ("Appointment Scheduled"); reading that back is not
-  //      the AE booking a meeting.
-  //   3. the FIRST time ever, not merely "differs from the last poll" — a deal moved
-  //      back into the appointment stage (meeting rescheduled), or a won deal
-  //      reopened and re-won, must not log the milestone twice.
+  // Two guards, each load-bearing for R12's numbers:
+  //   1. a milestone stage, and not the stage the tool CREATED the deal in.
+  //      `stageMilestone` already returns null for mid-pipeline steps and for
+  //      `closedlost`. The create-stage guard matters because HubSpot's default
+  //      pipeline starts at "Appointment Scheduled": reading that back — on the
+  //      first poll, or after the AE moves a deal back to it — is never the AE
+  //      booking a meeting. The guard releases itself the moment U12 introduces a
+  //      pipeline whose first stage is not the meeting stage.
+  //   2. the FIRST time ever for this practice.
+  //
+  // Deliberately NOT "the stage differs from the last poll". That reads naturally
+  // but is wrong twice over: it misses a REVISIT (a deal moved back into a
+  // milestone stage logs again), and — because the link row is written before the
+  // event, in separate statements — a crash between the two would make every later
+  // poll see an unchanged stage and lose the milestone permanently and silently.
+  // `hasMilestone` carries the exactly-once invariant on its own, and it re-reads
+  // the ground truth (roi_events) rather than a cache of it.
   const milestone = stageMilestone(readback.stage);
-  const moved = readback.stage !== priorStage;
-  if (milestone && moved && !(await hasMilestone(db, args.practiceId, milestone))) {
+  const isCreateStage = readback.stage === INITIAL_DEAL_STAGE_ID;
+  if (
+    milestone &&
+    !isCreateStage &&
+    !(await hasMilestone(db, args.practiceId, milestone))
+  ) {
     await db.insert(roiEvents).values({
       eventType: milestone,
       practiceId: args.practiceId,
