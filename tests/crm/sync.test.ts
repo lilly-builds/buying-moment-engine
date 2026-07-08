@@ -17,12 +17,18 @@ import {
   createDbTokenProvider,
   pushPracticeLead,
   recordStageForPractice,
+  sendReadiness,
   syncLeadQuality,
   syncPracticeLead,
 } from "@/src/crm/sync";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
 import type { LeadInput } from "@/src/crm/adapter";
-import { hubspotApiMock, mockFetch, type FetchCall } from "./mock-fetch";
+import {
+  hubspotApiMock,
+  hubspotConnectMock,
+  mockFetch,
+  type FetchCall,
+} from "./mock-fetch";
 
 const KEY = Buffer.alloc(32, 11);
 
@@ -64,15 +70,7 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
   });
 
   it("stores the tokens ENCRYPTED (ciphertext != plaintext) keyed by portal id", async () => {
-    const { fetch: f } = mockFetch((call) => {
-      if (call.path === "/oauth/v1/token") {
-        return { body: { access_token: "at_live", refresh_token: "rt_live", expires_in: 1800 } };
-      }
-      if (call.path.startsWith("/oauth/v1/access-tokens/")) {
-        return { body: { hub_id: 424242, scopes: ["oauth", "crm.objects.deals.write"] } };
-      }
-      return { status: 404, body: {} };
-    });
+    const { fetch: f } = hubspotConnectMock();
 
     const { portalId, scopes } = await completeHubSpotConnect(t.db, oauthDeps(f), {
       code: "the-code",
@@ -92,6 +90,95 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
     expect(row!.accessTokenEnc).not.toContain("at_live");
     // expiry = now + expires_in
     expect(row!.expiresAt.toISOString()).toBe("2026-07-07T00:30:00.000Z");
+  });
+
+  it("provisions the four tag properties on companies AND deals (idempotently)", async () => {
+    // Without this, the very first pushLead 400s: PROPERTY_DOESNT_EXIST.
+    const mock = hubspotConnectMock();
+    await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), {
+      code: "the-code",
+      encryptionKey: KEY,
+    });
+
+    const propertyCalls = mock.calls.filter(
+      (c) => c.method === "POST" && c.path.startsWith("/crm/v3/properties/"),
+    );
+    const created = propertyCalls
+      .filter((c) => !c.path.endsWith("/groups"))
+      .map((c) => `${c.path}:${(c.body as { name: string }).name}`);
+
+    for (const objectType of ["companies", "deals"]) {
+      for (const p of ["vertical", "signal_source", "signal_count", "ae_quality"]) {
+        expect(created).toContain(`/crm/v3/properties/${objectType}:${p}`);
+      }
+      // The group must be created before its properties reference it.
+      expect(
+        propertyCalls.some((c) => c.path === `/crm/v3/properties/${objectType}/groups`),
+      ).toBe(true);
+    }
+  });
+
+  it("a re-connect to an already-provisioned portal tolerates 409 and still succeeds", async () => {
+    // R17: never blindly overwrite a real record — an existing property answers
+    // 409 and we move on rather than PATCHing over an admin's customisation.
+    const mock = hubspotConnectMock();
+    const args = { code: "the-code", encryptionKey: KEY };
+
+    await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), args);
+    const second = await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), args);
+
+    expect(second.portalId).toBe("424242");
+    // Second pass hit the same routes and got 409s — no throw, one connection row.
+    const rows = await getActiveConnection(t.db);
+    expect(rows.ok).toBe(true);
+  });
+
+  it("reports canSend from the GRANTED scopes, not the requested ones", async () => {
+    const free = hubspotConnectMock({ scopes: ["oauth", "crm.objects.deals.write"] });
+    const freeResult = await completeHubSpotConnect(t.db, oauthDeps(free.fetch), {
+      code: "c1",
+      encryptionKey: KEY,
+    });
+    expect(freeResult.canSend).toBe(false);
+
+    const pro = hubspotConnectMock({
+      hubId: 999,
+      scopes: ["oauth", "automation.sequences.enrollments.write"],
+    });
+    const proResult = await completeHubSpotConnect(t.db, oauthDeps(pro.fetch), {
+      code: "c2",
+      encryptionKey: KEY,
+    });
+    expect(proResult.canSend).toBe(true);
+  });
+
+  it("surfaces a property-provisioning failure rather than reporting a healthy connect", async () => {
+    // A portal missing crm.schemas.*.write 403s. Silently swallowing that would
+    // hand the AE a CRM connection whose first lead push fails.
+    const forbidden = hubspotConnectMock({ propertiesForbidden: true });
+    await expect(
+      completeHubSpotConnect(t.db, oauthDeps(forbidden.fetch), {
+        code: "the-code",
+        encryptionKey: KEY,
+      }),
+    ).rejects.toThrow(/403/);
+  });
+
+  it("a FAILED connect persists NO connection — no usable-looking state left behind", async () => {
+    // Storing the tokens before provisioning meant the user was told "connect
+    // failed" while getActiveConnection still resolved and sendReadiness reported
+    // connected:true — every later push then died with an opaque 502.
+    const forbidden = hubspotConnectMock({ propertiesForbidden: true });
+    await expect(
+      completeHubSpotConnect(t.db, oauthDeps(forbidden.fetch), {
+        code: "the-code",
+        encryptionKey: KEY,
+      }),
+    ).rejects.toThrow();
+
+    const active = await getActiveConnection(t.db);
+    expect(active.ok).toBe(false);
+    expect(await sendReadiness(t.db)).toEqual({ connected: false, canSend: false });
   });
 });
 
@@ -253,6 +340,56 @@ describe("pushPracticeLead (idempotent push + ROI event)", () => {
       .from(crmLinks)
       .where(eq(crmLinks.practiceId, practiceId));
     expect(links).toHaveLength(1);
+
+    // …and the lead IS counted, exactly once. Keying `lead_pushed` off "was the
+    // company created" lost it entirely here: the retry saw an existing companyId,
+    // reported created:false, and never logged the push that actually landed.
+    const pushed = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("re-pushing an already-landed lead logs no second lead_pushed", async () => {
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+
+    const pushed = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("a re-push does NOT clobber the stored stage the AE has moved the deal to", async () => {
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    // The AE advanced the deal; a later poll persisted that.
+    await upsertCrmLink(t.db, { practiceId, stage: "closedwon", cycleTimeDays: 5 });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+
+    const [link] = await t.db
+      .select()
+      .from(crmLinks)
+      .where(eq(crmLinks.practiceId, practiceId));
+    expect(link.stage).toBe("closedwon");
   });
 });
 
@@ -279,6 +416,7 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
         dealstage: "closedwon",
         createdate: "2026-07-01T00:00:00Z",
         closedate: "2026-07-06T00:00:00Z",
+        hs_v2_date_entered_closedwon: "2026-07-06T00:00:00Z",
       },
     });
     const adapter = createHubSpotAdapter({
@@ -300,7 +438,7 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
     expect(won).toHaveLength(1);
   });
 
-  it("a closed-LOST deal is NOT logged as a win", async () => {
+  it("a closed-LOST deal logs NEITHER a win NOR a meeting", async () => {
     const practiceId = await seedPractice(t);
     await upsertCrmLink(t.db, { practiceId, dealId: "dl_2" });
     const mock = hubspotApiMock({
@@ -323,11 +461,164 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "deal_won"));
     expect(won).toHaveLength(0);
+    // A lost deal is not a booked meeting either — `stageMilestone` returns null.
     const meeting = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(meeting).toHaveLength(1);
+    expect(meeting).toHaveLength(0);
+  });
+
+  it("the appointment stage NEVER books a meeting — it is the stage we create deals in", async () => {
+    // Honest consequence, documented in stages.ts: on HubSpot's DEFAULT pipeline
+    // the first stage is "Appointment Scheduled", which is where the tool puts
+    // every deal it creates. So meeting_booked reads zero. Giving that tile a real
+    // number needs a pipeline whose first stage means "surfaced, not yet worked"
+    // (U12) — at which point this guard releases itself. We do not fake it.
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_3" });
+
+    await pollAt(t, practiceId, "appointmentscheduled");
+
+    const meeting = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "meeting_booked"));
+    expect(meeting).toHaveLength(0);
+  });
+
+  it("pushing a lead then polling its stage logs NO phantom meeting", async () => {
+    // The deal is CREATED in HubSpot's first stage (appointmentscheduled), so an
+    // unguarded first poll would read that as a transition into the meeting stage
+    // and book a meeting for every lead the tool ever pushed.
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock({
+      deal: { dealstage: "appointmentscheduled", createdate: "2026-07-01T00:00:00Z" },
+    });
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    await recordStageForPractice(t.db, adapter, { practiceId });
+
+    const meeting = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "meeting_booked"));
+    expect(meeting).toHaveLength(0);
+    // The push itself is still logged, exactly once.
+    const pushed = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(pushed).toHaveLength(1);
+  });
+
+  /** Poll the practice's stage once, with the deal reading back at `dealstage`. */
+  async function pollAt(t: TestDb, practiceId: string, dealstage: string) {
+    const mock = hubspotApiMock({
+      deal: { dealstage, createdate: "2026-07-01T00:00:00Z" },
+    });
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+    return recordStageForPractice(t.db, adapter, { practiceId });
+  }
+
+  it("PUSHED lead, advanced, then moved BACK to the create stage books NO meeting", async () => {
+    // The path production actually takes. `pushPracticeLead` seeds the created
+    // stage, so poll #1 is silent — which means a "differs from last poll" guard
+    // never primes, and the backwards move looks like a fresh transition into the
+    // meeting stage. No meeting was ever booked: the deal simply returned to the
+    // stage the tool created it in.
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+
+    await pollAt(t, practiceId, "appointmentscheduled"); // first poll
+    await pollAt(t, practiceId, "qualifiedtobuy"); // AE advances it
+    await pollAt(t, practiceId, "appointmentscheduled"); // AE moves it back
+
+    const meeting = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "meeting_booked"));
+    expect(meeting).toHaveLength(0);
+  });
+
+  it("a crash between the stage write and the event insert does not lose deal_won", async () => {
+    // `upsertCrmLink` commits the stage before the roi_events insert, and they are
+    // not one statement. A guard keyed on "stage differs from last poll" would see
+    // an unchanged stage on every later poll and lose the win permanently. The
+    // exactly-once invariant must re-read roi_events, not a cache of it.
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_crash" });
+    // Simulate the interrupted poll: stage persisted, event never written.
+    await upsertCrmLink(t.db, { practiceId, stage: "closedwon" });
+
+    await pollAt(t, practiceId, "closedwon");
+
+    const won = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "deal_won"));
+    expect(won).toHaveLength(1);
+  });
+
+  it("a won deal reopened and re-won does not log a second deal_won", async () => {
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_reopen" });
+
+    const stages = ["closedwon", "contractsent", "closedwon"];
+    for (const dealstage of stages) {
+      const mock = hubspotApiMock({
+        deal: {
+          dealstage,
+          createdate: "2026-07-01T00:00:00Z",
+          hs_v2_date_entered_closedwon: "2026-07-06T00:00:00Z",
+        },
+      });
+      const adapter = createHubSpotAdapter({
+        fetch: mock.fetch,
+        getAccessToken: async () => "tok",
+        sleep: async () => {},
+      });
+      await recordStageForPractice(t.db, adapter, { practiceId });
+    }
+
+    const won = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "deal_won"));
+    expect(won).toHaveLength(1);
+  });
+
+  it("a mid-pipeline stage logs NO milestone (walking the pipeline is not 4 meetings)", async () => {
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_4" });
+    const mock = hubspotApiMock({
+      deal: { dealstage: "presentationscheduled", createdate: "2026-07-01T00:00:00Z" },
+    });
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    await recordStageForPractice(t.db, adapter, { practiceId });
+
+    const all = await t.db.select().from(roiEvents);
+    expect(all).toHaveLength(0);
   });
 });
 
@@ -361,7 +652,7 @@ describe("ROI event double-count guards (review fixes)", () => {
     expect(events).toHaveLength(1);
   });
 
-  it("recordStageForPractice logs a milestone only on a stage TRANSITION, not on a repeated same-stage poll", async () => {
+  it("recordStageForPractice logs each milestone at most once, however often it is polled", async () => {
     const practiceId = await seedPractice(t);
     await upsertCrmLink(t.db, { practiceId, dealId: "dl_1" });
 
@@ -384,19 +675,20 @@ describe("ROI event double-count guards (review fixes)", () => {
       sleep: async () => {},
     });
 
-    // First poll: stored stage was null → transition → ONE meeting_booked.
+    // The appointment stage is the stage the tool CREATES deals in, so it is never
+    // a milestone — polling it logs nothing, however many times.
     await recordStageForPractice(t.db, adapter, { practiceId });
-    // Second poll: SAME stage → no new milestone (would double-count otherwise).
     await recordStageForPractice(t.db, adapter, { practiceId });
 
     const bookedAfterRepeat = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(bookedAfterRepeat).toHaveLength(1);
+    expect(bookedAfterRepeat).toHaveLength(0);
 
-    // Stage CHANGES → a second (distinct) milestone IS logged.
+    // A real milestone stage IS logged — once, no matter how often it is polled.
     stage = "closedwon";
+    await recordStageForPractice(t.db, adapter, { practiceId });
     await recordStageForPractice(t.db, adapter, { practiceId });
 
     const won = await t.db
@@ -404,12 +696,12 @@ describe("ROI event double-count guards (review fixes)", () => {
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "deal_won"));
     expect(won).toHaveLength(1);
-    // The earlier same-stage poll never added a second meeting_booked.
+    // The appointment-stage polls never added a meeting_booked.
     const bookedFinal = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
-    expect(bookedFinal).toHaveLength(1);
+    expect(bookedFinal).toHaveLength(0);
   });
 });
 
