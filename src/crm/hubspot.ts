@@ -167,6 +167,9 @@ interface HubSpotObject {
 
 const DEFAULT_BASE = "https://api.hubapi.com";
 
+/** Bounded network timeout — a stalled HubSpot response must not hang the live route. */
+export const HUBSPOT_FETCH_TIMEOUT_MS = 15_000;
+
 export function createHubSpotAdapter(deps: HubSpotDeps): CrmAdapter {
   const base = deps.baseUrl ?? DEFAULT_BASE;
   const maxRetries = deps.maxRetries ?? 5;
@@ -188,6 +191,7 @@ export function createHubSpotAdapter(deps: HubSpotDeps): CrmAdapter {
           "Content-Type": "application/json",
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(HUBSPOT_FETCH_TIMEOUT_MS),
       });
 
       if (res.status === 429 && attempt < maxRetries) {

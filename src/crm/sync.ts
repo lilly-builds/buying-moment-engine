@@ -4,6 +4,7 @@ import {
   getActiveConnection,
   loadCrmLink,
   loadConnection,
+  roiCycleTimeReadback,
   storeConnection,
   upsertCrmLink,
 } from "@/db/crm";
@@ -164,17 +165,25 @@ export async function pushPracticeLead(
     syncedAt: new Date(),
   });
 
-  await db.insert(roiEvents).values({
-    eventType: "lead_pushed",
-    practiceId: args.practiceId,
-    vertical: args.lead.tags.vertical,
-    payload: {
-      companyId: result.companyId,
-      contactId: result.contactId,
-      dealId: result.dealId,
-      created: result.created,
-    },
-  });
+  // Log lead_pushed ONLY on a create — an idempotent re-sync of an
+  // already-landed lead (created:false) must not log a second lead_pushed,
+  // which would over-count the ROI number R8 measures.
+  // KNOWN RESIDUAL (U12): a partial first push then a successful retry can
+  // UNDER-log by one; the complete fix is a DB uniqueness constraint on the
+  // ROI event, deferred to U12.
+  if (result.created) {
+    await db.insert(roiEvents).values({
+      eventType: "lead_pushed",
+      practiceId: args.practiceId,
+      vertical: args.lead.tags.vertical,
+      payload: {
+        companyId: result.companyId,
+        contactId: result.contactId,
+        dealId: result.dealId,
+        created: result.created,
+      },
+    });
+  }
 
   return result;
 }
@@ -269,6 +278,11 @@ export async function recordStageForPractice(
   if (!ref) {
     throw new Error(`no ${provider} link for practice ${args.practiceId}`);
   }
+  // Capture the stored stage BEFORE upsertCrmLink below overwrites it, so we
+  // can tell a real stage TRANSITION from a repeated poll of an unchanged stage.
+  const priorReadback = await roiCycleTimeReadback(db, args.practiceId, provider);
+  const priorStage = priorReadback?.stage ?? null;
+
   const readback = await adapter.recordStage(ref);
 
   await upsertCrmLink(db, {
@@ -279,15 +293,19 @@ export async function recordStageForPractice(
     cycleTimeDays: readback.cycleTimeDays,
   });
 
-  // Gate on the WON stage, not on closedAt — HubSpot sets `closedate` for
-  // closed-LOST too, so keying off it would log every lost deal as a win and
-  // inflate the exact ROI number R8 measures. "closedwon" is HubSpot's default
-  // won-stage id (verify the portal's stage ids live in U15).
-  await db.insert(roiEvents).values({
-    eventType: readback.stage === "closedwon" ? "deal_won" : "meeting_booked",
-    practiceId: args.practiceId,
-    payload: { stage: readback.stage, cycleTimeDays: readback.cycleTimeDays },
-  });
+  // Log a milestone ONLY on an actual stage TRANSITION — a repeated poll that
+  // reads back the SAME stage must not log a second milestone, which would
+  // over-count the ROI number R8 measures on repeated stage polls.
+  // The WON gate stays: HubSpot sets `closedate` for closed-LOST too, so keying
+  // a "win" off closedAt would log every lost deal as a win. "closedwon" is
+  // HubSpot's default won-stage id (verify the portal's stage ids live in U15).
+  if (readback.stage && readback.stage !== priorStage) {
+    await db.insert(roiEvents).values({
+      eventType: readback.stage === "closedwon" ? "deal_won" : "meeting_booked",
+      practiceId: args.practiceId,
+      payload: { stage: readback.stage, cycleTimeDays: readback.cycleTimeDays },
+    });
+  }
 
   return readback;
 }

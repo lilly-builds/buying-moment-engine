@@ -94,6 +94,8 @@ const ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs";
 const ADZUNA_COUNTRY = "us";
 /** Free developer tier today — U15 must confirm before scaling query volume. */
 export const ADZUNA_UNIT_COST_USD = 0;
+/** Bounded network timeout — a hung upstream must not block the sequential detector cron. */
+export const DETECTOR_FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Real I/O: calls the live Adzuna Jobs API. Requires `ADZUNA_APP_ID` /
@@ -115,7 +117,9 @@ export async function fetchAdzunaJobs(query: StaffingSpikeQuery): Promise<unknow
   url.searchParams.set("what", query.what);
   url.searchParams.set("content-type", "application/json");
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(DETECTOR_FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new Error(`Adzuna API error: ${res.status} ${res.statusText}`);
   }

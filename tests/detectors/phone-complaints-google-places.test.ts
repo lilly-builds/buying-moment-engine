@@ -24,31 +24,41 @@ describe("normalizePlaceReviewsToCandidate", () => {
     warnSpy.mockRestore();
   });
 
-  it("normalizes flagged reviews into a SignalCandidate citing the place's Google URL", () => {
+  it("aggregates flagged reviews into ONE SignalCandidate atom carrying the MAX confidence", () => {
     const parsed = googlePlaceDetailsResponseSchema.parse(fixture);
     const candidate = normalizePlaceReviewsToCandidate(parsed, QUERY, NOW);
 
     expect(candidate).not.toBeNull();
     expect(candidate?.kind).toBe("phone_complaints");
     expect(candidate?.practiceHint).toBe("Sunshine Dermatology");
-    // Fixture has 4 reviews: Jane + Priya flag, Marcus + Devon don't -> 2 atoms.
-    expect(candidate?.evidence).toHaveLength(2);
-    expect(candidate?.confidence).toBeGreaterThan(0);
-    expect(candidate?.confidence).toBeLessThanOrEqual(1);
-    for (const atom of candidate?.evidence ?? []) {
-      expect(atom.sourceUrl).toBe("https://maps.google.com/?cid=1234567890");
-    }
+    // Fixture: Jane (max phrase conf 0.9) + Priya (0.85) flag; Marcus + Devon
+    // don't. All would share this place's single URL, so the framework's
+    // sourceUrl dedupe collapses same-URL atoms at ingest — emit exactly ONE
+    // aggregated atom that carries the MAX confidence, never N per-review atoms.
+    expect(candidate?.evidence).toHaveLength(1);
+    expect(candidate?.confidence).toBe(0.9);
+    expect(candidate?.evidence[0].confidence).toBe(0.9);
+    expect(candidate?.evidence[0].sourceUrl).toBe("https://maps.google.com/?cid=1234567890");
+    // The claim summarizes the count + the distinct closed-vocabulary categories.
+    expect(candidate?.evidence[0].claim).toContain("2 Google reviews");
+    expect(candidate?.evidence[0].claim).toContain("cannot-get-through");
+    expect(candidate?.evidence[0].claim).toContain("long-hold");
   });
 
   it("never stores the raw review text as a snippet on the Google path (ToS guard)", () => {
     const parsed = googlePlaceDetailsResponseSchema.parse(fixture);
     const candidate = normalizePlaceReviewsToCandidate(parsed, QUERY, NOW);
 
+    expect(candidate?.evidence).toHaveLength(1);
     for (const atom of candidate?.evidence ?? []) {
       expect(atom.snippet).toBeUndefined();
       expect(atom.claim).toContain(QUERY.placeId);
+      // The claim carries only place_id + closed-vocab categories + count —
+      // never a word of any review's own text.
       expect(atom.claim).not.toContain("can't get through");
       expect(atom.claim).not.toContain("Left on hold");
+      expect(atom.claim).not.toContain("nightmare");
+      expect(atom.claim).not.toContain("20 minutes");
     }
   });
 

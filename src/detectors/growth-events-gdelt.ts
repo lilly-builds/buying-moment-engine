@@ -89,6 +89,8 @@ export function normalizeArticleToCandidate(
 const GDELT_BASE_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
 /** Keyless, free-tier API today — metered at $0 for a complete R19 ledger (see recon memo). */
 export const GDELT_UNIT_COST_USD = 0;
+/** Bounded network timeout — a hung upstream must not block the sequential detector cron. */
+export const DETECTOR_FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Real I/O: calls the live GDELT DOC 2.0 API. No key required. Never called in
@@ -101,7 +103,9 @@ export async function fetchGdeltArticles(query: GrowthEventsQuery): Promise<unkn
   url.searchParams.set("format", "json");
   url.searchParams.set("maxrecords", String(query.maxRecords ?? 75));
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(DETECTOR_FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new Error(`GDELT API error: ${res.status} ${res.statusText}`);
   }

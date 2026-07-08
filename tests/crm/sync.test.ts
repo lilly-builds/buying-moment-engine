@@ -191,12 +191,13 @@ describe("pushPracticeLead (idempotent push + ROI event)", () => {
     expect(links[0].companyId).toBe("co_1");
     expect(links[0].dealId).toBe("dl_1");
 
-    // both pushes logged a lead_pushed ROI event
+    // only the CREATE logged a lead_pushed ROI event — the idempotent re-push
+    // (created:false) must NOT log a second, or the ROI number double-counts.
     const events = await t.db
       .select()
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "lead_pushed"));
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(1);
     expect(events[0].vertical).toBe("dermatology");
   });
 
@@ -327,6 +328,88 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "meeting_booked"));
     expect(meeting).toHaveLength(1);
+  });
+});
+
+describe("ROI event double-count guards (review fixes)", () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await createTestDb();
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("pushPracticeLead twice (second is an idempotent re-push) logs exactly ONE lead_pushed", async () => {
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    const first = await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    expect(first.created).toBe(true);
+    const second = await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    expect(second.created).toBe(false); // idempotent re-push, no new record
+
+    const events = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(events).toHaveLength(1);
+  });
+
+  it("recordStageForPractice logs a milestone only on a stage TRANSITION, not on a repeated same-stage poll", async () => {
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_1" });
+
+    let stage = "appointmentscheduled";
+    const { fetch: f } = mockFetch((call) => {
+      const { method, path } = call;
+      if (method === "GET" && path.includes("/deals/")) {
+        return {
+          body: {
+            id: "dl_1",
+            properties: { dealstage: stage, createdate: "2026-07-01T00:00:00Z" },
+          },
+        };
+      }
+      return { status: 404, body: {} };
+    });
+    const adapter = createHubSpotAdapter({
+      fetch: f,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    // First poll: stored stage was null → transition → ONE meeting_booked.
+    await recordStageForPractice(t.db, adapter, { practiceId });
+    // Second poll: SAME stage → no new milestone (would double-count otherwise).
+    await recordStageForPractice(t.db, adapter, { practiceId });
+
+    const bookedAfterRepeat = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "meeting_booked"));
+    expect(bookedAfterRepeat).toHaveLength(1);
+
+    // Stage CHANGES → a second (distinct) milestone IS logged.
+    stage = "closedwon";
+    await recordStageForPractice(t.db, adapter, { practiceId });
+
+    const won = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "deal_won"));
+    expect(won).toHaveLength(1);
+    // The earlier same-stage poll never added a second meeting_booked.
+    const bookedFinal = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "meeting_booked"));
+    expect(bookedFinal).toHaveLength(1);
   });
 });
 

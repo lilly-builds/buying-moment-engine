@@ -95,25 +95,41 @@ export function normalizePlaceReviewsToCandidate(
 
   const placeUrl = response.result.url ?? googleMapsUrlFromPlaceId(query.placeId);
 
-  const evidence: CandidateEvidence[] = [];
+  // Aggregate across all flagged reviews into ONE evidence atom. Every atom
+  // here would share this place's single `sourceUrl`, so the framework's
+  // `kind|sourceUrl|practiceHint` dedupe (src/engine/detector.ts) collapses
+  // same-URL atoms to one raw signal at ingest — emitting one atom per review
+  // silently drops N-1 and keeps the FIRST review's confidence, not the max.
+  // Emit one atom carrying the max confidence + a count/category summary.
+  let flaggedCount = 0;
   let maxConfidence = 0;
+  const categories = new Set<string>();
 
   for (const review of reviews) {
     const classification = classifyPhoneComplaint(review.text);
     if (!classification.isPhoneComplaint) continue;
 
+    flaggedCount += 1;
     maxConfidence = Math.max(maxConfidence, classification.confidence);
-    evidence.push({
-      // R5 citation + Google ToS: never store review text. The claim carries
-      // only the place_id (the field Google permits storing long-lived) and
-      // our own closed-vocabulary category — no `snippet` on this path.
-      claim: `Phone-access complaint detected in a Google review for place_id "${query.placeId}" (category: "${classification.category}")`,
-      sourceUrl: placeUrl,
-      confidence: classification.confidence,
-    });
+    if (classification.category) categories.add(classification.category);
   }
 
-  if (evidence.length === 0) return null;
+  if (flaggedCount === 0) return null;
+
+  const sortedCategories = [...categories].sort();
+  const reviewWord = flaggedCount === 1 ? "review" : "reviews";
+
+  const evidence: CandidateEvidence[] = [
+    {
+      // R5 citation + Google ToS: never store review text. The claim carries
+      // only the place_id (the field Google permits storing long-lived), the
+      // count of flagged reviews, and our own closed-vocabulary categories —
+      // never a word of any review. No `snippet` on this path.
+      claim: `Phone-access complaints detected in ${flaggedCount} Google ${reviewWord} for place_id "${query.placeId}" (categories: ${sortedCategories.join(", ")})`,
+      sourceUrl: placeUrl,
+      confidence: maxConfidence,
+    },
+  ];
 
   const candidate: SignalCandidate = {
     practiceHint: query.practiceHint,
@@ -129,6 +145,8 @@ export function normalizePlaceReviewsToCandidate(
 const GOOGLE_PLACES_BASE_URL = "https://maps.googleapis.com/maps/api/place/details/json";
 /** Places API "Atmosphere Data" SKU (includes reviews) — confirm actual billed tier before scaling (U15). */
 export const GOOGLE_PLACES_UNIT_COST_USD = 0.005;
+/** Bounded network timeout — a hung upstream must not block the sequential detector cron. */
+export const DETECTOR_FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Real I/O: calls the live Google Places Details API. Requires
@@ -148,7 +166,9 @@ export async function fetchGooglePlaceDetails(query: PhoneComplaintsQuery): Prom
   url.searchParams.set("fields", "place_id,name,url,reviews");
   url.searchParams.set("key", apiKey);
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(DETECTOR_FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new Error(`Google Places API error: ${res.status} ${res.statusText}`);
   }

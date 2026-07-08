@@ -29,6 +29,9 @@ export const HUBSPOT_AUTHORIZE_BASE = "https://app.hubspot.com/oauth/authorize";
 /** Refresh this many ms BEFORE the token actually expires (clock-skew guard). */
 export const DEFAULT_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
+/** Bounded network timeout — a stalled OAuth token response must not hang the live route. */
+export const HUBSPOT_FETCH_TIMEOUT_MS = 15_000;
+
 export interface TokenSet {
   accessToken: string;
   refreshToken: string;
@@ -110,6 +113,7 @@ async function postTokenForm(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(form).toString(),
+    signal: AbortSignal.timeout(HUBSPOT_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
     // Never surface the response body — it can echo the client secret.
@@ -161,6 +165,7 @@ export async function fetchTokenMeta(
 ): Promise<TokenMeta> {
   const res = await deps.fetch(
     `${baseOf(deps)}/oauth/v1/access-tokens/${encodeURIComponent(accessToken)}`,
+    { signal: AbortSignal.timeout(HUBSPOT_FETCH_TIMEOUT_MS) },
   );
   if (!res.ok) {
     throw new Error(`HubSpot token-meta lookup failed with ${res.status}`);
