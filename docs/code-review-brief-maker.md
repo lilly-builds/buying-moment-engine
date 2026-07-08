@@ -1,15 +1,54 @@
 # Code review — U6 brief synthesizer
 
-**Branch:** `wave-3-u6` (9 commits on top of `wave-3-u5`) · **Date:** 2026-07-08
-**Status:** built and gated, **NOT merged, no PR opened. NOT ready to merge — see P1s below.**
-**Gates:** `tsc --noEmit` clean · `eslint` clean (0 errors) · `npm test` **705 passed, 2 consecutive full runs**.
+**Branch:** `wave-3-u6` (15 commits on top of `wave-3-u5`) · **Date:** 2026-07-08
+**Status:** built and gated. **All P1/P2/P3 findings below are FIXED** (see Resolution). Still NOT merged,
+no PR opened — a human opens the PR.
+**Gates:** `tsc --noEmit` clean · `eslint` clean (0 errors) · `npm test` **737 passed, 2 consecutive full runs**.
 **Live path exercised once:** one real Opus 4.8 call — HTTP 200, all three gates passed, **$0.0581**, 28.0s.
 **Fresh-eyes review:** a skeptic subagent that did not write the code reviewed `b37ddb9` and reproduced
-**five** defects. Three are requirement violations.
+**five** defects; the live call and a re-read surfaced four more. All nine are addressed below.
 
-> **Do not fix these in the session that wrote them.** Compact first, then work them in order.
-> **Fix P1-1 first**: a zero-signal brief can render a model-invented buying moment citing no evidence at
-> all — the single thing the two-stage architecture exists to make impossible.
+---
+
+## Resolution (2026-07-08) — all findings fixed, after compaction
+
+Fixed in six focused commits on `wave-3-u6`, each carrying a test that FAILS without it. Positive controls
+were re-run by reverting the guard in isolation: P1-1, P1-3 and P2-7 each fail their new tests when the fix
+is neutered and pass when restored.
+
+| Finding | Fix commit | The guard that now holds |
+|---|---|---|
+| **P1-1** | `5fde3e0` | Closure gate rejects `factual.zeroSignal !== (voice.headline === null)`, both directions. Render belt resolves the headline on `factual.zeroSignal`, not on the model's prose. |
+| **P1-2** | `5fde3e0`, `aaa70d8` | `renderBrief` shows the headline only while one of its `headlineEvidenceIds` is still a fresh signal (the render-time mirror of `headlineCitesASignal`), else the constant. Exposes `stale`. The follow-up closed the *partial-expiry* hole a count-only check missed. |
+| **P1-3** | `124637b` | Corpus split: pack numbers ground ONLY `objections[].rebuttal`; a pack number anywhere else is `ungrounded-number`. `personalizationSnippet` must cite ≥1 evidence id. |
+| **P2-4** | `d221896` | `stream: true`; the voice client folds a mid-body abort into a priced response. The transport-gate comment is corrected — streaming is what makes "a throw is unbilled" true. |
+| **P2-5** | `124637b` | `groundingParts(input, freshSignals)` — an expired signal's digits no longer ground prose. `ehrSignals[].name` and the `website` URL value dropped from the corpus. |
+| **P2-6** | `71ad428` | `MEETING_DURATION` allowlists proposal lengths (10/15/20/25/30/45/60); "a 12 minute call" is now caught. |
+| **P2-7** | `71ad428` | `wordNumbersToDigits` folds spelled-out numbers to digits before extraction, on both prose and corpus; "forty percent" is caught, "one" and ordinals are left alone. Our-ask durations (minutes and seconds, word or digit) stay exempt. |
+| **P2-8** | `496b995`, `aaa70d8` | Prompt rule forbids quantifying the evidence; a narrow `vague-quantifier` lint on headline/callOpener/personalizationSnippet. The follow-up exempts a vague *time-ask* ("a few minutes") so a CTA does not cost a retry. |
+| **P3-9** | `9a657d6` | `citationHref` deep-links only http(s) sources; a mailto/tel/ftp source degrades to the bare link. |
+
+**Fresh-eyes verification.** A second skeptic pass (that did not write the fixes) reviewed the whole fix
+diff and returned **SHIP**. It confirmed the P1s and P2s are correctly closed, and found two residuals,
+both now handled in `aaa70d8`: **finding 1** — the P1-2 belt keyed on `signalCount === 0` and so still
+showed a headline whose *own* signal had expired while an unrelated one kept the count at 1 (a real KTD
+violation, now fixed); **finding 3** — a vague time-ask tripped the P2-8 lint (a false positive, now
+exempted).
+
+**Two items remain on the record, neither a blocker:**
+- **Accepted residual (finding 2).** An allowlisted meeting length + a session noun ("a 15-minute call")
+  is exempt from the number gate regardless of whose meeting it is, so "your team burns a 15-minute call
+  on every reschedule" is not flagged. This is strictly narrower than the pre-P2-6 behaviour and is the
+  tradeoff the review chose; distinguishing our proposal from their statistic needs subject/verb parsing,
+  out of scope for U6. Semantic support is the human sample review at U15.
+- **One live call owed before the U15 seeding run (finding 4).** `stream: true` was added to a request
+  that also carries `output_config.format` (structured outputs). The reuse of `consumeSseStream` is
+  covered by the enrich suite against real SSE fixtures, and `buildVoiceRequestBody` is unit-pinned, but
+  streamed-structured-output has not been exercised end-to-end against the live API. This worktree's
+  `.env.local` has no usable `ANTHROPIC_API_KEY`, so it could not be run here.
+
+The nine findings below are the ORIGINAL review, kept verbatim for the record. Read them for the
+reproductions and the reasoning; the tables above are the current state.
 
 ---
 
