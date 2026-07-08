@@ -362,6 +362,38 @@ describe("enrichment waterfall (integration)", () => {
     expect(await t.db.select().from(practiceFacts)).toHaveLength(5);
     expect(await t.db.select().from(contacts)).toHaveLength(1);
   });
+
+  it("COST GUARD: a re-run does NOT re-buy a gap the database already filled", async () => {
+    const practiceId = await seedPractice(
+      "Sunshine Dermatology Associates",
+      "miami-fl",
+    );
+    // ONE client + ONE meter across both runs, so the call and the money are counted
+    // end-to-end rather than reset between them.
+    const pdl = FakePdlClient.fromFixture(personMatch);
+    const { meter, rows } = recordingMeter();
+    const d: WaterfallDeps = {
+      db: t.db,
+      research: FakeResearchClient.fromFixture(researchFixture),
+      pdl,
+      meter,
+      now: () => NOW,
+      logger: SILENT,
+    };
+    const practice = { id: practiceId, name: "Sunshine Dermatology Associates" };
+
+    const first = await enrichPractice(d, practice);
+    const second = await enrichPractice(d, practice);
+
+    expect(first.pdlCalls).toBe(1);
+    // Claude leaves the same gap again, but the stored contact now fills it — and
+    // `upsertContact` would discard whatever PDL returned anyway.
+    expect(second.pdlCalls).toBe(0);
+    expect(pdl.personCalls).toHaveLength(1);
+    expect(rows.filter((r) => r.provider === "pdl")).toHaveLength(1);
+    // The Claude call is NOT cached; it is bought again, and metered again.
+    expect(rows.filter((r) => r.provider === "anthropic")).toHaveLength(2);
+  });
 });
 
 describe("enrichment persistence primitives", () => {

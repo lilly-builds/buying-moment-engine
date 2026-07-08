@@ -4,7 +4,12 @@ import researchFixture from "./fixtures/anthropic-research-response.json";
 import roleOnly from "./fixtures/anthropic-research-role-only.json";
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
 import { parseResearchOutput } from "@/src/enrich/research-schema";
-import { computeGaps, factsFromFindings, hasGap } from "@/src/enrich/gaps";
+import {
+  computeGaps,
+  factsFromFindings,
+  hasGap,
+  subtractFilled,
+} from "@/src/enrich/gaps";
 import type { ResearchFindings } from "@/src/enrich/types";
 
 /**
@@ -55,6 +60,46 @@ describe("computeGaps — the cost guard, in pure form", () => {
       snippet: "Connect on LinkedIn",
     };
     expect(computeGaps(findings)).toEqual({ email: true, linkedinUrl: false });
+  });
+});
+
+describe("subtractFilled — the DB closes gaps too, so a re-run does not re-spend", () => {
+  const BOTH_GAPS = { email: true, linkedinUrl: true };
+
+  it("clears a gap the stored contact already fills", () => {
+    expect(
+      subtractFilled(BOTH_GAPS, {
+        email: "dana@sunshinederm.example",
+        linkedinUrl: null,
+      }),
+    ).toEqual({ email: false, linkedinUrl: true });
+  });
+
+  it("a fully-filled stored contact leaves NO gap — PDL is never called again", () => {
+    const gaps = subtractFilled(BOTH_GAPS, {
+      email: "dana@sunshinederm.example",
+      linkedinUrl: "https://linkedin.com/in/dana",
+    });
+    expect(hasGap(gaps)).toBe(false);
+  });
+
+  it("no stored contact yet -> the gaps stand untouched", () => {
+    expect(subtractFilled(BOTH_GAPS, null)).toEqual(BOTH_GAPS);
+  });
+
+  it("an empty stored contact fills nothing", () => {
+    expect(
+      subtractFilled(BOTH_GAPS, { email: null, linkedinUrl: null }),
+    ).toEqual(BOTH_GAPS);
+  });
+
+  it("never OPENS a gap Claude already closed", () => {
+    expect(
+      subtractFilled({ email: false, linkedinUrl: false }, {
+        email: null,
+        linkedinUrl: null,
+      }),
+    ).toEqual({ email: false, linkedinUrl: false });
   });
 });
 

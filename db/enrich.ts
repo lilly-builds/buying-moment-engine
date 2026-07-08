@@ -116,6 +116,31 @@ export type UpsertContactResult = {
   filled: string[];
 };
 
+export type StoredContact = typeof contacts.$inferSelect;
+
+/**
+ * The practice's stored decision-maker, or null. Read BEFORE the waterfall spends on
+ * PDL: `upsertContact` fills NULL columns only, so buying a field the row already
+ * holds produces a value that is written nowhere. Idempotent on data is not enough —
+ * a re-run must be idempotent on SPEND too.
+ *
+ * Scoped to the practice, not to (practice, role): this pipeline resolves exactly one
+ * decision-maker per practice, and the question being asked is "do we already own this
+ * practice's email?", not "do we own this exact job title's email?".
+ */
+export async function getContact(
+  db: Database,
+  practiceId: string,
+): Promise<StoredContact | null> {
+  const [row] = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.practiceId, practiceId))
+    .orderBy(contacts.createdAt)
+    .limit(1);
+  return row ?? null;
+}
+
 /**
  * Upsert the practice's decision-maker, keyed on (practice_id, role). No unique
  * constraint exists on `contacts`, so this is an explicit check-existence-then-write

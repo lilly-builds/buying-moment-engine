@@ -31,6 +31,31 @@ export function hasGap(gaps: Gaps): boolean {
   return gaps.email || gaps.linkedinUrl;
 }
 
+/** The subset of a stored `contacts` row that can close a gap. */
+export interface StoredContactFields {
+  email: string | null;
+  linkedinUrl: string | null;
+}
+
+/**
+ * Subtract what the DATABASE already holds from what Claude left blank.
+ *
+ * `computeGaps` sees only the FRESH findings, so a re-run of the same practice
+ * re-opens the email gap Claude never fills, calls PDL again (real money), and then
+ * `upsertContact`'s fill-NULL-only write silently discards the result. Idempotent on
+ * data, wasteful on spend. Netting the stored row out of the gaps closes that.
+ */
+export function subtractFilled(
+  gaps: Gaps,
+  existing: StoredContactFields | null,
+): Gaps {
+  if (!existing) return gaps;
+  return {
+    email: gaps.email && existing.email === null,
+    linkedinUrl: gaps.linkedinUrl && existing.linkedinUrl === null,
+  };
+}
+
 /**
  * Flatten findings into the cited facts we persist. Firmographics, EHR, incumbent
  * tooling and buying-moment context all land in `practice_facts`, each with its own

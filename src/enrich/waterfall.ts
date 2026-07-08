@@ -1,4 +1,5 @@
 import {
+  getContact,
   setEnrichmentStatus,
   upsertContact,
   upsertPracticeFact,
@@ -7,7 +8,13 @@ import type { Database } from "@/db/types";
 import { tagVertical } from "@/src/engine/resolver";
 import { classifyVertical } from "@/src/engine/verticals";
 import type { Meter } from "@/src/roi/cost-meter";
-import { computeGaps, factsFromFindings, hasGap, type Gaps } from "./gaps";
+import {
+  computeGaps,
+  factsFromFindings,
+  hasGap,
+  subtractFilled,
+  type Gaps,
+} from "./gaps";
 import { runPdlPersonEnrich } from "./pdl";
 import { runResearch } from "./research";
 import { isEmptyFindings } from "./research-schema";
@@ -25,9 +32,11 @@ import type {
  * waterfall runs — U8's pull-mode progress UI reads exactly that.
  *
  * COST DISCIPLINE — the rule this file exists to enforce: PDL is called ONLY for
- * the fields Claude left as gaps. A practice whose staff page publishes the
- * manager's name, email and LinkedIn makes ZERO PDL calls. The decision itself is
- * `computeGaps` in `./gaps.ts` — pure, and tested without a database.
+ * the fields Claude left as gaps AND the stored contact does not already fill. A
+ * practice whose staff page publishes the manager's name, email and LinkedIn makes
+ * ZERO PDL calls; so does a re-run of a practice we already enriched. The decisions
+ * are `computeGaps` + `subtractFilled` in `./gaps.ts` — pure, and tested without a
+ * database.
  */
 
 export interface WaterfallDeps {
@@ -137,8 +146,12 @@ export async function enrichPractice(
     await tagVertical(deps.db, practice.id, classification.vertical);
   }
 
-  // Stage 2 — PDL, for the gaps ONLY.
-  const gaps = computeGaps(findings);
+  // Stage 2 — PDL, for the gaps ONLY, and only the gaps the DB cannot already fill.
+  // A re-run must not re-buy an email `upsertContact` would then refuse to write.
+  const claudeGaps = computeGaps(findings);
+  const gaps = hasGap(claudeGaps)
+    ? subtractFilled(claudeGaps, await getContact(deps.db, practice.id))
+    : claudeGaps;
   const { pdlCalls, pdlResult } = await fillGaps(deps, practice, findings, gaps, log);
 
   const contactVariant = await persistContact(
