@@ -28,7 +28,9 @@ describe("mutation routes reject an unauthenticated request (guardMutation)", ()
     expect(res.status).toBe(401);
   });
   it("crm-sync POST -> 401", async () => {
-    const res = await crmSyncPOST();
+    const res = await crmSyncPOST(
+      new NextRequest("http://localhost/api/crm-sync", { method: "POST" }),
+    );
     expect(res.status).toBe(401);
   });
 });
