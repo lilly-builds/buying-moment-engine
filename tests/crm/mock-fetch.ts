@@ -11,6 +11,8 @@ export interface FetchCall {
   query: URLSearchParams;
   /** Parsed JSON body, or the raw string for form-encoded bodies. */
   body: unknown;
+  /** The Authorization header sent (Bearer <token>), or null. */
+  authorization: string | null;
 }
 
 export interface MockResponse {
@@ -50,6 +52,7 @@ export function mockFetch(responder: FetchResponder): MockFetch {
       path: parsed.pathname,
       query: parsed.searchParams,
       body,
+      authorization: new Headers(init?.headers).get("authorization"),
     };
     const index = calls.length;
     calls.push(call);

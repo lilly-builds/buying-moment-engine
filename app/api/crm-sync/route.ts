@@ -2,8 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { guardMutation } from "@/src/lib/auth-guard";
 import { getDb } from "@/db/client";
 import { readEncryptionKey, readOAuthDeps } from "@/src/crm/config";
-import { createHubSpotAdapter } from "@/src/crm/hubspot";
-import { createDbTokenProvider, pushPracticeLead } from "@/src/crm/sync";
+import { syncPracticeLead } from "@/src/crm/sync";
 import type { LeadInput } from "@/src/crm/adapter";
 
 // node:crypto (token decryption for the access-token provider) — pin Node.
@@ -11,14 +10,16 @@ export const runtime = "nodejs";
 
 /**
  * CRM push (R8, U10) — lands a tool-sourced lead in HubSpot as company + contact
- * + deal with all four tags, idempotently (keyed off the stored `crm_links` id).
- * Session-gated (R18). The assembled lead + the target portal come in the body;
- * the access token is fetched (and proactively refreshed) per-tenant.
+ * + deal with all four tags, idempotently. Session-gated (R18).
+ *
+ * SECURITY (U10 hardening): the target HubSpot connection is resolved
+ * SERVER-SIDE from stored connections — the request body carries only the lead
+ * to push, NEVER a portal id. A caller cannot point the push at another tenant's
+ * tokens (no IDOR).
  */
 
 interface SyncBody {
   practiceId: string;
-  portalId: string;
   lead: LeadInput;
 }
 
@@ -29,7 +30,6 @@ function parseBody(input: unknown): SyncBody | null {
   const tags = lead?.tags as Record<string, unknown> | undefined;
   if (
     typeof b.practiceId !== "string" ||
-    typeof b.portalId !== "string" ||
     !lead ||
     typeof lead.companyName !== "string" ||
     !tags ||
@@ -39,7 +39,9 @@ function parseBody(input: unknown): SyncBody | null {
   ) {
     return null;
   }
-  return { practiceId: b.practiceId, portalId: b.portalId, lead: lead as unknown as LeadInput };
+  // Any `portalId` in the body is deliberately IGNORED — the connection is
+  // resolved server-side. This is the IDOR fix; never read a portal from input.
+  return { practiceId: b.practiceId, lead: lead as unknown as LeadInput };
 }
 
 export async function POST(request: NextRequest) {
@@ -67,17 +69,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const db = getDb();
-    const getAccessToken = createDbTokenProvider(db, deps, {
-      portalId: body.portalId,
-      encryptionKey,
-    });
-    const adapter = createHubSpotAdapter({ fetch, getAccessToken });
-    const result = await pushPracticeLead(db, adapter, {
+    const outcome = await syncPracticeLead(getDb(), deps, {
       practiceId: body.practiceId,
       lead: body.lead,
+      encryptionKey,
     });
-    return NextResponse.json({ ok: true, ...result });
+    if (!outcome.ok) {
+      return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+    }
+    return NextResponse.json({ ok: true, ...outcome.result });
   } catch {
     return NextResponse.json({ error: "CRM sync failed" }, { status: 502 });
   }
