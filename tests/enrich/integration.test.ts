@@ -6,24 +6,42 @@ import researchFixture from "./fixtures/anthropic-research-response.json";
 import roleOnly from "./fixtures/anthropic-research-role-only.json";
 import personMatch from "./fixtures/pdl-person-enrich-match.json";
 import personNotFound from "./fixtures/pdl-person-enrich-404.json";
-import { FakePdlClient, FakeResearchClient, recordingMeter } from "./doubles";
+import { HARBOR_PAGES, METRO_PAGES, SUNSHINE_PAGES } from "./fixtures/held-pages";
+import {
+  emptyScraper,
+  FakeExtractClient,
+  FakePdlClient,
+  fakeScraper,
+  recordingMeter,
+} from "./doubles";
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
 import { drizzleCostRecorder } from "@/db/cost-recorder";
 import { contacts, costEvents, evidence, practiceFacts, practices } from "@/db/schema";
 import { upsertContact, upsertPracticeFact } from "@/db/enrich";
 import { resolvePractice } from "@/src/engine/resolver";
 import { enrichPractice, type WaterfallDeps } from "@/src/enrich/waterfall";
-import { PdlRateLimitError } from "@/src/enrich/types";
+import { AnthropicRequestError, PdlRateLimitError } from "@/src/enrich/types";
 import { createMeter } from "@/src/roi/cost-meter";
 
 /**
- * FULL-SEAM INTEGRATION (U5's Definition of Done): research -> gap-fill ->
- * enriched row persisted, on ephemeral PGlite with the externals mocked via
- * recorded fixtures. Nothing here reaches the network; nothing sends (D9).
+ * FULL-SEAM INTEGRATION (U5's Definition of Done): scrape -> extract -> VERIFY ->
+ * gap-fill -> enriched row persisted, on ephemeral PGlite with the externals mocked
+ * via recorded fixtures. Nothing here reaches the network; nothing sends (D9).
+ *
+ * The fake scraper holds `fixtures/held-pages.ts`, and every fixture snippet appears
+ * verbatim on the page it cites — because otherwise `verifyFindings` drops it and the
+ * test fails. Before this refactor a fixture could cite a URL and quote anything at
+ * all, since nothing held the page. The verifier now grades our test data too.
  */
 
 const NOW = new Date("2026-07-08T12:00:00Z");
 const SILENT = () => {};
+
+const SUNSHINE = {
+  name: "Sunshine Dermatology Associates",
+  geoKey: "miami-fl",
+  websiteUrl: "https://sunshinederm.example",
+};
 
 describe("enrichment waterfall (integration)", () => {
   let t: TestDb;
@@ -40,35 +58,45 @@ describe("enrichment waterfall (integration)", () => {
   }
 
   function deps(
-    research: FakeResearchClient,
+    pages: Map<string, string>,
+    extract: FakeExtractClient,
     pdl: FakePdlClient,
   ): { deps: WaterfallDeps; rows: ReturnType<typeof recordingMeter>["rows"] } {
     const { meter, rows } = recordingMeter();
     return {
-      deps: { db: t.db, research, pdl, meter, now: () => NOW, logger: SILENT },
+      deps: {
+        db: t.db,
+        scrape: fakeScraper(pages).scrape,
+        extract,
+        pdl,
+        meter,
+        now: () => NOW,
+        logger: SILENT,
+      },
       rows,
     };
   }
 
   it("SCENARIO 3: PDL fills the verified email + LinkedIn gap and persists them", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
-    const research = FakeResearchClient.fromFixture(researchFixture);
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d } = deps(research, pdl);
+    const { deps: d } = deps(SUNSHINE_PAGES, FakeExtractClient.fromFixture(researchFixture), pdl);
 
     const result = await enrichPractice(d, {
       id: practiceId,
-      name: "Sunshine Dermatology Associates",
+      name: SUNSHINE.name,
       city: "Miami",
       state: "FL",
+      websiteUrl: SUNSHINE.websiteUrl,
     });
 
     expect(result.status).toBe("enriched");
     expect(result.pdlCalls).toBe(1);
     expect(result.contactVariant).toBe("named");
+    // Every fact the extractor produced is provable on a page we held.
+    expect(result.factsDropped).toBe(0);
+    expect(result.pagesHeld).toBe(5);
+    expect(result.escalationTrigger).toBeNull();
 
     const [contact] = await t.db
       .select()
@@ -90,13 +118,13 @@ describe("enrichment waterfall (integration)", () => {
 
   it("SCENARIO 4 (COST GUARD): a fully-Claude-resolved practice makes ZERO PDL calls", async () => {
     const practiceId = await seedPractice("Metro Ortho Group", "denver-co");
-    const research = FakeResearchClient.fromFixture(fullyResolved);
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d, rows } = deps(research, pdl);
+    const { deps: d, rows } = deps(METRO_PAGES, FakeExtractClient.fromFixture(fullyResolved), pdl);
 
     const result = await enrichPractice(d, {
       id: practiceId,
       name: "Metro Ortho Group",
+      websiteUrl: "https://metroortho.example",
     });
 
     expect(result.pdlCalls).toBe(0);
@@ -118,19 +146,23 @@ describe("enrichment waterfall (integration)", () => {
 
   it("SCENARIO 5: no findable contact degrades to the role-only variant, never fails", async () => {
     const practiceId = await seedPractice("Harbor Vision Eye Care", "portland-or");
-    const research = FakeResearchClient.fromFixture(roleOnly);
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d } = deps(research, pdl);
+    const { deps: d } = deps(HARBOR_PAGES, FakeExtractClient.fromFixture(roleOnly), pdl);
 
     const result = await enrichPractice(d, {
       id: practiceId,
       name: "Harbor Vision Eye Care",
+      websiteUrl: "https://harborvision.example",
     });
 
     expect(result.status).toBe("enriched");
     expect(result.contactVariant).toBe("role_only");
     expect(result.pdlCalls).toBe(0);
     expect(pdl.personCalls).toEqual([]);
+    // The specialty fact cites `https://harborvision.example/` while the page map is
+    // keyed without the slash. The URL is an identifier we handed the model; tolerating
+    // that one difference is what keeps a TRUE fact from being dropped as fabrication.
+    expect(result.factsDropped).toBe(0);
 
     const [contact] = await t.db
       .select()
@@ -142,21 +174,19 @@ describe("enrichment waterfall (integration)", () => {
   });
 
   it("SCENARIO 8: every enrichment call writes a metered cost_events row", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const meter = createMeter(drizzleCostRecorder(t.db));
     await enrichPractice(
       {
         db: t.db,
-        research: FakeResearchClient.fromFixture(researchFixture),
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: FakeExtractClient.fromFixture(researchFixture),
         pdl: FakePdlClient.fromFixture(personMatch),
         meter,
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Sunshine Dermatology Associates" },
+      { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
     );
 
     const rows = await t.db
@@ -167,7 +197,9 @@ describe("enrichment waterfall (integration)", () => {
 
     const anthropic = rows.find((r) => r.provider === "anthropic")!;
     expect(anthropic.operation).toBe("messages.create");
-    expect(anthropic.pipelineStep).toBe("enrich.research");
+    // The primary path bills to its own pipeline step, so U12 can price it against the
+    // escalation it replaced, on the same practice.
+    expect(anthropic.pipelineStep).toBe("enrich.extract");
     expect(Number(anthropic.costUsd)).toBeGreaterThan(0);
 
     const pdlRow = rows.find((r) => r.provider === "pdl")!;
@@ -177,18 +209,17 @@ describe("enrichment waterfall (integration)", () => {
   });
 
   it("persists every fact with an evidence row carrying source URL + snippet + detected_at", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const { deps: d } = deps(
-      FakeResearchClient.fromFixture(researchFixture),
+      SUNSHINE_PAGES,
+      FakeExtractClient.fromFixture(researchFixture),
       FakePdlClient.fromFixture(personNotFound),
     );
 
     const result = await enrichPractice(d, {
       id: practiceId,
-      name: "Sunshine Dermatology Associates",
+      name: SUNSHINE.name,
+      websiteUrl: SUNSHINE.websiteUrl,
     });
     expect(result.factsWritten).toBe(5);
 
@@ -211,6 +242,8 @@ describe("enrichment waterfall (integration)", () => {
       expect(fact.sourceUrl).toMatch(/^https:\/\//);
       expect(fact.snippet).toBeTruthy();
       expect(fact.detectedAt).toEqual(NOW);
+      // The persisted snippet is verbatim on the page we held. That is D2, at the DB.
+      expect(SUNSHINE_PAGES.get(fact.sourceUrl)).toContain(fact.snippet);
     }
     expect(facts.find((f) => f.field === "ehr")?.value).toBe("ModMed EMA");
   });
@@ -218,13 +251,15 @@ describe("enrichment waterfall (integration)", () => {
   it("tags the vertical from the practice's own words", async () => {
     const practiceId = await seedPractice("Metro Ortho Group", "denver-co");
     const { deps: d } = deps(
-      FakeResearchClient.fromFixture(fullyResolved),
+      METRO_PAGES,
+      FakeExtractClient.fromFixture(fullyResolved),
       FakePdlClient.fromFixture(personNotFound),
     );
 
     const result = await enrichPractice(d, {
       id: practiceId,
       name: "Metro Ortho Group",
+      websiteUrl: "https://metroortho.example",
     });
     expect(result.vertical).toBe("orthopedics");
 
@@ -236,45 +271,275 @@ describe("enrichment waterfall (integration)", () => {
     expect(row.enrichmentStatus).toBe("enriched");
   });
 
-  it("ERROR PATH: malformed research JSON marks the practice failed and writes no facts", async () => {
+  // ─── D2, the tests that were previously IMPOSSIBLE ─────────────────────────
+
+  it("D2: a FABRICATED snippet never reaches practice_facts, and the drop is reported", async () => {
+    // Under the agentic mechanism this fact shipped: a real sourceUrl, a plausible
+    // snippet, and no way on earth to check it — we never held the page. Every other
+    // fact in the fixture is genuine, so the practice still enriches; only the lie is
+    // dropped. That is the difference between a verifier and a kill switch.
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
+    const base = parseMessagesResponse(researchFixture);
+    const fabricated = new FakeExtractClient(async () => ({
+      ...base,
+      text: base.text.replace(
+        "Our patient portal is powered by ModMed EMA.",
+        "The practice migrated to Epic in 2023 and reports a 4-provider team.",
+      ),
+    }));
+
+    const drops: Record<string, unknown>[] = [];
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: fabricated,
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter: recordingMeter().meter,
+        now: () => NOW,
+        logger: (event, meta) => {
+          if (event === "enrich.citation_drops" && meta) drops.push(meta);
+        },
+      },
+      { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    expect(result.status).toBe("enriched");
+    expect(result.factsDropped).toBe(1);
+    expect(result.factsWritten).toBe(4); // was 5
+
+    const fields = (await t.db.select().from(practiceFacts)).map((f) => f.field);
+    expect(fields).not.toContain("ehr");
+    expect(fields.sort()).toEqual([
+      "buying_moment_1",
+      "incumbent_tooling_1",
+      "specialty",
+      "website",
+    ]);
+
+    // Loud, not silent: the drop is logged with its field, reason and snippet.
+    expect(drops).toHaveLength(1);
+    expect(drops[0]).toMatchObject({ practice: SUNSHINE.name, dropped: 1 });
+    expect(drops[0].facts).toMatchObject([
+      { field: "ehr", reason: "snippet-not-verbatim" },
+    ]);
+  });
+
+  it("D2: a decision-maker whose ROLE is fabricated persists NO contact at all", async () => {
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
+    const base = parseMessagesResponse(researchFixture);
+    const fabricated = new FakeExtractClient(async () => ({
+      ...base,
+      text: base.text.replaceAll(
+        '"snippet": "Dana Whitfield, Practice Administrator"',
+        '"snippet": "Dana Whitfield runs the front office as Practice Administrator"',
+      ),
+    }));
+    const pdl = FakePdlClient.fromFixture(personMatch);
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: fabricated,
+        pdl,
+        meter: recordingMeter().meter,
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    // Who to contact is the one thing a brief must not guess.
+    expect(result.contactVariant).toBe("none");
+    expect(await t.db.select().from(contacts)).toHaveLength(0);
+    // And we did not pay PDL to look up a person we cannot cite.
+    expect(pdl.personCalls).toEqual([]);
+    expect(result.pdlCalls).toBe(0);
+  });
+
+  // ─── Failure paths and the (free) escalation signal ────────────────────────
+
+  it("EDGE CASE: a scrape that yields no text is `failed` and flags a thin-scrape trigger", async () => {
+    const practiceId = await seedPractice("Silent Practice", "reno-nv");
+    const extract = FakeExtractClient.fromFixture(researchFixture);
+    const { meter, rows } = recordingMeter();
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: emptyScraper("blocked").scrape,
+        extract,
+        pdl: FakePdlClient.fromFixture(personMatch),
+        meter,
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Silent Practice", websiteUrl: "https://silent.example" },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toMatch(/blocked/);
+    expect(result.escalationTrigger).toBe("thin-scrape");
+    expect(result.escalated).toBe(false); // U7 wires the escalator; nothing is bought here
+    // Nothing was paid for: the extractor was never called.
+    expect(extract.calls).toEqual([]);
+    expect(rows).toEqual([]);
+
+    const [row] = await t.db.select().from(practices).where(eq(practices.id, practiceId));
+    expect(row.enrichmentStatus).toBe("failed");
+  });
+
+  it("EDGE CASE: a practice with no website is a thin scrape — nothing to read, nothing paid", async () => {
+    const practiceId = await seedPractice("No Site Clinic", "boise-id");
+    const { meter, rows } = recordingMeter();
+    const scraper = fakeScraper(SUNSHINE_PAGES);
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: scraper.scrape,
+        extract: FakeExtractClient.fromFixture(researchFixture),
+        pdl: FakePdlClient.fromFixture(personMatch),
+        meter,
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "No Site Clinic", websiteUrl: null },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("no website url");
+    expect(result.escalationTrigger).toBe("thin-scrape");
+    expect(scraper.calls).toEqual([]);
+    expect(rows).toEqual([]);
+  });
+
+  it("ERROR PATH: a malformed (but BILLED) extract body fails the practice and is still metered", async () => {
     const practiceId = await seedPractice("Broken Derm", "austin-tx");
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d, rows } = deps(FakeResearchClient.malformed(), pdl);
+    const { deps: d, rows } = deps(SUNSHINE_PAGES, FakeExtractClient.malformed(), pdl);
 
     const result = await enrichPractice(d, {
       id: practiceId,
       name: "Broken Derm",
+      websiteUrl: SUNSHINE.websiteUrl,
     });
 
     expect(result.status).toBe("failed");
     expect(result.reason).toMatch(/malformed JSON/);
+    expect(result.escalationTrigger).toBe("extract-failed");
     expect(pdl.personCalls).toEqual([]);
-    // The Claude call still cost money and is still metered.
+    // Anthropic charged for this. It is metered.
     expect(rows).toHaveLength(1);
 
     expect(await t.db.select().from(practiceFacts)).toHaveLength(0);
     expect(await t.db.select().from(contacts)).toHaveLength(0);
-    const [row] = await t.db
-      .select()
-      .from(practices)
-      .where(eq(practices.id, practiceId));
+    const [row] = await t.db.select().from(practices).where(eq(practices.id, practiceId));
     expect(row.enrichmentStatus).toBe("failed");
   });
 
-  it("ERROR PATH: a PDL 429 leaves the gap unfilled but keeps the enrichment", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
+  it("KTD-7: a THROWN extract call fails the practice but does NOT trigger escalation", async () => {
+    // A 429 is unbilled and says nothing about the practice. Answering it by spending
+    // $1.27 on the agentic path would be Optiflow's Gate-4 bug, running the other way.
+    const practiceId = await seedPractice("Rate Limited Derm", "tampa-fl");
+    const { deps: d, rows } = deps(
+      SUNSHINE_PAGES,
+      FakeExtractClient.throwing(new AnthropicRequestError(429, "rate limited")),
+      FakePdlClient.fromFixture(personMatch),
     );
+
+    const result = await enrichPractice(d, {
+      id: practiceId,
+      name: "Rate Limited Derm",
+      websiteUrl: SUNSHINE.websiteUrl,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toMatch(/429/);
+    expect(result.escalationTrigger).toBeNull();
+    // Unbilled: the meter recorded nothing.
+    expect(rows).toEqual([]);
+  });
+
+  it("EDGE CASE: findings whose every fact is fabricated -> no-verified-facts, no partial write", async () => {
+    const practiceId = await seedPractice("Fabulist Derm", "miami-fl");
+    const base = parseMessagesResponse(researchFixture);
+    const allFake = new FakeExtractClient(async () => ({
+      ...base,
+      text: base.text.replaceAll(
+        /"snippet": "[^"]*"/g,
+        '"snippet": "Nothing on any page says this."',
+      ),
+    }));
+    const { meter, rows } = recordingMeter();
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: allFake,
+        pdl: FakePdlClient.fromFixture(personMatch),
+        meter,
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Fabulist Derm", websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toMatch(/no verified facts/);
+    // Extraction SUCCEEDED and nothing threw. The old mechanism could not tell this
+    // apart from a good result — this is exactly the case U7 escalates on.
+    expect(result.escalationTrigger).toBe("no-verified-facts");
+    expect(result.factsDropped).toBeGreaterThan(0);
+    expect(await t.db.select().from(practiceFacts)).toHaveLength(0);
+    expect(await t.db.select().from(contacts)).toHaveLength(0);
+    expect(rows).toHaveLength(1); // the wasted call still cost money
+  });
+
+  it("EDGE CASE: an empty extract result is failed, not a fabricated brief", async () => {
+    const practiceId = await seedPractice("Quiet Practice", "reno-nv");
+    const empty = new FakeExtractClient(async () => ({
+      text: "{}",
+      usage: {
+        inputTokens: 800,
+        outputTokens: 4,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        webSearchRequests: 0,
+        webFetchRequests: 0,
+      },
+      model: "claude-haiku-4-5",
+    }));
+    const { deps: d, rows } = deps(SUNSHINE_PAGES, empty, FakePdlClient.fromFixture(personMatch));
+
+    const result = await enrichPractice(d, {
+      id: practiceId,
+      name: "Quiet Practice",
+      websiteUrl: SUNSHINE.websiteUrl,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toMatch(/no verified facts/);
+    expect(result.factsWritten).toBe(0);
+    expect(result.factsDropped).toBe(0); // nothing to drop; the model reported nothing
+    expect(rows).toHaveLength(1); // the call still cost money
+  });
+
+  it("ERROR PATH: a PDL 429 leaves the gap unfilled but keeps the enrichment", async () => {
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const pdl = FakePdlClient.throwing(new PdlRateLimitError(30));
     const { deps: d, rows } = deps(
-      FakeResearchClient.fromFixture(researchFixture),
+      SUNSHINE_PAGES,
+      FakeExtractClient.fromFixture(researchFixture),
       pdl,
     );
 
     const result = await enrichPractice(d, {
       id: practiceId,
-      name: "Sunshine Dermatology Associates",
+      name: SUNSHINE.name,
+      websiteUrl: SUNSHINE.websiteUrl,
     });
 
     expect(result.status).toBe("enriched");
@@ -292,18 +557,17 @@ describe("enrichment waterfall (integration)", () => {
   });
 
   it("ERROR PATH: a PDL 404 no-match degrades the contact, still metered at $0", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const { deps: d, rows } = deps(
-      FakeResearchClient.fromFixture(researchFixture),
+      SUNSHINE_PAGES,
+      FakeExtractClient.fromFixture(researchFixture),
       FakePdlClient.fromFixture(personNotFound),
     );
 
     const result = await enrichPractice(d, {
       id: practiceId,
-      name: "Sunshine Dermatology Associates",
+      name: SUNSHINE.name,
+      websiteUrl: SUNSHINE.websiteUrl,
     });
 
     expect(result.pdlCalls).toBe(1);
@@ -318,45 +582,16 @@ describe("enrichment waterfall (integration)", () => {
     expect(contact.email).toBeNull();
   });
 
-  it("EDGE CASE: an empty research result is failed, not a fabricated brief", async () => {
-    const practiceId = await seedPractice("Silent Practice", "reno-nv");
-    const empty = new FakeResearchClient(async () => ({
-      text: "{}",
-      usage: {
-        inputTokens: 800,
-        outputTokens: 4,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        webSearchRequests: 2,
-        webFetchRequests: 0,
-      },
-      model: "claude-sonnet-5",
-    }));
-    const { deps: d, rows } = deps(empty, FakePdlClient.fromFixture(personMatch));
-
-    const result = await enrichPractice(d, {
-      id: practiceId,
-      name: "Silent Practice",
-    });
-
-    expect(result.status).toBe("failed");
-    expect(result.reason).toBe("research returned no facts");
-    expect(result.factsWritten).toBe(0);
-    expect(rows).toHaveLength(1); // the wasted search still cost money
-  });
-
   it("re-running the waterfall is idempotent — no duplicate facts, no clobbered email", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const run = () =>
       enrichPractice(
         deps(
-          FakeResearchClient.fromFixture(researchFixture),
+          SUNSHINE_PAGES,
+          FakeExtractClient.fromFixture(researchFixture),
           FakePdlClient.fromFixture(personMatch),
         ).deps,
-        { id: practiceId, name: "Sunshine Dermatology Associates" },
+        { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
       );
 
     const first = await run();
@@ -369,23 +604,21 @@ describe("enrichment waterfall (integration)", () => {
   });
 
   it("COST GUARD: a re-run does NOT re-buy a gap the database already filled", async () => {
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     // ONE client + ONE meter across both runs, so the call and the money are counted
     // end-to-end rather than reset between them.
     const pdl = FakePdlClient.fromFixture(personMatch);
     const { meter, rows } = recordingMeter();
     const d: WaterfallDeps = {
       db: t.db,
-      research: FakeResearchClient.fromFixture(researchFixture),
+      scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+      extract: FakeExtractClient.fromFixture(researchFixture),
       pdl,
       meter,
       now: () => NOW,
       logger: SILENT,
     };
-    const practice = { id: practiceId, name: "Sunshine Dermatology Associates" };
+    const practice = { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl };
 
     const first = await enrichPractice(d, practice);
     const second = await enrichPractice(d, practice);
@@ -396,7 +629,7 @@ describe("enrichment waterfall (integration)", () => {
     expect(second.pdlCalls).toBe(0);
     expect(pdl.personCalls).toHaveLength(1);
     expect(rows.filter((r) => r.provider === "pdl")).toHaveLength(1);
-    // The Claude call is NOT cached; it is bought again, and metered again.
+    // The extract call is NOT cached; it is bought again, and metered again.
     expect(rows.filter((r) => r.provider === "anthropic")).toHaveLength(2);
   });
 
@@ -405,36 +638,33 @@ describe("enrichment waterfall (integration)", () => {
     // re-run under a new title INSERTS a second row. The cost guard must read on the
     // same (practice, role) key `upsertContact` writes on — otherwise the old row's
     // email suppresses the PDL call and the new row is persisted empty.
-    const practiceId = await seedPractice(
-      "Sunshine Dermatology Associates",
-      "miami-fl",
-    );
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const pdl = FakePdlClient.fromFixture(personMatch);
     const { meter } = recordingMeter();
-    const withResearch = (research: FakeResearchClient): WaterfallDeps => ({
+    const withExtract = (extract: FakeExtractClient): WaterfallDeps => ({
       db: t.db,
-      research,
+      scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+      extract,
       pdl,
       meter,
       now: () => NOW,
       logger: SILENT,
     });
-    const practice = { id: practiceId, name: "Sunshine Dermatology Associates" };
+    const practice = { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl };
 
+    // Only the role's VALUE drifts. Its snippet still verifies — the page still says
+    // "Dana Whitfield, Practice Administrator" — so this is a title change, not a lie.
     const base = parseMessagesResponse(researchFixture);
-    const drifted = new FakeResearchClient(async () => ({
+    const drifted = new FakeExtractClient(async () => ({
       ...base,
       text: base.text.replaceAll(
-        '"Practice Administrator"',
-        '"Practice Manager"',
+        '"value": "Practice Administrator"',
+        '"value": "Practice Manager"',
       ),
     }));
 
-    await enrichPractice(
-      withResearch(FakeResearchClient.fromFixture(researchFixture)),
-      practice,
-    );
-    const second = await enrichPractice(withResearch(drifted), practice);
+    await enrichPractice(withExtract(FakeExtractClient.fromFixture(researchFixture)), practice);
+    const second = await enrichPractice(withExtract(drifted), practice);
 
     // The drifted role is an unfilled contact, so PDL is bought for it.
     expect(second.pdlCalls).toBe(1);

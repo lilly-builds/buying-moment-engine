@@ -1,6 +1,8 @@
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
 import { EXTRACT_MODEL } from "@/src/enrich/config";
 import { normalizeCompanyResponse, normalizePersonResponse } from "@/src/enrich/pdl-client";
+import type { ScrapeFailure } from "@/src/enrich/scrape";
+import type { Scraper } from "@/src/enrich/waterfall";
 import type {
   ExtractClient,
   ExtractRequest,
@@ -66,6 +68,41 @@ export class FakeResearchClient implements ResearchClient {
     this.calls.push(request);
     return this.behaviour();
   }
+}
+
+/**
+ * A scraper that never touches the network. `pages` is the substrate the extractor is
+ * shown AND the substrate `citations.ts` verifies against — the same map, as in
+ * production. Handing the verifier a different map than the model saw would make every
+ * test a tautology.
+ */
+export interface FakeScraper {
+  scrape: Scraper;
+  calls: string[];
+}
+
+export function fakeScraper(pages: Map<string, string>): FakeScraper {
+  const calls: string[] = [];
+  return {
+    calls,
+    scrape: async (websiteUrl: string) => {
+      calls.push(websiteUrl);
+      const totalChars = [...pages.values()].reduce((n, text) => n + text.length, 0);
+      return { pages, pagesHeld: pages.size, totalChars };
+    },
+  };
+}
+
+/** A site that gave us nothing — a 403, a dead host, or a JS shell with no text. */
+export function emptyScraper(reason: ScrapeFailure = "unreachable"): FakeScraper {
+  const calls: string[] = [];
+  return {
+    calls,
+    scrape: async (websiteUrl: string) => {
+      calls.push(websiteUrl);
+      return { pages: new Map(), pagesHeld: 0, totalChars: 0, reason };
+    },
+  };
 }
 
 export class FakeExtractClient implements ExtractClient {

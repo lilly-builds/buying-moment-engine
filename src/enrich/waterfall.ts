@@ -8,6 +8,8 @@ import type { Database } from "@/db/types";
 import { tagVertical } from "@/src/engine/resolver";
 import { classifyVertical } from "@/src/engine/verticals";
 import type { Meter } from "@/src/roi/cost-meter";
+import { verifyFindings, type DroppedFact } from "./citations";
+import { runExtract } from "./extract";
 import {
   computeGaps,
   factsFromFindings,
@@ -17,31 +19,47 @@ import {
   type Gaps,
 } from "./gaps";
 import { runPdlPersonEnrich } from "./pdl";
-import { runResearch } from "./research";
 import { isEmptyFindings } from "./research-schema";
+import type { ScrapeResult } from "./scrape";
 import type {
+  ExtractClient,
   PdlClient,
   PdlPersonResult,
-  ResearchClient,
   ResearchFindings,
 } from "./types";
 
 /**
- * The Claude -> PDL enrichment waterfall (spec § Stack). Synchronous end to end:
- * PDL is a request/response API, so there is no callback and no in-flight job.
- * The practice carries `enrichment_status = 'pending'` while the (seconds-long)
- * waterfall runs — U8's pull-mode progress UI reads exactly that.
+ * The enrichment waterfall (spec § Stack): **scrape -> extract -> verify -> PDL gap-fill
+ * -> persist**. Synchronous end to end; PDL is request/response, so there is no callback
+ * and no in-flight job. The practice carries `enrichment_status = 'pending'` while the
+ * (seconds-long) waterfall runs — U8's pull-mode progress UI reads exactly that.
  *
- * COST DISCIPLINE — the rule this file exists to enforce: PDL is called ONLY for the
- * fields Claude left as gaps AND the stored contact does not already fill. A practice
- * whose staff page publishes the manager's name, email and LinkedIn makes ZERO PDL
- * calls; so does a re-run of one we already enriched. The decisions are `computeGaps`
- * + `subtractFilled` in `./gaps.ts` — pure, and tested without a database.
+ * WHAT CHANGED, AND WHY IT MATTERS HERE. Stage 1 used to be `runResearch` — Claude
+ * browsing the web agentically. We never held the pages it read, so a fact's `snippet`
+ * could be anything and we persisted it on the strength of the model's word. Now we
+ * fetch the pages, hand the model text it cannot escape, and `verifyFindings` drops
+ * every fact whose snippet is not verbatim on the page it cites. **Only verified facts
+ * are persisted.** D2/R5 is enforced between the model and the database, by code.
+ *
+ * COST DISCIPLINE — unchanged, and load-bearing: PDL is called ONLY for the fields the
+ * extractor left as gaps AND the stored contact does not already fill. A practice whose
+ * staff page publishes the manager's name, email and LinkedIn makes ZERO PDL calls; so
+ * does a re-run. The decisions are `computeGaps` + `subtractFilled` in `./gaps.ts` —
+ * pure, and tested without a database.
+ *
+ * ESCALATION is scaffolded here and WIRED IN U7. `escalationTriggered` is a free,
+ * deterministic observation ("the agentic path would have run"); `escalated` means we
+ * actually spent $1.27. Splitting them lets U8 measure the escalation rate on real
+ * practices for $0, before deciding whether to pay to learn it.
  */
+
+/** Injected so the waterfall never owns a socket. Production: `scrapePractice({fetch}, url)`. */
+export type Scraper = (websiteUrl: string) => Promise<ScrapeResult>;
 
 export interface WaterfallDeps {
   db: Database;
-  research: ResearchClient;
+  scrape: Scraper;
+  extract: ExtractClient;
   pdl: PdlClient;
   meter: Meter;
   /** Injected clock — provenance timestamps must be reproducible in tests. */
@@ -54,17 +72,43 @@ export interface PracticeToEnrich {
   name: string;
   city?: string | null;
   state?: string | null;
+  /** The entry point. Without it there is nothing to scrape — see `trigger`. */
   websiteUrl?: string | null;
 }
+
+/**
+ * Why the agentic fallback WOULD run. Deterministic and free to compute; U7 decides
+ * whether to act on it.
+ *
+ * The plan names two triggers; `extract-failed` is the sub-case of "no verified facts"
+ * where the model's body never became findings at all. All three share the property
+ * KTD-7 demands: escalating changes both the input (search the web, not this text) and
+ * the model (Sonnet 5, not Haiku). Retrying an identical call on identical input buys
+ * three identical answers — that is Optiflow's Gate-4 bug, and it is not a strategy.
+ */
+export type EscalationTrigger =
+  /** No website, or the site yielded no usable text. */
+  | "thin-scrape"
+  /** A billed 200 whose body never parsed into findings. */
+  | "extract-failed"
+  /** Extraction succeeded, nothing threw, and no fact survived citation checking. */
+  | "no-verified-facts";
 
 export interface WaterfallResult {
   practiceId: string;
   status: "enriched" | "failed";
-  /** THE cost guard's observable: 0 when Claude fully resolved the contact. */
+  /** THE cost guard's observable: 0 when the extractor fully resolved the contact. */
   pdlCalls: number;
   factsWritten: number;
+  /** Facts the model produced that no page proves. The prompt-drift early warning. */
+  factsDropped: number;
+  pagesHeld: number;
   contactVariant: "named" | "role_only" | "none";
   vertical: string;
+  /** Free and deterministic: the agentic fallback would have run. */
+  escalationTrigger: EscalationTrigger | null;
+  /** Did we actually buy it? Always false until U7 wires the escalator. */
+  escalated: boolean;
   reason?: string;
 }
 
@@ -72,18 +116,26 @@ function defaultLogger(event: string, meta?: Record<string, unknown>): void {
   console.warn(event, meta ?? {});
 }
 
-function failure(
-  practiceId: string,
-  reason: string,
-): WaterfallResult {
+interface FailureContext {
+  reason: string;
+  trigger: EscalationTrigger | null;
+  pagesHeld?: number;
+  factsDropped?: number;
+}
+
+function failure(practiceId: string, ctx: FailureContext): WaterfallResult {
   return {
     practiceId,
     status: "failed",
     pdlCalls: 0,
     factsWritten: 0,
+    factsDropped: ctx.factsDropped ?? 0,
+    pagesHeld: ctx.pagesHeld ?? 0,
     contactVariant: "none",
     vertical: "unclassified",
-    reason,
+    escalationTrigger: ctx.trigger,
+    escalated: false,
+    reason: ctx.reason,
   };
 }
 
@@ -95,37 +147,60 @@ export async function enrichPractice(
   const log = deps.logger ?? defaultLogger;
   const detectedAt = now();
 
-  // Stage 1 — Claude agentic web research. Metered inside `runResearch` (R19).
-  const outcome = await runResearch(
-    { client: deps.research, meter: deps.meter, practiceId: practice.id },
-    {
-      practiceName: practice.name,
-      city: practice.city,
-      state: practice.state,
-      websiteUrl: practice.websiteUrl,
-    },
-  );
-
-  if (!outcome.ok) {
+  const fail = async (ctx: FailureContext): Promise<WaterfallResult> => {
     await setEnrichmentStatus(deps.db, practice.id, "failed");
-    log("enrich.research_failed", {
+    log("enrich.failed", {
       practice: practice.name,
-      reason: outcome.reason,
+      reason: ctx.reason,
+      escalationTrigger: ctx.trigger,
     });
-    return failure(practice.id, outcome.reason);
+    return failure(practice.id, ctx);
+  };
+
+  // Stage 1a — scrape the practice's own site. Free, and it produces the substrate the
+  // citation check needs. Without a URL there is nothing to read.
+  if (!practice.websiteUrl) {
+    return fail({ reason: "no website url", trigger: "thin-scrape" });
   }
 
-  const { findings } = outcome;
-  if (isEmptyFindings(findings)) {
-    // An honest empty result is not a crash — but it is also not "enriched".
-    await setEnrichmentStatus(deps.db, practice.id, "failed");
-    log("enrich.empty_findings", { practice: practice.name });
-    return failure(practice.id, "research returned no facts");
+  const scraped = await deps.scrape(practice.websiteUrl);
+  if (scraped.pagesHeld === 0) {
+    return fail({
+      reason: `scrape yielded no usable text (${scraped.reason ?? "empty"})`,
+      trigger: "thin-scrape",
+    });
   }
 
-  // Persist Claude's cited facts. Each carries its own evidence row.
+  // Stage 1b — ONE Haiku call over the held text. Metered inside `runExtract` (R19).
+  const outcome = await runExtractGuarded(deps, practice, scraped, log);
+  if (!outcome.ok) {
+    return fail({
+      reason: outcome.reason,
+      // A THROWN call is unbilled and tells us nothing about the practice. Escalating
+      // on it would answer a transient 429 by spending $1.27 (KTD-7).
+      trigger: outcome.thrown ? null : "extract-failed",
+      pagesHeld: scraped.pagesHeld,
+    });
+  }
+
+  // Stage 1c — the D2 gate. Drop every fact no held page proves, and say which.
+  const { verified, dropped } = verifyFindings(outcome.findings, scraped.pages);
+  if (dropped.length > 0) logDrops(log, practice.name, dropped);
+
+  if (isEmptyFindings(verified)) {
+    // Extraction SUCCEEDED and nothing threw; we simply learned nothing we can prove.
+    // The old mechanism could not tell this apart from a good result.
+    return fail({
+      reason: "no verified facts survived citation checking",
+      trigger: "no-verified-facts",
+      pagesHeld: scraped.pagesHeld,
+      factsDropped: dropped.length,
+    });
+  }
+
+  // Persist only what a page proves. Each fact carries its own evidence row.
   let factsWritten = 0;
-  for (const fact of factsFromFindings(findings)) {
+  for (const fact of factsFromFindings(verified)) {
     const result = await upsertPracticeFact(deps.db, {
       practiceId: practice.id,
       provider: "claude_research",
@@ -137,10 +212,10 @@ export async function enrichPractice(
 
   // Vertical tagging: the practice's own words first, EHR only as a fallback.
   const classification = classifyVertical({
-    text: [practice.name, findings.firmographics.specialty?.value]
+    text: [practice.name, verified.firmographics.specialty?.value]
       .filter(Boolean)
       .join(" "),
-    ehr: findings.ehr?.value ?? null,
+    ehr: verified.ehr?.value ?? null,
   });
   if (classification.vertical !== "unclassified") {
     await tagVertical(deps.db, practice.id, classification.vertical);
@@ -149,8 +224,8 @@ export async function enrichPractice(
   // Stage 2 — PDL, for the gaps ONLY, and only the gaps the DB cannot already fill.
   // A re-run must not re-buy an email `upsertContact` would then refuse to write. The
   // stored row is read on (practice, role), the same key it is written on.
-  const decisionMaker = findings.decisionMaker;
-  const claudeGaps = computeGaps(findings);
+  const decisionMaker = verified.decisionMaker;
+  const claudeGaps = computeGaps(verified);
   const gaps =
     decisionMaker && hasGap(claudeGaps)
       ? subtractFilled(
@@ -158,12 +233,12 @@ export async function enrichPractice(
           await getContact(deps.db, practice.id, decisionMaker.role.value),
         )
       : claudeGaps;
-  const { pdlCalls, pdlResult } = await fillGaps(deps, practice, findings, gaps, log);
+  const { pdlCalls, pdlResult } = await fillGaps(deps, practice, verified, gaps, log);
 
   const contactVariant = await persistContact(
     deps.db,
     practice.id,
-    findings,
+    verified,
     gaps,
     pdlResult,
   );
@@ -175,9 +250,70 @@ export async function enrichPractice(
     status: "enriched",
     pdlCalls,
     factsWritten,
+    factsDropped: dropped.length,
+    pagesHeld: scraped.pagesHeld,
     contactVariant,
     vertical: classification.vertical,
+    escalationTrigger: null,
+    escalated: false,
   };
+}
+
+type GuardedExtract =
+  | { ok: true; findings: ResearchFindings }
+  | { ok: false; reason: string; thrown: boolean };
+
+/**
+ * A non-2xx from Anthropic throws (correctly — it is unbilled, and the meter records
+ * nothing). It must not take the whole cohort run down with it, and it must be
+ * distinguishable from a BAD RESULT: only the latter is evidence about the practice.
+ */
+async function runExtractGuarded(
+  deps: WaterfallDeps,
+  practice: PracticeToEnrich,
+  scraped: ScrapeResult,
+  log: (event: string, meta?: Record<string, unknown>) => void,
+): Promise<GuardedExtract> {
+  try {
+    const outcome = await runExtract(
+      { client: deps.extract, meter: deps.meter, practiceId: practice.id },
+      {
+        practiceName: practice.name,
+        city: practice.city,
+        state: practice.state,
+        pages: scraped.pages,
+      },
+    );
+    return outcome.ok
+      ? { ok: true, findings: outcome.findings }
+      : { ok: false, reason: outcome.reason, thrown: false };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    log("enrich.extract_threw", { practice: practice.name, error: reason });
+    return { ok: false, reason, thrown: true };
+  }
+}
+
+/**
+ * Drops are the prompt-drift early-warning signal, so they are LOUD and itemised.
+ * A drop count that climbs across a cohort means the prompt moved, not that the
+ * practices got shifty.
+ */
+function logDrops(
+  log: (event: string, meta?: Record<string, unknown>) => void,
+  practiceName: string,
+  dropped: DroppedFact[],
+): void {
+  log("enrich.citation_drops", {
+    practice: practiceName,
+    dropped: dropped.length,
+    facts: dropped.map((d) => ({
+      field: d.field,
+      reason: d.reason,
+      sourceUrl: d.sourceUrl,
+      snippet: d.snippet.slice(0, 120),
+    })),
+  });
 }
 
 async function fillGaps(
