@@ -1,5 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { isAllowlisted, parseAllowlist, requireSession } from "@/src/lib/auth";
+import {
+  isAllowlisted,
+  isPublicPath,
+  parseAllowlist,
+  requireSession,
+} from "@/src/lib/auth";
+// `verifySharedSecret` / `@/src/lib/secret` were removed with Clay — nothing calls a
+// shared-secret callback now that PDL is synchronous. See src/lib/auth.ts publicPaths.
+
+describe("isPublicPath (R18)", () => {
+  const PROD = true;
+  const DEV = false;
+
+  it("always leaves /login reachable, or the redirect loops", () => {
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/login", env)).toBe(true);
+    }
+  });
+
+  it("does NOT expose the removed Clay callback in any environment", () => {
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/api/enrich-callback", env)).toBe(false);
+    }
+  });
+
+  it("gates the app itself in every environment", () => {
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/", env)).toBe(false);
+      expect(isPublicPath("/practice/123", env)).toBe(false);
+      expect(isPublicPath("/scoreboard", env)).toBe(false);
+      expect(isPublicPath("/api/feedback", env)).toBe(false);
+    }
+  });
+
+  it("opens /styleguide in dev for brand review", () => {
+    expect(isPublicPath("/styleguide", DEV)).toBe(true);
+  });
+
+  it("KEEPS /styleguide behind auth in production", () => {
+    // U2's styleguide reads nothing from the database, but R18 says the deployed
+    // app serves no page to a non-allowlisted visitor. This is the line that
+    // keeps the dev convenience from leaking into prod.
+    expect(isPublicPath("/styleguide", PROD)).toBe(false);
+  });
+
+  it("does not open a path merely because it is prefixed by a public one", () => {
+    expect(isPublicPath("/loginsomething", PROD)).toBe(false);
+    expect(isPublicPath("/styleguide-secrets", DEV)).toBe(false);
+  });
+});
 
 describe("parseAllowlist / isAllowlisted", () => {
   const allowlist = parseAllowlist("Lilly@Opterra.com, ae@eliseai.com");

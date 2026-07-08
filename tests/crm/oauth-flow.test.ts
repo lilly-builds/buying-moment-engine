@@ -11,7 +11,7 @@ import {
   verifyStateCookie,
 } from "@/src/crm/oauth-state";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
-import { mockFetch } from "./mock-fetch";
+import { hubspotConnectMock, mockFetch } from "./mock-fetch";
 
 const ENC_KEY = Buffer.alloc(32, 11);
 const SIGNING_KEY = deriveSigningKey(ENC_KEY);
@@ -26,17 +26,9 @@ function oauthDeps(fetchImpl: typeof fetch): OAuthHttpDeps {
   };
 }
 
-/** Mock the token exchange + token-meta lookup (no live HubSpot). */
+/** Token exchange + token-meta + the property-provisioning routes connect calls. */
 function connectMock() {
-  return mockFetch((call) => {
-    if (call.path === "/oauth/v1/token") {
-      return { body: { access_token: "at_live", refresh_token: "rt_live", expires_in: 1800 } };
-    }
-    if (call.path.startsWith("/oauth/v1/access-tokens/")) {
-      return { body: { hub_id: 424242, scopes: ["oauth", "crm.objects.deals.write"] } };
-    }
-    return { status: 404, body: {} };
-  });
+  return hubspotConnectMock();
 }
 
 describe("buildConnectHandshake (initiation)", () => {
@@ -48,9 +40,11 @@ describe("buildConnectHandshake (initiation)", () => {
     const u = new URL(location);
     expect(u.origin + u.pathname).toBe("https://app.hubspot.com/oauth/authorize");
     expect(u.searchParams.get("state")).toBe(state);
-    expect(u.searchParams.get("scope")).toContain(
+    // The send scope rides `optional_scope` so a free portal can still install.
+    expect(u.searchParams.get("optional_scope")).toContain(
       "automation.sequences.enrollments.write",
     );
+    expect(u.searchParams.get("scope")).toContain("crm.objects.deals.write");
     // the cookie is signed and validates against the same state
     expect(verifyStateCookie(cookieValue, state, SIGNING_KEY)).toBe(true);
   });

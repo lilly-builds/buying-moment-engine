@@ -1,10 +1,10 @@
+import { and, eq } from "drizzle-orm";
 import type { Database } from "@/db/types";
 import { roiEvents } from "@/db/schema";
 import {
   getActiveConnection,
   loadCrmLink,
   loadConnection,
-  roiCycleTimeReadback,
   storeConnection,
   upsertCrmLink,
 } from "@/db/crm";
@@ -15,11 +15,18 @@ import type {
   StageReadback,
 } from "./adapter";
 import { createHubSpotAdapter } from "./hubspot";
+import { ensureLeadProperties } from "./hubspot-properties";
+import {
+  INITIAL_DEAL_STAGE_ID,
+  stageMilestone,
+  type RoiMilestone,
+} from "./stages";
 import { decrypt, encrypt } from "./token-crypto";
 import {
   exchangeCodeForTokens,
   expiresAtFromExpiresIn,
   fetchTokenMeta,
+  hasSendScope,
   refreshAccessToken,
   shouldRefresh,
   type OAuthHttpDeps,
@@ -46,21 +53,49 @@ export interface ConnectOptions {
   now?: () => Date;
 }
 
+export interface ConnectResult {
+  portalId: string;
+  scopes: string;
+  /** True when the granted scopes include Sequences enrollment (U9/U11 gate). */
+  canSend: boolean;
+}
+
 /**
- * Complete the OAuth connect: exchange the `?code`, look up the portal id, and
- * store the tokens ENCRYPTED, keyed per-tenant by (provider, portal_id).
+ * Complete the OAuth connect: exchange the `?code`, look up the portal id, store
+ * the tokens ENCRYPTED (keyed per-tenant by provider + portal_id), and provision
+ * the four tag properties so the very first `pushLead` can land.
+ *
+ * Property provisioning is part of CONNECT, not of push: HubSpot 400s a write to
+ * a property that does not exist, so a connect that skipped this would hand the
+ * AE a CRM integration that fails on its first real lead.
+ *
+ * ORDER MATTERS. Provisioning runs BEFORE the connection is stored, so a connect
+ * that fails leaves NO connection behind. Storing first meant a 403/timeout during
+ * provisioning returned "connect failed" to the user while `getActiveConnection`
+ * still resolved and `sendReadiness` still reported `connected: true` — every later
+ * push then died deep inside with a generic 502 and no hint that reconnecting was
+ * the remedy. A failed operation must not leave usable-looking state.
  */
 export async function completeHubSpotConnect(
   db: Database,
   deps: OAuthHttpDeps,
   opts: ConnectOptions,
-): Promise<{ portalId: string; scopes: string }> {
+): Promise<ConnectResult> {
   const provider = opts.provider ?? DEFAULT_PROVIDER;
   const now = opts.now?.() ?? new Date();
 
   const tokens = await exchangeCodeForTokens(deps, opts.code);
   const meta = await fetchTokenMeta(deps, tokens.accessToken);
   const scopes = meta.scopes.join(" ");
+
+  // Idempotent: an already-provisioned portal answers 409 and we move on. The
+  // freshly-exchanged access token is valid for ~30 min, so no refresh needed.
+  // Throws on anything else — and nothing has been persisted yet.
+  await ensureLeadProperties({
+    fetch: deps.fetch,
+    getAccessToken: async () => tokens.accessToken,
+    baseUrl: deps.baseUrl,
+  });
 
   await storeConnection(db, {
     provider,
@@ -71,7 +106,21 @@ export async function completeHubSpotConnect(
     scopes,
   });
 
-  return { portalId: meta.hubId, scopes };
+  return { portalId: meta.hubId, scopes, canSend: hasSendScope(meta.scopes) };
+}
+
+/**
+ * Whether the stored connection may drive the send path (R10). Reads GRANTED
+ * scopes, so a portal that installed without Sales Hub Pro reports `canSend:
+ * false` and the UI shows the honest gated state instead of 403-ing at send.
+ */
+export async function sendReadiness(
+  db: Database,
+  provider = DEFAULT_PROVIDER,
+): Promise<{ connected: boolean; canSend: boolean }> {
+  const active = await getActiveConnection(db, provider);
+  if (!active.ok) return { connected: false, canSend: false };
+  return { connected: true, canSend: hasSendScope(active.connection.scopes) };
 }
 
 // ── Access-token provider (proactive refresh) ────────────────────────────────
@@ -141,6 +190,11 @@ export async function pushPracticeLead(
 ): Promise<PushResult> {
   const provider = args.provider ?? DEFAULT_PROVIDER;
   const existing = await loadCrmLink(db, args.practiceId, provider);
+  // Did the DEAL already exist before this push? Only a push that CREATES the deal
+  // may seed `crm_links.stage` below — a re-push would clobber the stage the AE has
+  // since moved the deal to. This flag deliberately does NOT gate `lead_pushed`;
+  // see the ground-truth read at the end of this function for why it cannot.
+  const dealAlreadyLanded = Boolean(existing?.dealId);
 
   // Persist ids AS EACH object lands, so a hard failure mid-sequence (a non-429
   // 5xx, or a 429 that exhausts retries) leaves a partial link that the next
@@ -162,16 +216,26 @@ export async function pushPracticeLead(
     contactId: result.contactId,
     dealId: result.dealId,
     leadQuality: args.lead.tags.aeQuality ?? null,
+    // Seed the created stage ONLY for a deal this push created. Writing it on a
+    // re-push would clobber a real stage the AE has since moved the deal to (the
+    // link row would then contradict HubSpot). On a create it makes
+    // `crm_links.stage` reflect reality before the first poll runs — that column is
+    // what `roiCycleTimeReadback` serves to the U12 scoreboard. It is NOT what
+    // prevents a phantom `meeting_booked`: the create-stage guard in
+    // `recordStageForPractice` is, and that holds even with this seed absent.
+    ...(dealAlreadyLanded ? {} : { stage: INITIAL_DEAL_STAGE_ID }),
     syncedAt: new Date(),
   });
 
-  // Log lead_pushed ONLY on a create — an idempotent re-sync of an
-  // already-landed lead (created:false) must not log a second lead_pushed,
-  // which would over-count the ROI number R8 measures.
-  // KNOWN RESIDUAL (U12): a partial first push then a successful retry can
-  // UNDER-log by one; the complete fix is a DB uniqueness constraint on the
-  // ROI event, deferred to U12.
-  if (result.created) {
+  // Log lead_pushed exactly once per practice. Keyed off the GROUND TRUTH
+  // (`roi_events`), never off `dealAlreadyLanded`: the deal id is committed by the
+  // adapter's `onProgress` in a statement of its OWN, before this insert. Crash in
+  // that window and the id is persisted while the event is not — every later retry
+  // then reads a landed deal, skips the insert, and the push that really landed is
+  // lost permanently and silently. Wrapping the final upsert + insert in one
+  // transaction does NOT close that window: `onProgress` already committed, outside
+  // it. Only re-reading the event log does. (Same lesson as `deal_won`.)
+  if (!(await hasRoiEvent(db, args.practiceId, "lead_pushed"))) {
     await db.insert(roiEvents).values({
       eventType: "lead_pushed",
       practiceId: args.practiceId,
@@ -278,10 +342,6 @@ export async function recordStageForPractice(
   if (!ref) {
     throw new Error(`no ${provider} link for practice ${args.practiceId}`);
   }
-  // Capture the stored stage BEFORE upsertCrmLink below overwrites it, so we
-  // can tell a real stage TRANSITION from a repeated poll of an unchanged stage.
-  const priorReadback = await roiCycleTimeReadback(db, args.practiceId, provider);
-  const priorStage = priorReadback?.stage ?? null;
 
   const readback = await adapter.recordStage(ref);
 
@@ -293,19 +353,68 @@ export async function recordStageForPractice(
     cycleTimeDays: readback.cycleTimeDays,
   });
 
-  // Log a milestone ONLY on an actual stage TRANSITION — a repeated poll that
-  // reads back the SAME stage must not log a second milestone, which would
-  // over-count the ROI number R8 measures on repeated stage polls.
-  // The WON gate stays: HubSpot sets `closedate` for closed-LOST too, so keying
-  // a "win" off closedAt would log every lost deal as a win. "closedwon" is
-  // HubSpot's default won-stage id (verify the portal's stage ids live in U15).
-  if (readback.stage && readback.stage !== priorStage) {
+  // Two guards, each load-bearing for R12's numbers:
+  //   1. a milestone stage, and not the stage the tool CREATED the deal in.
+  //      `stageMilestone` already returns null for mid-pipeline steps and for
+  //      `closedlost`. The create-stage guard matters because HubSpot's default
+  //      pipeline starts at "Appointment Scheduled": reading that back — on the
+  //      first poll, or after the AE moves a deal back to it — is never the AE
+  //      booking a meeting. The guard releases itself the moment U12 introduces a
+  //      pipeline whose first stage is not the meeting stage.
+  //   2. the FIRST time ever for this practice.
+  //
+  // Deliberately NOT "the stage differs from the last poll". That reads naturally
+  // but is wrong twice over: it misses a REVISIT (a deal moved back into a
+  // milestone stage logs again), and — because the link row is written before the
+  // event, in separate statements — a crash between the two would make every later
+  // poll see an unchanged stage and lose the milestone permanently and silently.
+  // `hasRoiEvent` carries the exactly-once invariant on its own, and it re-reads
+  // the ground truth (roi_events) rather than a cache of it.
+  const milestone = stageMilestone(readback.stage);
+  const isCreateStage = readback.stage === INITIAL_DEAL_STAGE_ID;
+  if (
+    milestone &&
+    !isCreateStage &&
+    !(await hasRoiEvent(db, args.practiceId, milestone))
+  ) {
     await db.insert(roiEvents).values({
-      eventType: readback.stage === "closedwon" ? "deal_won" : "meeting_booked",
+      eventType: milestone,
       practiceId: args.practiceId,
       payload: { stage: readback.stage, cycleTimeDays: readback.cycleTimeDays },
     });
   }
 
   return readback;
+}
+
+/** ROI events that must be logged AT MOST once per practice (R8 push, R12 tiles). */
+type ExactlyOnceEvent = RoiMilestone | "lead_pushed";
+
+/**
+ * Has this practice already recorded this event? (R8/R12: never double-count, never
+ * lose it.) The exactly-once gate re-reads `roi_events` — the ground truth — rather
+ * than any cached signal of it (a stage column, a persisted deal id), so it survives
+ * a crash between that signal being written and the event landing.
+ *
+ * Still check-then-insert: two CONCURRENT calls for one practice can both read false
+ * and both insert. The DB-level gate is a partial unique index on
+ * `roi_events (practice_id, event_type)`; it lands with U12, when `roi_events` gets a
+ * real consumer and a route drives these concurrently.
+ */
+async function hasRoiEvent(
+  db: Database,
+  practiceId: string,
+  eventType: ExactlyOnceEvent,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: roiEvents.id })
+    .from(roiEvents)
+    .where(
+      and(
+        eq(roiEvents.practiceId, practiceId),
+        eq(roiEvents.eventType, eventType),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
 }
