@@ -5,16 +5,22 @@ import {
   parseAllowlist,
   requireSession,
 } from "@/src/lib/auth";
-import { verifySharedSecret } from "@/src/lib/secret";
+// `verifySharedSecret` / `@/src/lib/secret` were removed with Clay — nothing calls a
+// shared-secret callback now that PDL is synchronous. See src/lib/auth.ts publicPaths.
 
 describe("isPublicPath (R18)", () => {
   const PROD = true;
   const DEV = false;
 
-  it("always leaves /login and the callback reachable, or the redirect loops", () => {
+  it("always leaves /login reachable, or the redirect loops", () => {
     for (const env of [PROD, DEV]) {
       expect(isPublicPath("/login", env)).toBe(true);
-      expect(isPublicPath("/api/enrich-callback", env)).toBe(true);
+    }
+  });
+
+  it("does NOT expose the removed Clay callback in any environment", () => {
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/api/enrich-callback", env)).toBe(false);
     }
   });
 
@@ -82,18 +88,5 @@ describe("requireSession", () => {
     const r = requireSession({ user: { email: "ae@eliseai.com" } }, allowlist);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.email).toBe("ae@eliseai.com");
-  });
-});
-
-describe("verifySharedSecret", () => {
-  it("accepts a matching secret", () => {
-    expect(verifySharedSecret("s3cret", "s3cret")).toBe(true);
-  });
-  it("rejects a mismatch", () => {
-    expect(verifySharedSecret("wrong", "s3cret")).toBe(false);
-  });
-  it("fails closed when either secret is missing", () => {
-    expect(verifySharedSecret(null, "s3cret")).toBe(false);
-    expect(verifySharedSecret("s3cret", undefined)).toBe(false);
   });
 });

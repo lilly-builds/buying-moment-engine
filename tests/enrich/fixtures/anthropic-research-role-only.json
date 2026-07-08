@@ -1,0 +1,23 @@
+{
+  "id": "msg_01ExampleRoleOnly",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "I searched the practice website and could not find a named administrator.\n\n{\n  \"firmographics\": {\n    \"specialty\": {\"value\": \"Ophthalmology\", \"sourceUrl\": \"https://harborvision.example/\", \"snippet\": \"Harbor Vision Eye Care has served Portland since 1998.\"}\n  },\n  \"ehr\": null,\n  \"incumbentTooling\": [],\n  \"decisionMaker\": {\n    \"name\": null,\n    \"role\": {\"value\": \"Office Manager\", \"sourceUrl\": \"https://harborvision.example/careers\", \"snippet\": \"Report directly to the Office Manager.\"},\n    \"email\": null,\n    \"linkedinUrl\": null\n  },\n  \"buyingMomentContext\": []\n}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 3011,
+    "output_tokens": 288,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "server_tool_use": {
+      "web_search_requests": 3,
+      "web_fetch_requests": 1
+    }
+  }
+}

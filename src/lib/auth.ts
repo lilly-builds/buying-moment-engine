@@ -25,8 +25,9 @@ export function isAllowlisted(
 /**
  * Routes reachable without a session.
  *
- * `/login` and the shared-secret callback must always stay open or the redirect
- * to /login would loop.
+ * `/login` must always stay open or the redirect to /login would loop.
+ * (The `/api/enrich-callback` route was removed with Clay — PDL is a synchronous
+ * request/response API, so no inbound callback exists to keep public.)
  *
  * `/styleguide` is open ONLY outside production. It is U2's visual-QA surface: it
  * renders design tokens and empty component variants, and reads nothing from the
@@ -36,7 +37,7 @@ export function isAllowlisted(
  * a Supabase round-trip. If it ever grows a real practice on it, delete this.
  */
 export function publicPaths(isProduction: boolean): string[] {
-  const paths = ["/login", "/api/enrich-callback"];
+  const paths = ["/login"];
   if (!isProduction) paths.push("/styleguide");
   return paths;
 }

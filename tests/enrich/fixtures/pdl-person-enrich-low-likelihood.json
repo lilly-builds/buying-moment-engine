@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "likelihood": 3,
+  "data": {
+    "id": "aBcDeF1234_0000",
+    "full_name": "d whitfield",
+    "job_title": "administrator",
+    "work_email": "d.whitfield@guessed-domain.example",
+    "linkedin_url": "linkedin.com/in/d-whitfield-maybe"
+  }
+}

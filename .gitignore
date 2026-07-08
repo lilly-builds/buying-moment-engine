@@ -44,6 +44,11 @@ next-env.d.ts
 # agent worktrees (ce-work parallel dispatch)
 /.claude/
 
+# Experiment #1 output — contains real decision-maker names + verified work emails.
+# The repo is PUBLIC. The cohort (public business info) is committed; results are NOT.
+experiment-1-results.jsonl
+experiment-*-results.jsonl
+
 # HubSpot CLI personal access key (never commit)
 .hs-pak
 hubspot.config.yml

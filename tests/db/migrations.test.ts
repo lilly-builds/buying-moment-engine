@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "../setup";
-import { contacts, costEvents, evidence, practices, signals } from "@/db/schema";
+import {
+  contacts,
+  costEvents,
+  evidence,
+  practiceFacts,
+  practices,
+  signals,
+} from "@/db/schema";
 
 describe("migrations", () => {
   let t: TestDb;
@@ -18,5 +25,7 @@ describe("migrations", () => {
     expect(await t.db.select().from(evidence)).toEqual([]);
     expect(await t.db.select().from(contacts)).toEqual([]);
     expect(await t.db.select().from(costEvents)).toEqual([]);
+    // 0003 — the citation-carrying enrichment store (U5).
+    expect(await t.db.select().from(practiceFacts)).toEqual([]);
   });
 });

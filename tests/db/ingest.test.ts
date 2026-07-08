@@ -54,4 +54,28 @@ describe("ingestRawSignal", () => {
     expect(await t.db.select().from(signals)).toHaveLength(0);
     expect(await t.db.select().from(evidence)).toHaveLength(0);
   });
+
+  it("the fallback dedupe hash is KEY-ORDER-INDEPENDENT (U5)", async () => {
+    // Same payload, keys emitted in a different order, and NO explicit dedupeHash.
+    const a = {
+      detectorKind: "staffing_spike",
+      payload: { snippet: "Hiring", confidence: 0.9 },
+      sourceUrl: "https://boards.example.com/job/7",
+      practiceHint: "Sunshine Dermatology",
+      detectedAt: "2026-07-01T00:00:00Z",
+      geoKey: "tampa-fl",
+    };
+    const b = {
+      geoKey: "tampa-fl",
+      detectedAt: "2026-07-01T00:00:00Z",
+      practiceHint: "Sunshine Dermatology",
+      sourceUrl: "https://boards.example.com/job/7",
+      payload: { confidence: 0.9, snippet: "Hiring" },
+      detectorKind: "staffing_spike",
+    };
+
+    expect((await ingestRawSignal(t.db, a)).status).toBe("ingested");
+    expect((await ingestRawSignal(t.db, b)).status).toBe("duplicate");
+    expect(await t.db.select().from(rawSignals)).toHaveLength(1);
+  });
 });
