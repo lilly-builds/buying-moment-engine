@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { upsertPractice, upsertSignal } from "@/db/ingest";
 import { signalCount } from "@/db/queries";
-import { evidence, practices } from "@/db/schema";
+import { evidence, practices, signals } from "@/db/schema";
 import type { Database } from "@/db/types";
 import type { DetectorKind } from "@/src/ingest/validate";
 import { normalizeName } from "@/src/ingest/validate";
@@ -167,32 +167,57 @@ export interface SignalAttachment {
  * Persist one evidence atom + its signal against an already-resolved practice.
  * Mirrors the ingest rail's promotion step so the citation contract (source URL +
  * snippet + detected_at) survives the resolver path too.
+ *
+ * IDEMPOTENT (R17). The ingest rail earns its idempotency upstream, from
+ * `raw_signals.dedupe_hash`. This path has no raw row, so the CITATION IDENTITY is
+ * the dedupe key: the same claim (`kind`) about the same practice, sourced from the
+ * same page. Insert-then-upsert cannot work here — a fresh `evidence` row means a
+ * fresh `evidence_id`, so `signals`' ON CONFLICT (practice_id, kind, evidence_id)
+ * could never fire and every re-run would duplicate both rows. U8's pull-mode
+ * re-runs the on-demand detector pass on demand, so this path WILL be re-entered.
+ * The existence check and the writes share one transaction so a concurrent
+ * re-entry can't interleave between them.
  */
 export async function attachSignal(db: Database, args: SignalAttachment) {
-  const [ev] = await db
-    .insert(evidence)
-    .values({
-      sourceUrl: args.sourceUrl,
-      snippet: args.snippet ?? null,
-      confidence:
-        args.confidence === null || args.confidence === undefined
-          ? null
-          : String(args.confidence),
-      detectedAt: args.detectedAt,
-    })
-    .returning({ id: evidence.id });
+  const confidence =
+    args.confidence === null || args.confidence === undefined
+      ? null
+      : String(args.confidence);
 
-  return upsertSignal(db, {
-    practiceId: args.practiceId,
-    kind: args.kind,
-    evidenceId: ev.id,
-    confidence:
-      args.confidence === null || args.confidence === undefined
-        ? null
-        : String(args.confidence),
-    detectedAt: args.detectedAt,
-    expiresAt: args.expiresAt ?? null,
-    signalSource: args.signalSource ?? args.kind,
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(signals)
+      .innerJoin(evidence, eq(signals.evidenceId, evidence.id))
+      .where(
+        and(
+          eq(signals.practiceId, args.practiceId),
+          eq(signals.kind, args.kind),
+          eq(evidence.sourceUrl, args.sourceUrl),
+        ),
+      )
+      .limit(1);
+    if (existing) return existing.signals;
+
+    const [ev] = await tx
+      .insert(evidence)
+      .values({
+        sourceUrl: args.sourceUrl,
+        snippet: args.snippet ?? null,
+        confidence,
+        detectedAt: args.detectedAt,
+      })
+      .returning({ id: evidence.id });
+
+    return upsertSignal(tx, {
+      practiceId: args.practiceId,
+      kind: args.kind,
+      evidenceId: ev.id,
+      confidence,
+      detectedAt: args.detectedAt,
+      expiresAt: args.expiresAt ?? null,
+      signalSource: args.signalSource ?? args.kind,
+    });
   });
 }
 

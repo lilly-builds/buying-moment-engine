@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { count, eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../setup";
-import { practices } from "@/db/schema";
+import { evidence, practices, signals } from "@/db/schema";
 import {
   attachSignal,
   canonicalizeName,
@@ -166,18 +167,66 @@ describe("practice resolution + derived signal count", () => {
     expect(await firedSignalCount(t.db, practiceId)).toBe(0);
   });
 
-  it("re-attaching identical evidence is idempotent (ON CONFLICT DO NOTHING)", async () => {
+  it("re-attaching identical evidence is idempotent — no duplicate evidence or signal rows", async () => {
     const { practiceId } = await resolvePractice(t.db, {
       name: "Harbor Vision Eye Care",
       geoKey: "portland-or",
     });
-    const a = await attachSignal(t.db, {
-      practiceId,
-      kind: "phone_complaints",
-      sourceUrl: "https://reviews.example.com/harbor",
-      detectedAt: DETECTED,
+    const attach = () =>
+      attachSignal(t.db, {
+        practiceId,
+        kind: "phone_complaints" as const,
+        sourceUrl: "https://reviews.example.com/harbor",
+        detectedAt: DETECTED,
+      });
+
+    const first = await attach();
+    const second = await attach(); // the re-attach — this is the whole point
+
+    expect(first.id).toBeTruthy();
+    // Same signal row returned, not a second one.
+    expect(second.id).toBe(first.id);
+
+    // Count the ROWS, not the derived signal count. `firedSignalCount` counts
+    // DISTINCT kinds, so it reads 1 even when the tables have silently doubled —
+    // which is exactly how the original version of this test hid the bug.
+    const [{ n: evidenceRows }] = await t.db
+      .select({ n: count() })
+      .from(evidence)
+      .innerJoin(signals, eq(signals.evidenceId, evidence.id))
+      .where(eq(signals.practiceId, practiceId));
+    const [{ n: signalRows }] = await t.db
+      .select({ n: count() })
+      .from(signals)
+      .where(eq(signals.practiceId, practiceId));
+
+    expect(evidenceRows).toBe(1);
+    expect(signalRows).toBe(1);
+    expect(await firedSignalCount(t.db, practiceId)).toBe(1);
+  });
+
+  it("a DIFFERENT source URL for the same kind attaches as new evidence", async () => {
+    // Guard the other direction: dedupe must key on the citation, not collapse
+    // two genuinely distinct sources into one. Two reviews on different pages are
+    // two pieces of evidence for one fired signal kind.
+    const { practiceId } = await resolvePractice(t.db, {
+      name: "Cascade Vision Partners",
+      geoKey: "portland-or",
     });
-    expect(a.id).toBeTruthy();
+    for (const url of ["https://a.example.com/r1", "https://b.example.com/r2"]) {
+      await attachSignal(t.db, {
+        practiceId,
+        kind: "phone_complaints",
+        sourceUrl: url,
+        detectedAt: DETECTED,
+      });
+    }
+    const [{ n: signalRows }] = await t.db
+      .select({ n: count() })
+      .from(signals)
+      .where(eq(signals.practiceId, practiceId));
+    expect(signalRows).toBe(2);
+    // ...but still ONE fired signal kind (D8/R1).
     expect(await firedSignalCount(t.db, practiceId)).toBe(1);
   });
 
