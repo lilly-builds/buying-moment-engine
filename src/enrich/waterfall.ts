@@ -32,12 +32,11 @@ import type {
  * The practice carries `enrichment_status = 'pending'` while the (seconds-long)
  * waterfall runs — U8's pull-mode progress UI reads exactly that.
  *
- * COST DISCIPLINE — the rule this file exists to enforce: PDL is called ONLY for
- * the fields Claude left as gaps AND the stored contact does not already fill. A
- * practice whose staff page publishes the manager's name, email and LinkedIn makes
- * ZERO PDL calls; so does a re-run of a practice we already enriched. The decisions
- * are `computeGaps` + `subtractFilled` in `./gaps.ts` — pure, and tested without a
- * database.
+ * COST DISCIPLINE — the rule this file exists to enforce: PDL is called ONLY for the
+ * fields Claude left as gaps AND the stored contact does not already fill. A practice
+ * whose staff page publishes the manager's name, email and LinkedIn makes ZERO PDL
+ * calls; so does a re-run of one we already enriched. The decisions are `computeGaps`
+ * + `subtractFilled` in `./gaps.ts` — pure, and tested without a database.
  */
 
 export interface WaterfallDeps {
@@ -149,8 +148,7 @@ export async function enrichPractice(
 
   // Stage 2 — PDL, for the gaps ONLY, and only the gaps the DB cannot already fill.
   // A re-run must not re-buy an email `upsertContact` would then refuse to write. The
-  // stored row is read on (practice, role) — the same key it is written on, so a
-  // drifted role reads null and is correctly treated as a new contact to fill.
+  // stored row is read on (practice, role), the same key it is written on.
   const decisionMaker = findings.decisionMaker;
   const claudeGaps = computeGaps(findings);
   const gaps =
@@ -228,8 +226,7 @@ async function persistContact(
   // PDL may fill ONLY the fields Claude left blank. A Claude-cited value always
   // wins: it has a source URL, PDL's does not.
   const email = dm.email?.value ?? (gaps.email ? pdlResult?.workEmail : null);
-  // PDL's LinkedIn URL arrives scheme-less. Normalize at the persist boundary, so a
-  // broken `href` can never reach the contact card (U9).
+  // PDL's LinkedIn URL arrives scheme-less: normalize so U9's `href` is never broken.
   const linkedinUrl = normalizeLinkedinUrl(
     dm.linkedinUrl?.value ?? (gaps.linkedinUrl ? pdlResult?.linkedinUrl : null),
   );

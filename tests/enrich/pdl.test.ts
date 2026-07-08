@@ -73,7 +73,7 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
 
 describe("BILLED vs MATCHED — PDL charges on the HTTP 200, not on our judgement", () => {
   it("a 200 whose body we do not recognize is BILLED, and the meter charges units=1", async () => {
-    // Real spend, zero usable data. Metering on `matched` would book this at $0.
+    // Real spend, zero usable data. Metering on `matched` books this at $0.
     const unrecognized = { data: { some: "shape we have never seen" } };
     expect(normalizePersonResponse(unrecognized, 200)).toEqual({
       billed: true,
@@ -94,8 +94,7 @@ describe("BILLED vs MATCHED — PDL charges on the HTTP 200, not on our judgemen
   });
 
   it("a 200 below the likelihood threshold is BILLED, and the meter charges units=1", async () => {
-    // PDL returned a person and charged for it; we refuse to USE it (D9). The
-    // refusal is ours, the invoice is theirs.
+    // PDL returned a person and charged for it; we refuse to USE it (D9).
     const result = normalizePersonResponse(personLowLikelihood, 200);
     expect(result.billed).toBe(true);
     expect(result.matched).toBe(false);
@@ -118,7 +117,7 @@ describe("the real PDL client over a stubbed fetch — a billed 200 never throws
 
   it("a 200 whose BODY STREAM dies mid-read is still billed, so it still writes a row", async () => {
     // The 200 header is the billing event; `res.text()` rejecting afterwards must not
-    // unwind past the meter. Guarding only `JSON.parse` would leave this path throwing.
+    // unwind past the meter.
     vi.stubGlobal("fetch", async () => {
       const body = new ReadableStream({
         start(controller) {
