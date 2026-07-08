@@ -148,11 +148,18 @@ export async function enrichPractice(
   }
 
   // Stage 2 — PDL, for the gaps ONLY, and only the gaps the DB cannot already fill.
-  // A re-run must not re-buy an email `upsertContact` would then refuse to write.
+  // A re-run must not re-buy an email `upsertContact` would then refuse to write. The
+  // stored row is read on (practice, role) — the same key it is written on, so a
+  // drifted role reads null and is correctly treated as a new contact to fill.
+  const decisionMaker = findings.decisionMaker;
   const claudeGaps = computeGaps(findings);
-  const gaps = hasGap(claudeGaps)
-    ? subtractFilled(claudeGaps, await getContact(deps.db, practice.id))
-    : claudeGaps;
+  const gaps =
+    decisionMaker && hasGap(claudeGaps)
+      ? subtractFilled(
+          claudeGaps,
+          await getContact(deps.db, practice.id, decisionMaker.role.value),
+        )
+      : claudeGaps;
   const { pdlCalls, pdlResult } = await fillGaps(deps, practice, findings, gaps, log);
 
   const contactVariant = await persistContact(

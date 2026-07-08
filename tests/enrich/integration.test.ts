@@ -7,6 +7,7 @@ import roleOnly from "./fixtures/anthropic-research-role-only.json";
 import personMatch from "./fixtures/pdl-person-enrich-match.json";
 import personNotFound from "./fixtures/pdl-person-enrich-404.json";
 import { FakePdlClient, FakeResearchClient, recordingMeter } from "./doubles";
+import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
 import { drizzleCostRecorder } from "@/db/cost-recorder";
 import { contacts, costEvents, evidence, practiceFacts, practices } from "@/db/schema";
 import { upsertContact, upsertPracticeFact } from "@/db/enrich";
@@ -397,6 +398,62 @@ describe("enrichment waterfall (integration)", () => {
     expect(rows.filter((r) => r.provider === "pdl")).toHaveLength(1);
     // The Claude call is NOT cached; it is bought again, and metered again.
     expect(rows.filter((r) => r.provider === "anthropic")).toHaveLength(2);
+  });
+
+  it("a DRIFTED role is a different contact — PDL fills it, and no row is left empty", async () => {
+    // `contacts` has no unique constraint and `role` is free text from the model, so a
+    // re-run under a new title INSERTS a second row. The cost guard must read on the
+    // same (practice, role) key `upsertContact` writes on — otherwise the old row's
+    // email suppresses the PDL call and the new row is persisted empty.
+    const practiceId = await seedPractice(
+      "Sunshine Dermatology Associates",
+      "miami-fl",
+    );
+    const pdl = FakePdlClient.fromFixture(personMatch);
+    const { meter } = recordingMeter();
+    const withResearch = (research: FakeResearchClient): WaterfallDeps => ({
+      db: t.db,
+      research,
+      pdl,
+      meter,
+      now: () => NOW,
+      logger: SILENT,
+    });
+    const practice = { id: practiceId, name: "Sunshine Dermatology Associates" };
+
+    const base = parseMessagesResponse(researchFixture);
+    const drifted = new FakeResearchClient(async () => ({
+      ...base,
+      text: base.text.replaceAll(
+        '"Practice Administrator"',
+        '"Practice Manager"',
+      ),
+    }));
+
+    await enrichPractice(
+      withResearch(FakeResearchClient.fromFixture(researchFixture)),
+      practice,
+    );
+    const second = await enrichPractice(withResearch(drifted), practice);
+
+    // The drifted role is an unfilled contact, so PDL is bought for it.
+    expect(second.pdlCalls).toBe(1);
+
+    const rows = await t.db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.practiceId, practiceId));
+    expect(rows.map((r) => r.role).sort()).toEqual([
+      "Practice Administrator",
+      "Practice Manager",
+    ]);
+    // Neither row is empty — the guard saved money, it did not eat the data.
+    for (const row of rows) {
+      expect(row.email).toBe("dana.whitfield@sunshinederm.example");
+      expect(row.linkedinUrl).toBe(
+        "https://linkedin.com/in/dana-whitfield-example",
+      );
+    }
   });
 });
 

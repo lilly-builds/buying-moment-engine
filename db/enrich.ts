@@ -119,24 +119,27 @@ export type UpsertContactResult = {
 export type StoredContact = typeof contacts.$inferSelect;
 
 /**
- * The practice's stored decision-maker, or null. Read BEFORE the waterfall spends on
- * PDL: `upsertContact` fills NULL columns only, so buying a field the row already
- * holds produces a value that is written nowhere. Idempotent on data is not enough —
- * a re-run must be idempotent on SPEND too.
+ * The stored contact for this practice + role, or null. Read BEFORE the waterfall
+ * spends on PDL: `upsertContact` fills NULL columns only, so buying a field the row
+ * already holds produces a value that is written nowhere. Idempotent on data is not
+ * enough — a re-run must be idempotent on SPEND too.
  *
- * Scoped to the practice, not to (practice, role): this pipeline resolves exactly one
- * decision-maker per practice, and the question being asked is "do we already own this
- * practice's email?", not "do we own this exact job title's email?".
+ * Keyed on the SAME (practice_id, role) tuple `upsertContact` writes on, and that is
+ * load-bearing. `role` is free text from the model and `contacts` carries no unique
+ * constraint, so a re-run whose role drifts ("Practice Administrator" -> "Practice
+ * Manager") INSERTS a second row. Reading by practice_id alone would let the old
+ * row's email suppress the PDL call, and the new row would be written empty — the
+ * cost guard silently eating the data it was meant to protect.
  */
 export async function getContact(
   db: Database,
   practiceId: string,
+  role: string,
 ): Promise<StoredContact | null> {
   const [row] = await db
     .select()
     .from(contacts)
-    .where(eq(contacts.practiceId, practiceId))
-    .orderBy(contacts.createdAt)
+    .where(and(eq(contacts.practiceId, practiceId), eq(contacts.role, role)))
     .limit(1);
   return row ?? null;
 }
