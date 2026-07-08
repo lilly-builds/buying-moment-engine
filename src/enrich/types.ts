@@ -52,6 +52,18 @@ export interface Firmographics {
   yearFounded?: CitedFact;
 }
 
+/**
+ * The keys of `Firmographics`, fixed and ordered. Iterate this rather than
+ * `Object.keys()`: it survives an absent key, it makes `dropped` read the same on
+ * every run, and adding a field here fails the compile in every place that must
+ * change with it.
+ */
+export const FIRMOGRAPHIC_FIELDS = [
+  "specialty",
+  "website",
+  "yearFounded",
+] as const satisfies readonly (keyof Firmographics)[];
+
 export interface ResearchFindings {
   firmographics: Firmographics;
   /** Incumbent EHR, if the practice states it publicly. */
@@ -114,6 +126,31 @@ export interface ResearchResponse {
 
 export interface ResearchClient {
   research(request: ResearchRequest): Promise<ResearchResponse>;
+}
+
+// ─── Claude extraction client seam (the PRIMARY path) ─────────────────────────
+
+/**
+ * Extraction reads text we already hold. `pages` is `Map<absoluteUrl, cleanedText>`
+ * exactly as `scrape.ts` produced it — never a flattened blob (KTD-3). The URL key
+ * is what the model is told to cite and what `citations.ts` checks the snippet
+ * against; join the pages together and provenance is gone, leaving only "this
+ * sentence exists somewhere."
+ */
+export interface ExtractRequest {
+  practiceName: string;
+  city?: string | null;
+  state?: string | null;
+  pages: Map<string, string>;
+}
+
+/**
+ * Same raw shape as `ResearchClient`: text + usage + model, parsed outside the
+ * meter. A billed 200 whose body we cannot read is a resolved response carrying
+ * `unpricedReason`, never a throw.
+ */
+export interface ExtractClient {
+  extract(request: ExtractRequest): Promise<ResearchResponse>;
 }
 
 // ─── PDL client seam ──────────────────────────────────────────────────────────

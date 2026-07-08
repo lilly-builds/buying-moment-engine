@@ -12,6 +12,7 @@ import {
   ANTHROPIC_INPUT_USD_PER_TOKEN,
   ANTHROPIC_OUTPUT_USD_PER_TOKEN,
   anthropicCallCostUsd,
+  RESEARCH_RATES,
   RESEARCH_MODEL,
   WEB_FETCH_TOOL_TYPE,
   WEB_SEARCH_TOOL_TYPE,
@@ -226,7 +227,7 @@ describe("usage + cost math", () => {
       webFetchRequests: 5,
     };
     // $3 input + $15 output + 2 x $0.01 search; web fetch is free.
-    expect(anthropicCallCostUsd(usage)).toBeCloseTo(
+    expect(anthropicCallCostUsd(usage, RESEARCH_RATES)).toBeCloseTo(
       3 + 15 + 2 * WEB_SEARCH_USD_PER_REQUEST,
       10,
     );
@@ -238,7 +239,7 @@ describe("usage + cost math", () => {
       cacheCreationInputTokens: 1_000_000,
       cacheReadInputTokens: 1_000_000,
     };
-    expect(anthropicCallCostUsd(usage)).toBeCloseTo(3 * 1.25 + 3 * 0.1, 10);
+    expect(anthropicCallCostUsd(usage, RESEARCH_RATES)).toBeCloseTo(3 * 1.25 + 3 * 0.1, 10);
   });
 });
 

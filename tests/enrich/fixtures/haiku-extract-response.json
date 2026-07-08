@@ -1,0 +1,17 @@
+{
+  "id": "msg_01ExtractFixture",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"firmographics\":{\"specialty\":{\"value\":\"Dermatology\",\"sourceUrl\":\"https://sunshinederm.example\",\"snippet\":\"Sunshine Dermatology Associates is a dermatology group serving South Florida.\"},\"website\":{\"value\":\"https://sunshinederm.example\",\"sourceUrl\":\"https://sunshinederm.example\",\"snippet\":\"Sunshine Dermatology Associates is a dermatology group serving South Florida.\"},\"yearFounded\":null},\"ehr\":{\"value\":\"ModMed EMA\",\"sourceUrl\":\"https://sunshinederm.example/patients\",\"snippet\":\"Request records through our ModMed EMA patient portal.\"},\"incumbentTooling\":[],\"decisionMaker\":{\"name\":{\"value\":\"Dana Whitfield\",\"sourceUrl\":\"https://sunshinederm.example/team\",\"snippet\":\"Dana Whitfield, Practice Administrator\"},\"role\":{\"value\":\"Practice Administrator\",\"sourceUrl\":\"https://sunshinederm.example/team\",\"snippet\":\"Dana Whitfield, Practice Administrator\"},\"email\":null,\"linkedinUrl\":null},\"buyingMomentContext\":[]}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 9412,
+    "output_tokens": 318
+  }
+}

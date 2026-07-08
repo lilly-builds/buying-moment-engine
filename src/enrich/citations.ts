@@ -1,8 +1,9 @@
-import type {
-  CitedFact,
-  DecisionMaker,
-  Firmographics,
-  ResearchFindings,
+import {
+  FIRMOGRAPHIC_FIELDS,
+  type CitedFact,
+  type DecisionMaker,
+  type Firmographics,
+  type ResearchFindings,
 } from "./types";
 
 /**
@@ -130,9 +131,6 @@ function verifyFact(
 
   return page.includes(snippet) ? fact : drop("snippet-not-verbatim");
 }
-
-/** Fixed and ordered, so `dropped` reads the same on every run (KTD-4). */
-const FIRMOGRAPHIC_FIELDS = ["specialty", "website", "yearFounded"] as const;
 
 function verifyFirmographics(
   firmographics: Firmographics,

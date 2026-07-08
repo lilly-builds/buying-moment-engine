@@ -3,6 +3,7 @@ import {
   anthropicCallCostUsd,
   anthropicCostBreakdown,
   PIPELINE_STEP_RESEARCH,
+  RESEARCH_RATES,
 } from "./config";
 import { parseResearchOutput } from "./research-schema";
 import type {
@@ -56,9 +57,9 @@ export async function runResearch(
       practiceId: deps.practiceId ?? null,
       // One metered paid call = one HTTP request to /v1/messages.
       units: 1,
-      unitCostUsd: (res) => anthropicCallCostUsd(res.usage),
+      unitCostUsd: (res) => anthropicCallCostUsd(res.usage, RESEARCH_RATES),
       meta: (res) => ({
-        ...anthropicCostBreakdown(res.usage),
+        ...anthropicCostBreakdown(res.usage, RESEARCH_RATES),
         practiceName: request.practiceName,
         ...(res.unpricedReason === undefined
           ? {}

@@ -9,15 +9,28 @@
 
 import type { ClaudeUsage } from "./types";
 
-// ─── Model (spec § Stack — LOCKED) ────────────────────────────────────────────
+// ─── Models (spec § Stack — LOCKED) ───────────────────────────────────────────
 //
 // "Anthropic Claude — Opus 4.8 (brief voice) · Sonnet 5 / Haiku 4.5 (agentic
-// research + extraction)". U5 is research + extraction, so it runs on Sonnet 5.
-// Opus 4.8 is U6's brief-voice model and is deliberately NOT used here.
+// research + extraction)". Opus 4.8 is U6's brief-voice model, never used here.
+//
+// EXTRACT is the primary path: one call over page text we already hold, so it needs
+// no web tools and no reasoning depth — Haiku 4.5 does it for ~1/128th of the cost
+// (E5, n=6). RESEARCH is the rare agentic escalation, which needs `web_search` /
+// `web_fetch`; those `_20260209` tools require Sonnet 5 or Opus 4.6+ and are NOT
+// available on Haiku, so escalation stays on Sonnet 5.
+export const EXTRACT_MODEL = "claude-haiku-4-5" as const;
 export const RESEARCH_MODEL = "claude-sonnet-5" as const;
 
 /** Non-streaming; stays well under the SDK/HTTP timeout ceiling (~16k). */
 export const RESEARCH_MAX_TOKENS = 8000;
+
+/**
+ * Findings JSON for one practice. Measured output was 700-1,100 tokens (E5, n=6);
+ * 4k leaves headroom without inviting a `stop_reason: max_tokens` truncation, which
+ * under structured outputs yields syntactically incomplete JSON.
+ */
+export const EXTRACT_MAX_TOKENS = 4000;
 
 // ─── Anthropic pricing (USD per token) ────────────────────────────────────────
 //
@@ -28,6 +41,37 @@ export const RESEARCH_MAX_TOKENS = 8000;
 // promotional rate that expires mid-demo and silently re-prices historical CAC.
 export const ANTHROPIC_INPUT_USD_PER_TOKEN = 3 / 1_000_000;
 export const ANTHROPIC_OUTPUT_USD_PER_TOKEN = 15 / 1_000_000;
+
+// Claude Haiku 4.5 list price: $1 / input MTok, $5 / output MTok. Same source.
+export const HAIKU_INPUT_USD_PER_TOKEN = 1 / 1_000_000;
+export const HAIKU_OUTPUT_USD_PER_TOKEN = 5 / 1_000_000;
+
+/**
+ * A rate card, passed EXPLICITLY to every pricing call.
+ *
+ * There is no default. Two models now share one cost formula, and a default would
+ * mean forgetting the argument prices a Haiku call at Sonnet rates — silently, by
+ * 3x, in the one number (CAC) this repo exists to measure. A missing argument
+ * should be a compile error, not a plausible wrong answer.
+ */
+export interface ModelRates {
+  /** The rate card we priced against, written into `meta.model` on the cost row. */
+  model: string;
+  inputUsdPerToken: number;
+  outputUsdPerToken: number;
+}
+
+export const RESEARCH_RATES: ModelRates = {
+  model: RESEARCH_MODEL,
+  inputUsdPerToken: ANTHROPIC_INPUT_USD_PER_TOKEN,
+  outputUsdPerToken: ANTHROPIC_OUTPUT_USD_PER_TOKEN,
+};
+
+export const EXTRACT_RATES: ModelRates = {
+  model: EXTRACT_MODEL,
+  inputUsdPerToken: HAIKU_INPUT_USD_PER_TOKEN,
+  outputUsdPerToken: HAIKU_OUTPUT_USD_PER_TOKEN,
+};
 
 // https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 // Cache writes cost 1.25x base input; cache reads cost 0.1x base input.
@@ -97,9 +141,26 @@ export const PDL_MIN_LIKELIHOOD = 6;
 export const ENRICH_FETCH_TIMEOUT_MS = 600_000;
 export const PDL_FETCH_TIMEOUT_MS = 20_000;
 
+/**
+ * Extraction is a PLAIN Messages call over text we already hold — no server-side
+ * browsing, so it is bounded by Anthropic, not by the web. Measured wall time was
+ * seconds (E5). It must never inherit the agentic path's 10-minute ceiling; a
+ * 60s abort here is a real signal that something is wrong.
+ */
+export const EXTRACT_FETCH_TIMEOUT_MS = 60_000;
+
 /** `cost_events.pipeline_step` values — the scoreboard slices spend on these. */
 export const PIPELINE_STEP_RESEARCH = "enrich.research";
+export const PIPELINE_STEP_EXTRACT = "enrich.extract";
 export const PIPELINE_STEP_PDL = "enrich.pdl";
+
+/** The server-tool surcharge riding inside a Messages call. Zero on the extract path. */
+function serverToolUsd(usage: ClaudeUsage): number {
+  return (
+    usage.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST +
+    usage.webFetchRequests * WEB_FETCH_USD_PER_REQUEST
+  );
+}
 
 /**
  * Total USD for ONE Anthropic Messages request: tokens (input, output, cache
@@ -109,29 +170,34 @@ export const PIPELINE_STEP_PDL = "enrich.pdl";
  * One paid HTTP call -> one `cost_events` row (see `db/schema/roi.ts`), with the
  * component breakdown carried in `meta` so U12 can split token spend from
  * search spend without a second, synthetic wrapper.
+ *
+ * Cache multipliers are model-independent (1.25x write, 0.1x read) and apply to
+ * whichever base input rate `rates` carries.
  */
-export function anthropicCallCostUsd(usage: ClaudeUsage): number {
-  const input = usage.inputTokens * ANTHROPIC_INPUT_USD_PER_TOKEN;
-  const output = usage.outputTokens * ANTHROPIC_OUTPUT_USD_PER_TOKEN;
+export function anthropicCallCostUsd(
+  usage: ClaudeUsage,
+  rates: ModelRates,
+): number {
+  const input = usage.inputTokens * rates.inputUsdPerToken;
+  const output = usage.outputTokens * rates.outputUsdPerToken;
   const cacheWrite =
     usage.cacheCreationInputTokens *
-    ANTHROPIC_INPUT_USD_PER_TOKEN *
+    rates.inputUsdPerToken *
     ANTHROPIC_CACHE_WRITE_MULTIPLIER;
   const cacheRead =
     usage.cacheReadInputTokens *
-    ANTHROPIC_INPUT_USD_PER_TOKEN *
+    rates.inputUsdPerToken *
     ANTHROPIC_CACHE_READ_MULTIPLIER;
-  const search = usage.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST;
-  const fetch = usage.webFetchRequests * WEB_FETCH_USD_PER_REQUEST;
-  return input + output + cacheWrite + cacheRead + search + fetch;
+  return input + output + cacheWrite + cacheRead + serverToolUsd(usage);
 }
 
 /** The `meta` breakdown written alongside each Anthropic cost_events row. */
 export function anthropicCostBreakdown(
   usage: ClaudeUsage,
+  rates: ModelRates,
 ): Record<string, unknown> {
   return {
-    model: RESEARCH_MODEL,
+    model: rates.model,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheCreationInputTokens: usage.cacheCreationInputTokens,
@@ -139,9 +205,6 @@ export function anthropicCostBreakdown(
     webSearchRequests: usage.webSearchRequests,
     webFetchRequests: usage.webFetchRequests,
     webSearchUsd: usage.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST,
-    tokenUsd:
-      anthropicCallCostUsd(usage) -
-      usage.webSearchRequests * WEB_SEARCH_USD_PER_REQUEST -
-      usage.webFetchRequests * WEB_FETCH_USD_PER_REQUEST,
+    tokenUsd: anthropicCallCostUsd(usage, rates) - serverToolUsd(usage),
   };
 }

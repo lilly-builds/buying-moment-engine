@@ -1,6 +1,9 @@
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
+import { EXTRACT_MODEL } from "@/src/enrich/config";
 import { normalizeCompanyResponse, normalizePersonResponse } from "@/src/enrich/pdl-client";
 import type {
+  ExtractClient,
+  ExtractRequest,
   PdlClient,
   PdlCompanyResult,
   PdlPersonRequest,
@@ -60,6 +63,43 @@ export class FakeResearchClient implements ResearchClient {
   }
 
   async research(request: ResearchRequest): Promise<ResearchResponse> {
+    this.calls.push(request);
+    return this.behaviour();
+  }
+}
+
+export class FakeExtractClient implements ExtractClient {
+  calls: ExtractRequest[] = [];
+
+  constructor(private readonly behaviour: () => Promise<ResearchResponse>) {}
+
+  static fromFixture(fixture: unknown): FakeExtractClient {
+    return new FakeExtractClient(async () => parseMessagesResponse(fixture, EXTRACT_MODEL));
+  }
+
+  /** A billed 200 whose body is not the JSON the schema promised. */
+  static malformed(): FakeExtractClient {
+    return new FakeExtractClient(async () => ({
+      text: '{"firmographics": { oops',
+      usage: {
+        inputTokens: 9_000,
+        outputTokens: 40,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        webSearchRequests: 0,
+        webFetchRequests: 0,
+      },
+      model: EXTRACT_MODEL,
+    }));
+  }
+
+  static throwing(error: Error): FakeExtractClient {
+    return new FakeExtractClient(async () => {
+      throw error;
+    });
+  }
+
+  async extract(request: ExtractRequest): Promise<ResearchResponse> {
     this.calls.push(request);
     return this.behaviour();
   }

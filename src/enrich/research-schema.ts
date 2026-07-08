@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ResearchFindings } from "./types";
+import { FIRMOGRAPHIC_FIELDS, type Firmographics, type ResearchFindings } from "./types";
 
 /**
  * The citation gate (D2/R5). The model's JSON is parsed through this schema
@@ -17,6 +17,18 @@ const citedFactSchema = z.object({
   snippet: z.string().min(1),
 });
 
+/**
+ * `null` and "absent" mean the same thing: the page did not state it.
+ *
+ * Structured outputs force this. A JSON Schema with `additionalProperties: false`
+ * lists every optional field in `required` and makes it nullable (the shape all six
+ * E5/E6 calls returned), so Haiku answers `"yearFounded": null` where the agentic
+ * path simply omitted the key. Both must land on the same `undefined`.
+ */
+const optionalCitedFact = citedFactSchema
+  .nullish()
+  .transform((fact) => fact ?? undefined);
+
 const decisionMakerSchema = z.object({
   // null = D9's role-only variant. A missing NAME is honest; a missing ROLE means
   // we learned nothing about who to contact, so the whole object must be null.
@@ -27,16 +39,31 @@ const decisionMakerSchema = z.object({
 });
 
 /**
+ * A key whose value is `undefined` still ENUMERATES. Left alone, a practice where
+ * nothing was found would report `Object.keys(firmographics).length === 3`, and the
+ * next reader's obvious emptiness check would be wrong. Drop the empty keys.
+ */
+function compactFirmographics(firmographics: Firmographics): Firmographics {
+  const compacted: Firmographics = {};
+  for (const field of FIRMOGRAPHIC_FIELDS) {
+    const fact = firmographics[field];
+    if (fact !== undefined) compacted[field] = fact;
+  }
+  return compacted;
+}
+
+/**
  * STRICT: an unknown firmographics key is a parse failure, not a silent pass. The
  * old `z.record()` accepted anything the model invented — including the derived
  * tallies KTD-4 removed, which cannot be honestly cited.
  */
 const firmographicsSchema = z
   .strictObject({
-    specialty: citedFactSchema.optional(),
-    website: citedFactSchema.optional(),
-    yearFounded: citedFactSchema.optional(),
+    specialty: optionalCitedFact,
+    website: optionalCitedFact,
+    yearFounded: optionalCitedFact,
   })
+  .transform(compactFirmographics)
   .default({});
 
 export const researchFindingsSchema = z.object({

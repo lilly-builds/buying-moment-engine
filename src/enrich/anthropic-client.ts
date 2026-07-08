@@ -50,7 +50,9 @@ const usageSchema = z.object({
 });
 
 const messagesResponseSchema = z.object({
-  model: z.string().default(RESEARCH_MODEL),
+  // No default: a body missing `model` falls to the salvage tiers, which label it with
+  // the CALLER's model rather than assuming the agentic one.
+  model: z.string().optional(),
   stop_reason: z.string().nullish(),
   content: z.array(z.object({ type: z.string() }).loose()).default([]),
   usage: usageSchema,
@@ -95,12 +97,12 @@ function salvageUsage(body: unknown): ClaudeUsage | null {
   return parsed.success ? normalizeUsage(parsed.data) : null;
 }
 
-function salvageModel(body: unknown): string {
+function salvageModel(body: unknown, fallback: string): string {
   if (typeof body === "object" && body !== null && "model" in body) {
     const model = (body as { model: unknown }).model;
     if (typeof model === "string" && model.length > 0) return model;
   }
-  return RESEARCH_MODEL;
+  return fallback;
 }
 
 /**
@@ -118,24 +120,31 @@ function salvageModel(body: unknown): string {
  *
  * An empty `text` is "no findings" downstream (`research-schema.ts` reports
  * "no JSON object found"), never a crash.
+ *
+ * `fallbackModel` labels the row when even the body's `model` field is gone. It only
+ * ever reaches an already-flagged `unpriced` row, so a default is safe here in a way
+ * it is NOT for a rate card — see `ModelRates`. `extract.ts` passes `EXTRACT_MODEL`.
  */
-export function parseMessagesResponse(body: unknown): ResearchResponse {
+export function parseMessagesResponse(
+  body: unknown,
+  fallbackModel: string = RESEARCH_MODEL,
+): ResearchResponse {
   const parsed = messagesResponseSchema.safeParse(body);
   if (parsed.success) {
     return {
       text: collectText(parsed.data.content),
       usage: normalizeUsage(parsed.data.usage),
-      model: parsed.data.model,
+      model: parsed.data.model ?? fallbackModel,
     };
   }
 
   const usage = salvageUsage(body);
-  if (usage) return { text: "", usage, model: salvageModel(body) };
+  if (usage) return { text: "", usage, model: salvageModel(body, fallbackModel) };
 
   return {
     text: "",
     usage: ZERO_USAGE,
-    model: salvageModel(body),
+    model: salvageModel(body, fallbackModel),
     unpricedReason: UNPARSEABLE_ENVELOPE,
   };
 }
@@ -150,8 +159,11 @@ export function parseMessagesResponse(body: unknown): ResearchResponse {
  * stream, and that rejection would unwind exactly as far as the `JSON.parse` we are
  * guarding against. The undefined is not a swallowed error — it is the "unrecognized
  * body" that tier 3 of `parseMessagesResponse` exists to handle.
+ *
+ * Exported for `extract.ts`: both clients face the same billed-200 hazard, and one
+ * implementation means one place for the rule to live.
  */
-async function readJsonBody(res: Response): Promise<unknown> {
+export async function readJsonBody(res: Response): Promise<unknown> {
   try {
     return JSON.parse(await res.text()) as unknown;
   } catch {
