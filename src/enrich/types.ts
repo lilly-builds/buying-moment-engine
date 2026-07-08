@@ -29,9 +29,31 @@ export interface DecisionMaker {
   linkedinUrl: CitedFact | null;
 }
 
+/**
+ * A FIXED set of named fields, not a free-form `Record` (KTD-4, KTD-5).
+ *
+ * Two forces landed on the same answer:
+ *  1. Structured outputs require `additionalProperties: false` on every object, so
+ *     an open-ended map cannot be expressed as a JSON Schema at all.
+ *  2. `locationsCount` and `providerCount` are TALLIES, and a tally has no
+ *     contiguous sentence that proves it. The only way a model can produce a
+ *     snippet for one is by stitching separate parts of a page together — which is
+ *     exactly the fabrication `citations.ts` exists to catch. It caught this twice
+ *     (E7), on those two fields, both times.
+ *
+ * So the model cites what a page STATES (`specialty`, `website`, `yearFounded`),
+ * and code counts what must be counted. This is not a workaround; it drags the
+ * repo back into compliance with its own architecture — "factual card fields are
+ * assembled deterministically in code from evidence; the LLM writes only voice."
+ */
+export interface Firmographics {
+  specialty?: CitedFact;
+  website?: CitedFact;
+  yearFounded?: CitedFact;
+}
+
 export interface ResearchFindings {
-  /** Free-form firmographic fields (specialty, locationsCount, providerCount, ...). */
-  firmographics: Record<string, CitedFact>;
+  firmographics: Firmographics;
   /** Incumbent EHR, if the practice states it publicly. */
   ehr: CitedFact | null;
   /** Other incumbent tooling (patient portal, scheduling widget, review platform). */

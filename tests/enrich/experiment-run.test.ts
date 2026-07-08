@@ -57,12 +57,16 @@ describe("experiment #1 — per-record scoring", () => {
     expect(record.key).toBe("sunshine-derm-miami");
     expect(record.sizeBand).toBe("mid_large");
 
-    // Claude found specialty, locations and the EHR — but no email/LinkedIn.
+    // Claude found specialty, website and the EHR — but no email/LinkedIn.
+    // KTD-4: the derived tallies are no longer asked of the model, so they are
+    // recorded `false` (not retrieved) rather than dropped — the column has to stay
+    // comparable against the rows the agentic mechanism already wrote.
     expect(record.claude.ok).toBe(true);
     expect(record.claude.company).toMatchObject({
       specialty: true,
-      locationsCount: true,
+      website: true,
       ehr: true,
+      locationsCount: false,
       providerCount: false,
     });
     expect(record.claude.person).toMatchObject({

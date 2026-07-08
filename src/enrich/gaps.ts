@@ -84,8 +84,10 @@ export function normalizeLinkedinUrl(
  */
 export function factsFromFindings(findings: ResearchFindings): FactInput[] {
   const facts: FactInput[] = [];
+  // `Firmographics` is a fixed object of OPTIONAL fields (KTD-4), so an absent
+  // field enumerates as `undefined` rather than not enumerating at all.
   for (const [field, fact] of Object.entries(findings.firmographics)) {
-    facts.push({ field, ...fact });
+    if (fact !== undefined) facts.push({ field, ...fact });
   }
   if (findings.ehr) facts.push({ field: "ehr", ...findings.ehr });
   findings.incumbentTooling.forEach((fact, i) => {

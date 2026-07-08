@@ -141,12 +141,14 @@ describe("factsFromFindings — what lands in practice_facts", () => {
   it("flattens firmographics, EHR, tooling and buying-moment context", () => {
     const facts = factsFromFindings(findingsFrom(researchFixture));
     const fields = facts.map((f) => f.field).sort();
+    // KTD-4: `locationsCount` used to be here. A tally has no contiguous sentence
+    // that proves it, so the model no longer reports one and code counts it instead.
     expect(fields).toEqual([
       "buying_moment_1",
       "ehr",
       "incumbent_tooling_1",
-      "locationsCount",
       "specialty",
+      "website",
     ]);
     // Every persisted fact carries its citation — the DB FK depends on it.
     for (const fact of facts) {

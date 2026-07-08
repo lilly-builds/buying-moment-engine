@@ -25,7 +25,11 @@ RULES — these are hard constraints, not preferences:
 OUTPUT — respond with a single JSON object and nothing else. Every leaf "fact" object is exactly {"value", "sourceUrl", "snippet"}.
 
 {
-  "firmographics": { "<field>": {"value": "...", "sourceUrl": "https://...", "snippet": "..."} },
+  "firmographics": {
+    "specialty":   {"value": "...", "sourceUrl": "https://...", "snippet": "..."},
+    "website":     {"value": "...", "sourceUrl": "https://...", "snippet": "..."},
+    "yearFounded": {"value": "...", "sourceUrl": "https://...", "snippet": "..."}
+  },
   "ehr": {"value": "...", "sourceUrl": "https://...", "snippet": "..."} | null,
   "incumbentTooling": [ {"value": "...", "sourceUrl": "https://...", "snippet": "..."} ],
   "decisionMaker": {
@@ -37,7 +41,8 @@ OUTPUT — respond with a single JSON object and nothing else. Every leaf "fact"
   "buyingMomentContext": [ {"value": "...", "sourceUrl": "https://...", "snippet": "..."} ]
 }
 
-Suggested firmographics fields when the pages support them: "specialty", "locationsCount", "providerCount", "website", "yearFounded".
+The ONLY firmographics fields are: "specialty", "website", "yearFounded". Include a field only when a page states it.
+Do NOT report how many locations or how many providers the practice has. Those are tallies you would have to count yourself, and a tally has no single sentence that proves it. Code counts them from the evidence you cite.
 "buyingMomentContext" is timing intelligence a static data vendor cannot have: a new location, a recent acquisition or PE deal, a hiring push for front-desk staff, a publicly announced expansion or new service line. Only include what a page states.
 If a field has no supporting page, omit it (or use null where the shape requires a value). Return {} for firmographics rather than inventing one.`;
 
@@ -49,7 +54,7 @@ export function buildResearchPrompt(request: ResearchRequest): string {
     request.websiteUrl ? `Website: ${request.websiteUrl}` : null,
     "",
     "Find, from public pages:",
-    "1. Firmographics — specialty, how many locations, how many providers, website, year founded.",
+    "1. Firmographics — specialty, website, year founded. (Do not count locations or providers.)",
     "2. The EHR / practice-management system they run, and any other incumbent patient-communication tooling (patient portal, online scheduling widget, review platform).",
     "3. The decision-maker for front-desk / patient-communication software: name (if a page names them) and role.",
     "4. Their public work email and LinkedIn profile URL, but ONLY if a page states them. Do not construct an email from a naming pattern.",

@@ -120,8 +120,12 @@ export async function runCohortEntry(
       record.claude.ok = true;
       record.claude.company = {
         specialty: f.firmographics.specialty !== undefined,
-        locationsCount: f.firmographics.locationsCount !== undefined,
-        providerCount: f.firmographics.providerCount !== undefined,
+        // KTD-4: a tally has no contiguous sentence that proves it, so these are no
+        // longer asked of the model at all. Recorded as `false` (= not retrieved)
+        // rather than dropped, so the column stays comparable against the three
+        // rows the agentic mechanism already wrote to the ledger.
+        locationsCount: false,
+        providerCount: false,
         website: f.firmographics.website !== undefined,
         ehr: f.ehr !== null,
       };

@@ -26,8 +26,21 @@ const decisionMakerSchema = z.object({
   linkedinUrl: citedFactSchema.nullable().default(null),
 });
 
+/**
+ * STRICT: an unknown firmographics key is a parse failure, not a silent pass. The
+ * old `z.record()` accepted anything the model invented — including the derived
+ * tallies KTD-4 removed, which cannot be honestly cited.
+ */
+const firmographicsSchema = z
+  .strictObject({
+    specialty: citedFactSchema.optional(),
+    website: citedFactSchema.optional(),
+    yearFounded: citedFactSchema.optional(),
+  })
+  .default({});
+
 export const researchFindingsSchema = z.object({
-  firmographics: z.record(z.string(), citedFactSchema).default({}),
+  firmographics: firmographicsSchema,
   ehr: citedFactSchema.nullable().default(null),
   incumbentTooling: z.array(citedFactSchema).default([]),
   decisionMaker: decisionMakerSchema.nullable().default(null),
@@ -39,11 +52,18 @@ export type ParseResult =
   | { ok: false; reason: string };
 
 /**
- * Pull the first balanced top-level JSON object out of the model's text. We do NOT
- * use `output_config.format` (structured outputs): web search always enables
- * citations on text blocks, and structured outputs are documented as incompatible
- * with citations (400). Extracting-then-validating gets the same guarantee — the
- * schema, not the model, decides what counts as a fact — without that conflict.
+ * Pull the first balanced top-level JSON object out of the model's text.
+ *
+ * THIS NOW SERVES ONLY THE AGENTIC ESCALATION PATH (`research.ts`). The primary
+ * path — `extract.ts` — holds the page text itself, declares no `web_fetch`, and
+ * therefore may use `output_config.format` (structured outputs), which returns
+ * bare JSON and needs no scanner.
+ *
+ * It cannot be deleted, as the mechanism plan's KTD-5 proposed. The escalation
+ * client still declares `web_fetch` with `citations: {enabled: true}`, and
+ * structured outputs are documented as incompatible with citations (400). So that
+ * path still answers in prose-wrapped JSON and still needs extracting-then-
+ * validating — the schema, not the model, decides what counts as a fact.
  *
  * When a `{` opens but never closes (a truncated or corrupt body) we return the
  * unbalanced remainder rather than null, so `JSON.parse` reports the real syntax
@@ -100,7 +120,8 @@ export function parseResearchOutput(text: string): ParseResult {
 /** True when research produced nothing usable — no facts, no contact, no moment. */
 export function isEmptyFindings(findings: ResearchFindings): boolean {
   return (
-    Object.keys(findings.firmographics).length === 0 &&
+    // `Object.values` on the fixed shape: an absent optional field is `undefined`.
+    Object.values(findings.firmographics).every((fact) => fact === undefined) &&
     findings.ehr === null &&
     findings.incumbentTooling.length === 0 &&
     findings.decisionMaker === null &&

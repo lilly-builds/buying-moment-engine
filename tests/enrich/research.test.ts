@@ -19,6 +19,10 @@ import {
 } from "@/src/enrich/config";
 import { runResearch } from "@/src/enrich/research";
 import {
+  buildResearchPrompt,
+  RESEARCH_SYSTEM_PROMPT,
+} from "@/src/enrich/research-prompt";
+import {
   extractJsonObject,
   isEmptyFindings,
   parseResearchOutput,
@@ -41,12 +45,12 @@ describe("citation closure (D2/R5)", () => {
     if (!outcome.ok) return;
 
     const f = outcome.findings;
-    expect(f.firmographics.specialty.sourceUrl).toBe(
+    expect(f.firmographics.specialty?.sourceUrl).toBe(
       "https://sunshinederm.example/about",
     );
-    expect(f.firmographics.specialty.snippet).toContain("dermatology group");
-    expect(f.firmographics.locationsCount.sourceUrl).toBe(
-      "https://sunshinederm.example/locations",
+    expect(f.firmographics.specialty?.snippet).toContain("dermatology group");
+    expect(f.firmographics.website?.sourceUrl).toBe(
+      "https://sunshinederm.example/about",
     );
     expect(f.ehr?.value).toBe("ModMed EMA");
     expect(f.ehr?.sourceUrl).toBe("https://sunshinederm.example/patient-portal");
@@ -102,6 +106,46 @@ describe("citation closure (D2/R5)", () => {
       ehr: { value: "ModMed", sourceUrl: "https://x.example", snippet: "" },
     });
     expect(parseResearchOutput(bad).ok).toBe(false);
+  });
+
+  it("KTD-4: an UNKNOWN firmographics key is rejected, not silently accepted", () => {
+    // `z.record()` used to wave anything through, including the derived tallies a
+    // model can only produce by stitching. `z.strictObject` is the gate now.
+    const bad = JSON.stringify({
+      firmographics: {
+        providerCount: {
+          value: "3",
+          sourceUrl: "https://x.example/team",
+          snippet: "Dr. A, Dr. B, Dr. C",
+        },
+      },
+    });
+    const result = parseResearchOutput(bad);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/providerCount/);
+  });
+
+  it("accepts the three fields a page can actually STATE", () => {
+    const good = JSON.stringify({
+      firmographics: {
+        specialty: { value: "Dermatology", sourceUrl: "https://x.example", snippet: "a dermatology group" },
+        website: { value: "https://x.example", sourceUrl: "https://x.example", snippet: "a dermatology group" },
+        yearFounded: { value: "2004", sourceUrl: "https://x.example", snippet: "founded in 2004" },
+      },
+    });
+    const result = parseResearchOutput(good);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.findings.firmographics.yearFounded?.value).toBe("2004");
+  });
+});
+
+describe("KTD-4 prompt guard — the model is never ASKED for a tally", () => {
+  it("the escalation prompt does not request locationsCount or providerCount", () => {
+    // A schema that rejects a field the prompt still asks for produces a parse
+    // failure on a billed call. Both ends have to agree.
+    expect(RESEARCH_SYSTEM_PROMPT).not.toMatch(/"locationsCount"|"providerCount"/);
+    expect(RESEARCH_SYSTEM_PROMPT).toMatch(/Do NOT report how many locations/);
+    expect(buildResearchPrompt(REQUEST)).not.toMatch(/how many locations, how many providers/);
   });
 });
 
