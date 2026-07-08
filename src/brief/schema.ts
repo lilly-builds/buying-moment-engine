@@ -279,17 +279,41 @@ export function referencedEvidenceIds(voice: VoiceBrief): string[] {
   ];
 }
 
-/** Every string of model-authored prose. What `lint.ts` sweeps for ungrounded digits. */
-export function voiceProse(voice: VoiceBrief): string[] {
-  return [
-    ...(voice.headline === null ? [] : [voice.headline]),
-    voice.callOpener,
-    voice.personalizationSnippet,
-    ...voice.sequence.touches.flatMap((touch) => [touch.subject, touch.body]),
-    voice.sequence.namedCta,
-    ...voice.discoveryQuestions,
-    ...voice.objections.flatMap((o) => [o.objection, o.rebuttal]),
-  ];
+/** One addressable piece of model-authored prose. */
+export interface ProseField {
+  /** Dotted path, e.g. `sequence.touches[2].body`. Named so a lint violation is actionable. */
+  field: string;
+  text: string;
+}
+
+/**
+ * EVERY string the model wrote, each with its path. This is the surface `lint.ts`
+ * sweeps — including `discoveryQuestions` and `objections`, which carry no evidence
+ * ids. That is deliberate: a question asserts nothing, so it needs no citation, but
+ * an invented statistic could still hide inside one. The numeric-grounding check is
+ * the only thing standing there, so it must see everything.
+ */
+export function voiceProseFields(voice: VoiceBrief): ProseField[] {
+  const fields: ProseField[] = [];
+  if (voice.headline !== null) fields.push({ field: "headline", text: voice.headline });
+  fields.push({ field: "callOpener", text: voice.callOpener });
+  fields.push({
+    field: "personalizationSnippet",
+    text: voice.personalizationSnippet,
+  });
+  voice.sequence.touches.forEach((touch, i) => {
+    fields.push({ field: `sequence.touches[${i}].subject`, text: touch.subject });
+    fields.push({ field: `sequence.touches[${i}].body`, text: touch.body });
+  });
+  fields.push({ field: "sequence.namedCta", text: voice.sequence.namedCta });
+  voice.discoveryQuestions.forEach((question, i) => {
+    fields.push({ field: `discoveryQuestions[${i}]`, text: question });
+  });
+  voice.objections.forEach((objection, i) => {
+    fields.push({ field: `objections[${i}].objection`, text: objection.objection });
+    fields.push({ field: `objections[${i}].rebuttal`, text: objection.rebuttal });
+  });
+  return fields;
 }
 
 // ─── The persisted row + the render-time view ─────────────────────────────────
