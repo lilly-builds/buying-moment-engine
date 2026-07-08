@@ -1,5 +1,10 @@
 import { z } from "zod";
 import {
+  consumeSseStream,
+  describeFailure,
+  StreamAccumulator,
+} from "./anthropic-stream";
+import {
   ANTHROPIC_API_URL,
   ANTHROPIC_API_VERSION,
   ENRICH_FETCH_TIMEOUT_MS,
@@ -171,10 +176,16 @@ export async function readJsonBody(res: Response): Promise<unknown> {
   }
 }
 
+/**
+ * `stream: true` is not a nicety. Un-streamed, this request writes no headers until all
+ * 16 server-side tool calls finish, and undici aborts it at 300s — billed, unrecorded.
+ * See `anthropic-stream.ts`.
+ */
 export function buildRequestBody(request: ResearchRequest) {
   return {
     model: RESEARCH_MODEL,
     max_tokens: RESEARCH_MAX_TOKENS,
+    stream: true,
     system: RESEARCH_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildResearchPrompt(request) }],
     tools: [
@@ -193,6 +204,46 @@ export function buildRequestBody(request: ResearchRequest) {
   };
 }
 
+/** `meta.reason` on a 200 that opened and then produced nothing at all. */
+export const EMPTY_STREAM = "empty-stream";
+
+/**
+ * Fold a (possibly dead) stream into a `ResearchResponse`. Three tiers, most to least
+ * information — the same ladder `parseMessagesResponse` walks, for the same reason:
+ *
+ *  1. events arrived -> text + usage, PRICED from the tokens we saw, even if the socket
+ *     then died mid-body. A truncated answer parses to "no JSON object found" downstream;
+ *     the money is still on the ledger.
+ *  2. no events, but the stream failed -> unpriced, with `err.cause.code` as the reason.
+ *  3. no events, no failure (a 200 that closed silently) -> unpriced, `EMPTY_STREAM`.
+ *
+ * Never throws. Everything reaching this function was billed the moment the 200 landed.
+ */
+export function streamToResponse(
+  accumulator: StreamAccumulator,
+  failure: string | null,
+): ResearchResponse {
+  // A mid-stream `error` event on a 200 is Anthropic's own failure channel.
+  const streamError = failure ?? accumulator.apiError ?? undefined;
+
+  if (accumulator.sawAnyEvent) {
+    return {
+      text: accumulator.text,
+      usage: accumulator.usage,
+      model: accumulator.model ?? RESEARCH_MODEL,
+      ...(streamError === undefined ? {} : { streamError }),
+    };
+  }
+
+  return {
+    text: "",
+    usage: ZERO_USAGE,
+    model: accumulator.model ?? RESEARCH_MODEL,
+    unpricedReason: streamError ?? EMPTY_STREAM,
+    ...(streamError === undefined ? {} : { streamError }),
+  };
+}
+
 /** Production binding. `apiKey` is injected, never read from the module scope. */
 export function anthropicResearchClient(apiKey: string): ResearchClient {
   return {
@@ -205,15 +256,29 @@ export function anthropicResearchClient(apiKey: string): ResearchClient {
           "content-type": "application/json",
         },
         body: JSON.stringify(buildRequestBody(request)),
+        // A TOTAL-duration guard now, not a headers one. Streaming took that job away.
         signal: AbortSignal.timeout(ENRICH_FETCH_TIMEOUT_MS),
       });
       // Non-2xx is an UNBILLED call: throw, and the meter correctly records
-      // nothing. Past this line the request is billed, so nothing may throw —
-      // `parseMessagesResponse` degrades instead.
+      // nothing. Past this line the request is billed, so nothing may throw.
       if (!res.ok) {
         throw new AnthropicRequestError(res.status, res.statusText);
       }
-      return parseMessagesResponse(await readJsonBody(res));
+
+      const accumulator = new StreamAccumulator();
+      let failure: string | null = null;
+      if (res.body === null) {
+        failure = "no response body on a 200";
+      } else {
+        try {
+          await consumeSseStream(res.body, accumulator);
+        } catch (err) {
+          // The socket died on a call Anthropic already charged for. `describeFailure`
+          // digs out `err.cause.code`, because "TypeError: fetch failed" diagnoses nothing.
+          failure = describeFailure(err);
+        }
+      }
+      return streamToResponse(accumulator, failure);
     },
   };
 }

@@ -64,6 +64,10 @@ export async function runResearch(
         ...(res.unpricedReason === undefined
           ? {}
           : { unpriced: true, reason: res.unpricedReason }),
+        // The diagnosis, not the symptom: `UND_ERR_HEADERS_TIMEOUT`, not "fetch failed".
+        // A PRICED row can carry one too — a stream that died after 9,000 input tokens
+        // cost real money, and is worth exactly that much on the ledger.
+        ...(res.streamError === undefined ? {} : { streamError: res.streamError }),
       }),
     },
     () => deps.client.research(request),

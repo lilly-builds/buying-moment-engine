@@ -122,6 +122,13 @@ export interface ResearchResponse {
    * better than no row at all, which is money that vanishes.
    */
   unpricedReason?: string;
+  /**
+   * A 200 whose STREAM died or errored mid-body. The call is still priced from the
+   * tokens seen before the failure; this carries `err.cause.code` into the cost row's
+   * meta, so "fetch failed" becomes `UND_ERR_HEADERS_TIMEOUT` and a symptom becomes
+   * a diagnosis.
+   */
+  streamError?: string;
 }
 
 export interface ResearchClient {

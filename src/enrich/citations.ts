@@ -67,6 +67,29 @@ export interface DroppedFact {
 export interface VerificationResult {
   verified: ResearchFindings;
   dropped: DroppedFact[];
+  /**
+   * Facts KEPT without proof. Only ever non-empty on the agentic escalation path, and
+   * only for URLs we never fetched. Empty on the primary path, always.
+   */
+  unverifiable: DroppedFact[];
+}
+
+export interface VerifyOptions {
+  /**
+   * What to do with a fact citing a URL absent from `pages`.
+   *
+   * `"drop"` — the DEFAULT, and the only correct answer on the primary path. We handed
+   * the model every URL it was allowed to cite; inventing one is fabrication.
+   *
+   * `"keep-unverifiable"` — for the agentic escalation path ALONE. That path browses the
+   * open web, so it legitimately cites pages we never fetched. We cannot call those facts
+   * false; we simply cannot prove them, which is precisely the assurance level this whole
+   * refactor exists to escape. They are kept, counted, and reported.
+   *
+   * A `snippet-not-verbatim` failure on a page we DO hold is dropped under both modes.
+   * Where we can check, the agentic path gets no exemption.
+   */
+  unheldUrl?: "drop" | "keep-unverifiable";
 }
 
 /**
@@ -90,6 +113,18 @@ export function normalizeForCitation(text: string): string {
 }
 
 /**
+ * Everything the verification pass needs, in one object, so a new call site cannot
+ * silently forget to honour `keepUnheld`.
+ */
+interface VerifyContext {
+  /** Pre-normalized ONCE. 7 pages x 12 facts would otherwise re-normalize ~50KB 84 times. */
+  pages: Map<string, string>;
+  dropped: DroppedFact[];
+  unverifiable: DroppedFact[];
+  keepUnheld: boolean;
+}
+
+/**
  * `https://x/team` and `https://x/team/` name the same page we handed the model, and
  * which one it echoes back is a coin flip. Tolerating the slash is not evidence
  * loosening: the URL is an IDENTIFIER we supplied, while the snippet is the CLAIM.
@@ -97,51 +132,46 @@ export function normalizeForCitation(text: string): string {
  * this rule. Nothing else about the URL is forgiven — a different path or host is
  * `url-not-held`.
  */
-function lookupPage(
-  normalizedPages: Map<string, string>,
-  sourceUrl: string,
-): string | undefined {
-  const direct = normalizedPages.get(sourceUrl);
+function lookupPage(pages: Map<string, string>, sourceUrl: string): string | undefined {
+  const direct = pages.get(sourceUrl);
   if (direct !== undefined) return direct;
-  return (
-    normalizedPages.get(sourceUrl.replace(TRAILING_SLASH, "")) ??
-    normalizedPages.get(`${sourceUrl}/`)
-  );
+  return pages.get(sourceUrl.replace(TRAILING_SLASH, "")) ?? pages.get(`${sourceUrl}/`);
 }
 
-/** A verified fact is returned as-is; an unverifiable one is pushed onto `dropped`. */
-function verifyFact(
-  field: string,
-  fact: CitedFact,
-  normalizedPages: Map<string, string>,
-  dropped: DroppedFact[],
-): CitedFact | null {
-  const drop = (reason: DropReason): null => {
-    dropped.push({ field, reason, sourceUrl: fact.sourceUrl, snippet: fact.snippet });
-    return null;
-  };
+function factRef(field: string, fact: CitedFact, reason: DropReason): DroppedFact {
+  return { field, reason, sourceUrl: fact.sourceUrl, snippet: fact.snippet };
+}
 
-  const page = lookupPage(normalizedPages, fact.sourceUrl);
-  if (page === undefined) return drop("url-not-held");
+/** Verified -> the fact. Unprovable -> `null`, and a row on `dropped` saying why. */
+function verifyFact(field: string, fact: CitedFact, ctx: VerifyContext): CitedFact | null {
+  const page = lookupPage(ctx.pages, fact.sourceUrl);
+  if (page === undefined) {
+    // The agentic path cites the open web. We cannot check it; we also cannot call it
+    // a lie. Keep it, and say out loud that it is unproven.
+    if (ctx.keepUnheld) {
+      ctx.unverifiable.push(factRef(field, fact, "url-not-held"));
+      return fact;
+    }
+    ctx.dropped.push(factRef(field, fact, "url-not-held"));
+    return null;
+  }
 
   const snippet = normalizeForCitation(fact.snippet);
   // `"anything".includes("")` is true, so a snippet of pure whitespace would sail
   // through and prove nothing. Zod's `min(1)` accepts `"   "`; this does not.
-  if (snippet === "") return drop("snippet-not-verbatim");
+  if (snippet !== "" && page.includes(snippet)) return fact;
 
-  return page.includes(snippet) ? fact : drop("snippet-not-verbatim");
+  // We HOLD this page and the snippet is not on it. No mode forgives that.
+  ctx.dropped.push(factRef(field, fact, "snippet-not-verbatim"));
+  return null;
 }
 
-function verifyFirmographics(
-  firmographics: Firmographics,
-  normalizedPages: Map<string, string>,
-  dropped: DroppedFact[],
-): Firmographics {
+function verifyFirmographics(firmographics: Firmographics, ctx: VerifyContext): Firmographics {
   const verified: Firmographics = {};
   for (const field of FIRMOGRAPHIC_FIELDS) {
     const fact = firmographics[field];
     if (fact === undefined) continue;
-    const ok = verifyFact(`firmographics.${field}`, fact, normalizedPages, dropped);
+    const ok = verifyFact(`firmographics.${field}`, fact, ctx);
     if (ok) verified[field] = ok;
   }
   return verified;
@@ -157,19 +187,18 @@ function verifyFirmographics(
  */
 function verifyDecisionMaker(
   decisionMaker: DecisionMaker | null,
-  normalizedPages: Map<string, string>,
-  dropped: DroppedFact[],
+  ctx: VerifyContext,
 ): DecisionMaker | null {
   if (!decisionMaker) return null;
   const { name, role, email, linkedinUrl } = decisionMaker;
 
   // Check every field first — even when the role is about to sink the contact — so a
   // genuinely fabricated `name` is reported as fabrication rather than as collateral.
-  const okName = name ? verifyFact("decisionMaker.name", name, normalizedPages, dropped) : null;
-  const okRole = verifyFact("decisionMaker.role", role, normalizedPages, dropped);
-  const okEmail = email ? verifyFact("decisionMaker.email", email, normalizedPages, dropped) : null;
+  const okName = name ? verifyFact("decisionMaker.name", name, ctx) : null;
+  const okRole = verifyFact("decisionMaker.role", role, ctx);
+  const okEmail = email ? verifyFact("decisionMaker.email", email, ctx) : null;
   const okLinkedin = linkedinUrl
-    ? verifyFact("decisionMaker.linkedinUrl", linkedinUrl, normalizedPages, dropped)
+    ? verifyFact("decisionMaker.linkedinUrl", linkedinUrl, ctx)
     : null;
 
   if (!okRole) {
@@ -179,14 +208,7 @@ function verifyDecisionMaker(
       ["decisionMaker.email", okEmail],
       ["decisionMaker.linkedinUrl", okLinkedin],
     ] as const) {
-      if (fact) {
-        dropped.push({
-          field,
-          reason: "contact-role-dropped",
-          sourceUrl: fact.sourceUrl,
-          snippet: fact.snippet,
-        });
-      }
+      if (fact) ctx.dropped.push(factRef(field, fact, "contact-role-dropped"));
     }
     return null;
   }
@@ -194,15 +216,8 @@ function verifyDecisionMaker(
   return { name: okName, role: okRole, email: okEmail, linkedinUrl: okLinkedin };
 }
 
-function verifyList(
-  field: string,
-  facts: CitedFact[],
-  normalizedPages: Map<string, string>,
-  dropped: DroppedFact[],
-): CitedFact[] {
-  return facts.filter(
-    (fact, i) => verifyFact(`${field}[${i}]`, fact, normalizedPages, dropped) !== null,
-  );
+function verifyList(field: string, facts: CitedFact[], ctx: VerifyContext): CitedFact[] {
+  return facts.filter((fact, i) => verifyFact(`${field}[${i}]`, fact, ctx) !== null);
 }
 
 /**
@@ -215,30 +230,34 @@ function verifyList(
  * Non-mutating. `verified` is a fresh object; the caller keeps the original findings
  * for logging alongside the drops.
  *
- * The agentic escalation path (U7) passes through here too. Where we hold no pages for
- * it, every fact is `url-not-held` — which is the truth: we cannot verify what we never
- * fetched. See the Risks section of the mechanism plan.
+ * The agentic escalation path passes through here too, with
+ * `{ unheldUrl: "keep-unverifiable" }`. It browses the open web, so most of its citations
+ * name pages we never fetched. Those are kept and COUNTED, not proven — the pre-refactor
+ * assurance level, which is what a rare fallback should cost. What it does not get is an
+ * exemption on pages we DO hold: a snippet that is not on one of those is dropped,
+ * whichever model produced it.
  */
 export function verifyFindings(
   findings: ResearchFindings,
   pages: Map<string, string>,
+  options: VerifyOptions = {},
 ): VerificationResult {
-  // Normalize each page ONCE. A practice with 7 pages × 12 facts would otherwise
-  // re-normalize ~50KB of text 84 times.
-  const normalizedPages = new Map(
-    [...pages].map(([url, text]) => [url, normalizeForCitation(text)] as const),
-  );
-  const dropped: DroppedFact[] = [];
-
-  const verified: ResearchFindings = {
-    firmographics: verifyFirmographics(findings.firmographics, normalizedPages, dropped),
-    ehr: findings.ehr
-      ? verifyFact("ehr", findings.ehr, normalizedPages, dropped)
-      : null,
-    incumbentTooling: verifyList("incumbentTooling", findings.incumbentTooling, normalizedPages, dropped),
-    decisionMaker: verifyDecisionMaker(findings.decisionMaker, normalizedPages, dropped),
-    buyingMomentContext: verifyList("buyingMomentContext", findings.buyingMomentContext, normalizedPages, dropped),
+  const ctx: VerifyContext = {
+    pages: new Map(
+      [...pages].map(([url, text]) => [url, normalizeForCitation(text)] as const),
+    ),
+    dropped: [],
+    unverifiable: [],
+    keepUnheld: options.unheldUrl === "keep-unverifiable",
   };
 
-  return { verified, dropped };
+  const verified: ResearchFindings = {
+    firmographics: verifyFirmographics(findings.firmographics, ctx),
+    ehr: findings.ehr ? verifyFact("ehr", findings.ehr, ctx) : null,
+    incumbentTooling: verifyList("incumbentTooling", findings.incumbentTooling, ctx),
+    decisionMaker: verifyDecisionMaker(findings.decisionMaker, ctx),
+    buyingMomentContext: verifyList("buyingMomentContext", findings.buyingMomentContext, ctx),
+  };
+
+  return { verified, dropped: ctx.dropped, unverifiable: ctx.unverifiable };
 }

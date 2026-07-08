@@ -11,10 +11,12 @@ import {
   emptyScraper,
   FakeExtractClient,
   FakePdlClient,
+  FakeResearchClient,
   fakeScraper,
   recordingMeter,
 } from "./doubles";
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
+import { createEscalationBudget, noEscalationBudget } from "@/src/enrich/escalation";
 import { drizzleCostRecorder } from "@/db/cost-recorder";
 import { contacts, costEvents, evidence, practiceFacts, practices } from "@/db/schema";
 import { upsertContact, upsertPracticeFact } from "@/db/enrich";
@@ -525,6 +527,157 @@ describe("enrichment waterfall (integration)", () => {
     expect(result.factsWritten).toBe(0);
     expect(result.factsDropped).toBe(0); // nothing to drop; the model reported nothing
     expect(rows).toHaveLength(1); // the call still cost money
+  });
+
+  // ─── Escalation: fires on a bad RESULT, never on a throw (KTD-7) ───────────
+
+  it("a thin scrape ESCALATES exactly once, and the agentic findings are persisted", async () => {
+    const practiceId = await seedPractice("Blocked Derm", "miami-fl");
+    const agentic = FakeResearchClient.fromFixture(researchFixture);
+    const budget = createEscalationBudget(3);
+    const { meter, rows } = recordingMeter();
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: emptyScraper("blocked").scrape,
+        extract: FakeExtractClient.fromFixture(researchFixture),
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter,
+        escalation: { client: agentic, budget },
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Blocked Derm", websiteUrl: "https://blocked.example" },
+    );
+
+    expect(result.status).toBe("enriched");
+    expect(result.escalationTrigger).toBe("thin-scrape");
+    expect(result.escalated).toBe(true);
+    // EXACTLY ONCE. There is no loop here, and a second thin result has nowhere to go.
+    expect(agentic.calls).toHaveLength(1);
+    expect(budget.spent).toBe(1);
+
+    // We hold no pages, so nothing the agentic path said can be proven. It is persisted
+    // at the pre-refactor assurance level, and counted so a reader knows.
+    // 7 CITED FACTS (5 practice_facts + the contact's name and role), 5 practice_facts
+    // rows. `factsUnverifiable` and `factsDropped` count citations; `factsWritten` counts
+    // rows. The decision-maker is a fact you can be wrong about too.
+    expect(result.factsUnverifiable).toBe(7);
+    expect(result.factsWritten).toBe(5);
+    expect(result.factsDropped).toBe(0);
+    // The Haiku extractor was never called: there was nothing to hand it.
+    expect(rows.filter((r) => r.pipelineStep === "enrich.extract")).toHaveLength(0);
+    expect(rows.filter((r) => r.pipelineStep === "enrich.research")).toHaveLength(1);
+  });
+
+  it("zero verified facts ESCALATES — extraction succeeded and nothing threw", async () => {
+    // The case the old mechanism could not see, and Optiflow's Gate 4 throws away.
+    const practiceId = await seedPractice("Fabulist Derm", "miami-fl");
+    const base = parseMessagesResponse(researchFixture);
+    const allFake = new FakeExtractClient(async () => ({
+      ...base,
+      text: base.text.replaceAll(/"snippet": "[^"]*"/g, '"snippet": "Nothing on any page says this."'),
+    }));
+    const budget = createEscalationBudget(3);
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: allFake,
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter: recordingMeter().meter,
+        escalation: { client: FakeResearchClient.fromFixture(researchFixture), budget },
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Fabulist Derm", websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    expect(result.escalationTrigger).toBe("no-verified-facts");
+    expect(result.escalated).toBe(true);
+    expect(result.status).toBe("enriched");
+    // We DO hold the pages this time, so the agentic path is checked against them —
+    // and its snippets are the genuine ones, so nothing is dropped or unproven.
+    expect(result.factsUnverifiable).toBe(0);
+    expect(await t.db.select().from(practiceFacts)).toHaveLength(5);
+  });
+
+  it("a VERIFIED result never escalates — no wasted $1.27", async () => {
+    const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
+    const agentic = FakeResearchClient.fromFixture(researchFixture);
+    const budget = createEscalationBudget(3);
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: FakeExtractClient.fromFixture(researchFixture),
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter: recordingMeter().meter,
+        escalation: { client: agentic, budget },
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    expect(result.escalationTrigger).toBeNull();
+    expect(result.escalated).toBe(false);
+    expect(agentic.calls).toEqual([]);
+    expect(budget.spent).toBe(0);
+  });
+
+  it("KTD-7: a THROWN extractor never escalates — answering a 429 with $1.27 buys nothing", async () => {
+    const practiceId = await seedPractice("Rate Limited Derm", "tampa-fl");
+    const agentic = FakeResearchClient.fromFixture(researchFixture);
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: fakeScraper(SUNSHINE_PAGES).scrape,
+        extract: FakeExtractClient.throwing(new AnthropicRequestError(429, "rate limited")),
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter: recordingMeter().meter,
+        escalation: { client: agentic, budget: createEscalationBudget(3) },
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Rate Limited Derm", websiteUrl: SUNSHINE.websiteUrl },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.escalationTrigger).toBeNull();
+    expect(result.escalated).toBe(false);
+    expect(agentic.calls).toEqual([]);
+  });
+
+  it("U8's setting: a ZERO budget records the trigger and buys NOTHING", async () => {
+    const practiceId = await seedPractice("Blocked Derm", "miami-fl");
+    const agentic = FakeResearchClient.fromFixture(researchFixture);
+    const { meter, rows } = recordingMeter();
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: emptyScraper("unreachable").scrape,
+        extract: FakeExtractClient.fromFixture(researchFixture),
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter,
+        escalation: { client: agentic, budget: noEscalationBudget() },
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Blocked Derm", websiteUrl: "https://blocked.example" },
+    );
+
+    // This is how U8 measures the escalation rate across a real cohort for $0.
+    expect(result.status).toBe("failed");
+    expect(result.escalationTrigger).toBe("thin-scrape");
+    expect(result.escalated).toBe(false);
+    expect(agentic.calls).toEqual([]);
+    expect(rows).toEqual([]);
   });
 
   it("ERROR PATH: a PDL 429 leaves the gap unfilled but keeps the enrichment", async () => {

@@ -129,17 +129,33 @@ export const PDL_MIN_LIKELIHOOD = 6;
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 /**
- * Agentic research is NOT a plain API call. One request runs up to
- * WEB_SEARCH_MAX_USES searches + WEB_FETCH_MAX_USES page fetches SERVER-SIDE before
- * returning a single token, so it is bounded by the web, not by Anthropic.
+ * A TOTAL-DURATION guard on the agentic escalation call, and nothing more.
  *
- * The old value (120_000) was copied from DETECTOR_FETCH_TIMEOUT_MS, where one plain
- * HTTP call really does finish in seconds. It aborted the research call on every
- * practice of a 10-practice run, at 121s each — the ceiling, not the work, was the
- * limit. Raised to Anthropic's own 10-minute cap for a non-streaming request.
+ * It is no longer the thing that kills the call. Agentic research runs up to
+ * WEB_SEARCH_MAX_USES searches + WEB_FETCH_MAX_USES fetches SERVER-SIDE before writing a
+ * byte, and un-streamed that tripped undici's `headersTimeout`
+ * (`undici@7.28.0 lib/dispatcher/client.js:262` = `300e3`) — a first-byte-of-headers
+ * ceiling, not a duration one. It killed 1 call in 3 while recording $0.00. The call now
+ * STREAMS (see `anthropic-stream.ts`), headers land immediately, and that ceiling cannot
+ * fire. What remains is `bodyTimeout` (`:261`, also `300e3`), the gap BETWEEN chunks,
+ * which Anthropic's periodic `ping` events reset.
+ *
+ * So this abort signal now means what it says: a call still running after ten minutes is
+ * a call to give up on.
  */
 export const ENRICH_FETCH_TIMEOUT_MS = 600_000;
 export const PDL_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * How many practices in ONE cohort run may buy the agentic fallback.
+ *
+ * Escalation costs $1.27 a shot. `escalationTrigger` (free, deterministic) and
+ * `escalated` (paid) are separate on purpose: a cap of 3 quietly authorizes $3.81, which
+ * is 38x the ~$0.10 a whole 5-practice verification run is meant to cost. U8 sets this to
+ * ZERO and simply records how often escalation WOULD have fired — measuring the rate
+ * before paying to learn it.
+ */
+export const MAX_ESCALATIONS_PER_RUN = 3;
 
 /**
  * Extraction is a PLAIN Messages call over text we already hold — no server-side

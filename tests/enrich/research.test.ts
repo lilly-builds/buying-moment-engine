@@ -5,8 +5,8 @@ import {
   anthropicResearchClient,
   buildRequestBody,
   collectText,
+  EMPTY_STREAM,
   normalizeUsage,
-  UNPARSEABLE_ENVELOPE,
 } from "@/src/enrich/anthropic-client";
 import {
   ANTHROPIC_INPUT_USD_PER_TOKEN,
@@ -305,43 +305,106 @@ describe("metering the research call (R19)", () => {
 });
 
 /**
- * The real HTTP client, over a stubbed `fetch`. These drive the boundary the meter
- * wraps, because that is where the money is: a 200 is BILLED whatever its body says,
- * so a parse failure there must never throw past the meter.
+ * The real HTTP client, over a stubbed `fetch`. These drive the boundary the meter wraps,
+ * because that is where the money is: a 200 is BILLED whatever its body then does, so
+ * nothing past that line may throw.
+ *
+ * The client now STREAMS (KTD-8). Un-streamed, an agentic request writes no headers until
+ * all 16 server-side tool calls finish, and undici aborts it at `headersTimeout = 300e3`
+ * — billed, unrecorded, $0.00 on the ledger. These tests pin the salvage ladder.
  */
+function sse(...frames: Array<Record<string, unknown>>): string {
+  return frames.map((f) => `event: ${String(f.type)}\ndata: ${JSON.stringify(f)}\n\n`).join("");
+}
+
+const MESSAGE_START = {
+  type: "message_start",
+  message: {
+    model: RESEARCH_MODEL,
+    usage: { input_tokens: 1000, output_tokens: 1, server_tool_use: { web_search_requests: 2 } },
+  },
+};
+const TEXT_DELTA = (text: string) => ({
+  type: "content_block_delta",
+  index: 0,
+  delta: { type: "text_delta", text },
+});
+const MESSAGE_DELTA = {
+  type: "message_delta",
+  delta: { stop_reason: "end_turn" },
+  usage: { output_tokens: 500 },
+};
+
 describe("a BILLED Anthropic 200 always writes a cost row (R19)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  function stubFetch(status: number, body: string): void {
-    vi.stubGlobal(
-      "fetch",
-      async () =>
-        new Response(body, {
-          status,
-          headers: { "content-type": "application/json" },
-        }),
-    );
-  }
-
-  /** A 200 whose headers landed — so it is billed — but whose body stream then dies. */
-  function stubFetchBrokenBodyStream(): void {
+  /**
+   * Stream `body`, then (optionally) kill the socket instead of closing it cleanly.
+   *
+   * The bytes are enqueued from `pull`, not `start`. `controller.error()` DISCARDS the
+   * queue, so erroring in `start` after an `enqueue` delivers nothing at all — which is
+   * not what a dying socket does, and would quietly turn the mid-body test into the
+   * before-any-event test.
+   */
+  function stubStream(body: string, dieAfter = false, status = 200): void {
     vi.stubGlobal("fetch", async () => {
-      const body = new ReadableStream({
-        start(controller) {
-          controller.error(new Error("socket hang up"));
+      let sent = false;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!sent && body.length > 0) {
+            sent = true;
+            controller.enqueue(new TextEncoder().encode(body));
+            return;
+          }
+          if (dieAfter) controller.error(new Error("socket hang up"));
+          else controller.close();
         },
       });
-      return new Response(body, { status: 200 });
+      return new Response(stream, { status, headers: { "content-type": "text/event-stream" } });
     });
   }
 
   const client = () => anthropicResearchClient("test-key-not-a-real-secret");
 
-  it("a 200 with a garbage body is recorded as an UNPRICED call, never a throw", async () => {
-    // An edge/proxy handed back HTML with a 200. Anthropic still billed the call.
-    stubFetch(200, "<html><body>200 OK</body></html>");
+  it("accumulates input tokens from `message_start` and output tokens from `message_delta`", async () => {
+    stubStream(sse(MESSAGE_START, TEXT_DELTA('{"ehr":null}'), MESSAGE_DELTA));
+    const { meter, rows } = recordingMeter();
+
+    await runResearch({ client: client(), meter }, REQUEST);
+
+    expect(rows).toHaveLength(1);
+    // 1000 in, 500 out (message_delta REPLACES message_start's provisional 1), 2 searches.
+    expect(rows[0].meta).toMatchObject({ inputTokens: 1000, outputTokens: 500, webSearchRequests: 2 });
+    expect(rows[0].costUsd).toBeCloseTo(
+      1000 * ANTHROPIC_INPUT_USD_PER_TOKEN +
+        500 * ANTHROPIC_OUTPUT_USD_PER_TOKEN +
+        2 * WEB_SEARCH_USD_PER_REQUEST,
+      10,
+    );
+    expect(rows[0].meta).not.toHaveProperty("unpriced");
+  });
+
+  it("a stream that dies MID-BODY is priced from the tokens seen, NOT $0.00", async () => {
+    // This is the exact failure that cost the ledger $1.27 per killed call. The 200 is the
+    // billing event; a socket death afterwards is an incident, not a refund.
+    stubStream(sse(MESSAGE_START, TEXT_DELTA('{"firmog')), true);
+    const { meter, rows } = recordingMeter();
+
+    const outcome = await runResearch({ client: client(), meter }, REQUEST);
+
+    expect(outcome.ok).toBe(false); // truncated JSON
+    expect(rows).toHaveLength(1);
+    expect(rows[0].costUsd).toBeGreaterThan(0);
+    expect(rows[0].meta).toMatchObject({ inputTokens: 1000 });
+    expect(rows[0].meta).not.toHaveProperty("unpriced");
+    // The incident rides along on a PRICED row.
+    expect(rows[0].meta).toMatchObject({ streamError: expect.stringContaining("socket hang up") });
+  });
+
+  it("a stream that dies BEFORE any event writes an UNPRICED row naming the fault", async () => {
+    stubStream("", true);
     const { meter, rows } = recordingMeter();
 
     const outcome = await runResearch({ client: client(), meter }, REQUEST);
@@ -350,48 +413,35 @@ describe("a BILLED Anthropic 200 always writes a cost row (R19)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].units).toBe(1);
     expect(rows[0].costUsd).toBe(0);
+    expect(rows[0].meta).toMatchObject({ unpriced: true, reason: expect.stringContaining("socket hang up") });
+  });
+
+  it("captures `err.cause.code` — the diagnosis, not `fetch failed`", async () => {
+    // Node wraps the real fault: the outer error is always `TypeError: fetch failed`, and
+    // `UND_ERR_HEADERS_TIMEOUT` lives on `err.cause.code`. Logging only the outer message
+    // is how a 300s ceiling was misread for months as "Anthropic is slow."
+    const wrapped = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("Headers Timeout Error"), { code: "UND_ERR_HEADERS_TIMEOUT" }),
+    });
+    vi.stubGlobal("fetch", async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start: (controller) => controller.error(wrapped),
+      });
+      return new Response(stream, { status: 200 });
+    });
+    const { meter, rows } = recordingMeter();
+
+    await runResearch({ client: client(), meter }, REQUEST);
+
     expect(rows[0].meta).toMatchObject({
       unpriced: true,
-      reason: UNPARSEABLE_ENVELOPE,
+      reason: expect.stringContaining("UND_ERR_HEADERS_TIMEOUT"),
     });
   });
 
-  it("a 200 with valid usage but unrecognized content blocks is PRICED from that usage", async () => {
-    stubFetch(
-      200,
-      JSON.stringify({
-        model: RESEARCH_MODEL,
-        // A block shape this client has never seen: no `type` discriminator.
-        content: [{ kind: "some_future_block", payload: {} }],
-        usage: {
-          input_tokens: 1000,
-          output_tokens: 500,
-          server_tool_use: { web_search_requests: 2 },
-        },
-      }),
-    );
-    const { meter, rows } = recordingMeter();
-
-    const outcome = await runResearch({ client: client(), meter }, REQUEST);
-
-    // No text to parse -> honest "no findings", not a crash.
-    expect(outcome.ok).toBe(false);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].costUsd).toBeCloseTo(
-      1000 * ANTHROPIC_INPUT_USD_PER_TOKEN +
-        500 * ANTHROPIC_OUTPUT_USD_PER_TOKEN +
-        2 * WEB_SEARCH_USD_PER_REQUEST,
-      10,
-    );
-    expect(rows[0].meta).toMatchObject({ inputTokens: 1000, outputTokens: 500 });
-    // It was priced, so it is NOT flagged unpriced.
-    expect(rows[0].meta).not.toHaveProperty("unpriced");
-  });
-
-  it("a 200 whose BODY STREAM dies mid-read is still billed, so it still writes a row", async () => {
-    // The 200 header is the billing event; `res.text()` rejecting afterwards must not
-    // unwind past the meter. Guarding only `JSON.parse` would leave this path throwing.
-    stubFetchBrokenBodyStream();
+  it("a 200 that streams nothing at all is UNPRICED with `empty-stream`", async () => {
+    // An edge/proxy handed back a 200 with an unrecognizable body. Anthropic billed it.
+    stubStream("<html><body>200 OK</body></html>");
     const { meter, rows } = recordingMeter();
 
     const outcome = await runResearch({ client: client(), meter }, REQUEST);
@@ -399,14 +449,22 @@ describe("a BILLED Anthropic 200 always writes a cost row (R19)", () => {
     expect(outcome.ok).toBe(false);
     expect(rows).toHaveLength(1);
     expect(rows[0].units).toBe(1);
-    expect(rows[0].meta).toMatchObject({
-      unpriced: true,
-      reason: UNPARSEABLE_ENVELOPE,
-    });
+    expect(rows[0].costUsd).toBe(0);
+    expect(rows[0].meta).toMatchObject({ unpriced: true, reason: EMPTY_STREAM });
   });
 
-  it("ERROR PATH: a 500 is UNBILLED — it throws and writes NO cost row", async () => {
-    stubFetch(500, JSON.stringify({ type: "error" }));
+  it("a mid-stream `error` event on a 200 is priced and reported, never thrown", async () => {
+    stubStream(sse(MESSAGE_START, { type: "error", error: { type: "overloaded_error", message: "Overloaded" } }));
+    const { meter, rows } = recordingMeter();
+
+    await runResearch({ client: client(), meter }, REQUEST);
+
+    expect(rows[0].costUsd).toBeGreaterThan(0);
+    expect(rows[0].meta).toMatchObject({ streamError: "Overloaded" });
+  });
+
+  it("ERROR PATH: a 500 is UNBILLED — it throws before the stream opens, and writes NO cost row", async () => {
+    vi.stubGlobal("fetch", async () => new Response("{}", { status: 500 }));
     const { meter, rows } = recordingMeter();
 
     await expect(
