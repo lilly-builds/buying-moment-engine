@@ -1,0 +1,45 @@
+{
+  "uid": "gtm_maestro_app",
+  "type": "app",
+  "config": {
+    "description": "GTM Maestro — pushes buying-moment practice leads into HubSpot as tagged company/contact/deal records and enrolls approved 3-touch sequences. One OAuth grant covers CRM + send + analytics.",
+    "name": "GTM Maestro",
+    "distribution": "private",
+    "auth": {
+      "type": "oauth",
+      "redirectUrls": [
+        "http://localhost:3000/api/hubspot/oauth"
+      ],
+      "requiredScopes": [
+        "oauth",
+        "crm.objects.companies.read",
+        "crm.objects.companies.write",
+        "crm.objects.contacts.read",
+        "crm.objects.contacts.write",
+        "crm.objects.deals.read",
+        "crm.objects.deals.write",
+        "crm.schemas.companies.read",
+        "crm.schemas.companies.write",
+        "crm.schemas.deals.read",
+        "crm.schemas.deals.write"
+      ],
+      "optionalScopes": [
+        "automation.sequences.enrollments.write"
+      ],
+      "conditionallyRequiredScopes": []
+    },
+    "permittedUrls": {
+      "fetch": [
+        "https://api.hubapi.com"
+      ],
+      "iframe": [],
+      "img": []
+    },
+    "support": {
+      "supportEmail": "support@example.com",
+      "documentationUrl": "https://github.com/lilly-builds/buying-moment-engine",
+      "supportUrl": "https://github.com/lilly-builds/buying-moment-engine/issues",
+      "supportPhone": "+18005555555"
+    }
+  }
+}

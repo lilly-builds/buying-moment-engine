@@ -10,8 +10,15 @@
  * injected `fetch` so tests mock it (no live HubSpot account needed — U15).
  */
 
-/** The scopes requested on the single grant (send + analytics ride along). */
-export const HUBSPOT_SCOPES = [
+/**
+ * Scopes that MUST be granted for the app to install at all. Every one of these
+ * is available on a free HubSpot portal (verified live 2026-07-08 — the free
+ * portal 246702075 granted all eleven).
+ *
+ * `crm.schemas.*.write` is here because `ensureLeadProperties` creates the four
+ * tag properties at connect time; without it that call 403s (`MISSING_SCOPES`).
+ */
+export const HUBSPOT_REQUIRED_SCOPES = [
   "oauth",
   "crm.objects.companies.read",
   "crm.objects.companies.write",
@@ -19,9 +26,54 @@ export const HUBSPOT_SCOPES = [
   "crm.objects.contacts.write",
   "crm.objects.deals.read",
   "crm.objects.deals.write",
-  // Send (U11) — must be on the SAME grant so one connect covers it (R8).
-  "automation.sequences.enrollments.write",
+  "crm.schemas.companies.read",
+  "crm.schemas.companies.write",
+  "crm.schemas.deals.read",
+  "crm.schemas.deals.write",
 ] as const;
+
+/** The one scope the send path (U11) needs — Sequences enrollment. */
+export const HUBSPOT_SEND_SCOPE = "automation.sequences.enrollments.write";
+
+/**
+ * Scopes requested but NOT required to install.
+ *
+ * WHY OPTIONAL: HubSpot Sequences is a Sales Hub Professional+ feature. Verified
+ * live 2026-07-08 — with this scope marked *required*, a free portal refuses the
+ * install outright: "Authorization failed because your account lacks access to
+ * the required scopes [automation.sequences.enrollments.write]", which would take
+ * the CRM push (the whole measured-ROI backbone) down with it. As an OPTIONAL
+ * scope the same portal installs cleanly and simply isn't granted it, so CRM
+ * works everywhere and only SEND self-gates — exactly D14's "full value before a
+ * single key". Optional scopes ride the `optional_scope` query param.
+ */
+export const HUBSPOT_OPTIONAL_SCOPES = [HUBSPOT_SEND_SCOPE] as const;
+
+/**
+ * The full set the authorize URL asks for. Kept for callers that just want to
+ * know everything the app may hold; the install-blocking set is REQUIRED only.
+ */
+export const HUBSPOT_SCOPES = [
+  ...HUBSPOT_REQUIRED_SCOPES,
+  ...HUBSPOT_OPTIONAL_SCOPES,
+] as const;
+
+/**
+ * Can this connection send? Reads the scopes actually GRANTED (persisted on
+ * `crm_connections.scopes` at connect time), never what we asked for — a portal
+ * without Sales Hub Pro silently drops the optional send scope, and the U9/U11
+ * send-gate must render that honestly rather than attempt a call that 403s.
+ */
+export function hasSendScope(
+  grantedScopes: string | readonly string[] | null | undefined,
+): boolean {
+  if (!grantedScopes) return false;
+  const list =
+    typeof grantedScopes === "string"
+      ? grantedScopes.split(/\s+/).filter(Boolean)
+      : grantedScopes;
+  return list.includes(HUBSPOT_SEND_SCOPE);
+}
 
 export const HUBSPOT_API_BASE = "https://api.hubapi.com";
 export const HUBSPOT_AUTHORIZE_BASE = "https://app.hubspot.com/oauth/authorize";
@@ -59,18 +111,27 @@ export interface OAuthHttpDeps extends OAuthConfig {
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 
-/** Build the HubSpot authorize URL the "Connect HubSpot" button points at. */
+/**
+ * Build the HubSpot authorize URL the "Connect HubSpot" button points at.
+ *
+ * `scope` carries the install-blocking set; `optional_scope` carries scopes a
+ * portal may lack without failing the install (HubSpot's own split — putting an
+ * optional scope in `scope` makes it required again and breaks free portals).
+ */
 export function buildAuthorizeUrl(args: {
   clientId: string;
   redirectUri: string;
   scopes?: readonly string[];
+  optionalScopes?: readonly string[];
   state?: string;
 }): string {
   const params = new URLSearchParams({
     client_id: args.clientId,
     redirect_uri: args.redirectUri,
-    scope: (args.scopes ?? HUBSPOT_SCOPES).join(" "),
+    scope: (args.scopes ?? HUBSPOT_REQUIRED_SCOPES).join(" "),
   });
+  const optional = args.optionalScopes ?? HUBSPOT_OPTIONAL_SCOPES;
+  if (optional.length > 0) params.set("optional_scope", optional.join(" "));
   if (args.state) params.set("state", args.state);
   return `${HUBSPOT_AUTHORIZE_BASE}?${params.toString()}`;
 }

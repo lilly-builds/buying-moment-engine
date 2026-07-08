@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { isAllowlisted, parseAllowlist } from "@/src/lib/auth";
+import { isAllowlisted, isPublicPath, parseAllowlist } from "@/src/lib/auth";
 
 /**
  * Session refresh + route gate (R18), called from the root `proxy.ts`.
@@ -12,16 +12,15 @@ import { isAllowlisted, parseAllowlist } from "@/src/lib/auth";
  * /login stays reachable so the redirect can't infinite-loop.
  *
  * U5 removed `/api/enrich-callback` from this allowlist: PDL is a SYNCHRONOUS
- * request/response API (spec § Stack), so no inbound callback exists. Nothing is
- * publicly reachable now except /login.
+ * request/response API (spec § Stack), so no inbound callback exists. In
+ * production /login is the only publicly reachable path; outside production
+ * /styleguide joins it, for brand review (see `publicPaths`).
  */
 
-const PUBLIC_PATHS = ["/login"];
-
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`),
-  );
+/** Resolved once per request. `publicPaths` opens /styleguide outside production
+ *  only — see the note on that function. */
+function isPublic(pathname: string): boolean {
+  return isPublicPath(pathname, process.env.NODE_ENV === "production");
 }
 
 function redirectToLogin(request: NextRequest): NextResponse {
@@ -39,7 +38,7 @@ export async function updateSession(
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) {
     // Supabase Auth unconfigured -> deny all non-public routes (fail closed).
-    return isPublicPath(request.nextUrl.pathname)
+    return isPublic(request.nextUrl.pathname)
       ? response
       : redirectToLogin(request);
   }
@@ -67,7 +66,7 @@ export async function updateSession(
   const allowlist = parseAllowlist(process.env.ALLOWLIST_EMAILS);
   const authorized = isAllowlisted(user?.email, allowlist);
 
-  if (!authorized && !isPublicPath(request.nextUrl.pathname)) {
+  if (!authorized && !isPublic(request.nextUrl.pathname)) {
     return redirectToLogin(request);
   }
 
