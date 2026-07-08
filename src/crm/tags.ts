@@ -88,13 +88,36 @@ export function contactProperties(lead: LeadInput): Props {
   });
 }
 
-export function dealProperties(lead: LeadInput, mode: PropertyMode): Props {
+/**
+ * Properties for CREATING a deal.
+ *
+ * `dealstage` — not `pipeline` — is what places a deal in a pipeline. Verified
+ * live: sending `pipeline` alone leaves BOTH null and the deal enters no pipeline,
+ * so no stage and no cycle time can ever be read back.
+ */
+export function dealCreateProperties(
+  lead: LeadInput,
+  mode: PropertyMode,
+): Props {
   return dropEmpty({
     dealname: `${lead.companyName} — buying moment`,
-    // `dealstage` — not `pipeline` — is what places a deal in a pipeline. Verified
-    // live: sending `pipeline` alone leaves BOTH null and the deal enters no
-    // pipeline, so no stage and no cycle time can ever be read back.
     dealstage: INITIAL_DEAL_STAGE_ID,
     ...encodeTags(lead.tags, mode),
   });
+}
+
+/**
+ * Properties for UPDATING an existing deal — the tags, and nothing else.
+ *
+ * R17, "never blindly overwrite a real record": `dealstage` and `dealname` belong
+ * to the HUMAN once the deal exists. Re-pushing a practice (a second signal fires)
+ * must refresh `signal_count` without dragging a closed-won deal back to
+ * "Appointment Scheduled" in the AE's live CRM — which is exactly what sending the
+ * create-bag on a PATCH did, and it double-logged `deal_won` when the AE re-closed.
+ */
+export function dealUpdateProperties(
+  lead: LeadInput,
+  mode: PropertyMode,
+): Props {
+  return dropEmpty({ ...encodeTags(lead.tags, mode) });
 }

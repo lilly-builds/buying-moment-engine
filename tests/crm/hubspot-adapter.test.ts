@@ -142,6 +142,33 @@ describe("createHubSpotAdapter.pushLead", () => {
     ]);
     expect(bodyProps(mock.calls[0]).ae_quality).toBe("down");
   });
+
+  it("a re-push NEVER writes dealstage — it must not drag a won deal backwards", async () => {
+    // The AE closed this deal. A second signal fires and the feed re-pushes the
+    // practice. Sending the create-bag on the PATCH would reopen the won deal in
+    // the AE's live CRM (R17: never blindly overwrite a real record).
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter(deps({ fetch: mock.fetch }));
+
+    await adapter.pushLead(LEAD, { companyId: "co_1", contactId: "ct_1", dealId: "dl_1" });
+
+    const dealPatch = mock.calls.find((c) => c.path === "/crm/v3/objects/deals/dl_1")!;
+    expect(dealPatch.method).toBe("PATCH");
+    expect(bodyProps(dealPatch).dealstage).toBeUndefined();
+    expect(bodyProps(dealPatch).dealname).toBeUndefined();
+    // …but the tags DO refresh, which is the whole point of a re-push.
+    expect(bodyProps(dealPatch).signal_count).toBe("2");
+  });
+
+  it("a first push DOES set dealstage, or the deal enters no pipeline", async () => {
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter(deps({ fetch: mock.fetch }));
+    await adapter.pushLead(LEAD);
+    const dealPost = mock.calls.find(
+      (c) => c.method === "POST" && c.path === "/crm/v3/objects/deals",
+    )!;
+    expect(bodyProps(dealPost).dealstage).toBe("appointmentscheduled");
+  });
 });
 
 describe("createHubSpotAdapter.tagLead (ae_quality 👍 -> 👎)", () => {
@@ -229,6 +256,24 @@ describe("createHubSpotAdapter.recordStage (cycle-time read-back)", () => {
     const adapter = createHubSpotAdapter(deps({ fetch: mock.fetch }));
     const readback = await adapter.recordStage({ dealId: "dl_9" });
     expect(readback.stage).toBe("appointmentscheduled");
+    expect(readback.cycleTimeDays).toBeNull();
+  });
+
+  it("a deal that WAS won but is not won now reports NO cycle time", async () => {
+    // HubSpot keeps `hs_v2_date_entered_closedwon` after a deal is reopened or
+    // lost. Reading it unconditionally reports a sales cycle for a deal that is
+    // not, right now, won. We never read it unless the deal says it is won.
+    const mock = hubspotApiMock({
+      deal: {
+        dealstage: "closedlost",
+        createdate: "2026-07-01T00:00:00Z",
+        hs_v2_date_entered_closedwon: "2026-07-06T00:00:00Z",
+      },
+    });
+    const adapter = createHubSpotAdapter(deps({ fetch: mock.fetch }));
+    const readback = await adapter.recordStage({ dealId: "dl_reopened" });
+    expect(readback.stage).toBe("closedlost");
+    expect(readback.closedAt).toBeNull();
     expect(readback.cycleTimeDays).toBeNull();
   });
 

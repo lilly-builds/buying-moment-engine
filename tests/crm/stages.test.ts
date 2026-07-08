@@ -6,7 +6,7 @@ import {
   stageMilestone,
   WON_STAGE_ID,
 } from "@/src/crm/stages";
-import { dealProperties } from "@/src/crm/tags";
+import { dealCreateProperties, dealUpdateProperties } from "@/src/crm/tags";
 import type { LeadInput } from "@/src/crm/adapter";
 
 const LEAD: LeadInput = {
@@ -14,18 +14,36 @@ const LEAD: LeadInput = {
   tags: { vertical: "dermatology", signalSource: "staffing-spike", signalCount: 2 },
 };
 
-describe("dealProperties places the deal in a pipeline", () => {
-  it("sets dealstage — a deal with only `pipeline` enters NO pipeline at all", () => {
+describe("deal properties: create places it in a pipeline, update never moves it", () => {
+  it("CREATE sets dealstage — a deal with only `pipeline` enters NO pipeline at all", () => {
     // Verified live 2026-07-08: {pipeline:"default"} alone -> dealstage:null AND
     // pipeline:null. Setting dealstage alone implies the default pipeline.
-    const props = dealProperties(LEAD, "custom");
+    const props = dealCreateProperties(LEAD, "custom");
     expect(props.dealstage).toBe(INITIAL_DEAL_STAGE_ID);
+    expect(props.dealname).toBeDefined();
   });
 
-  it("still carries the tags so pipeline reports slice by them", () => {
-    const props = dealProperties(LEAD, "custom");
+  it("CREATE carries the tags so pipeline reports slice by them", () => {
+    const props = dealCreateProperties(LEAD, "custom");
     expect(props.vertical).toBe("dermatology");
     expect(props.signal_source).toBe("staffing-spike");
+  });
+
+  it("UPDATE never sends dealstage — a re-push must not drag a won deal backwards", () => {
+    // R17, never blindly overwrite a real record. dealstage + dealname belong to
+    // the AE once the deal exists; only the tags are ours to refresh.
+    const props = dealUpdateProperties(LEAD, "custom");
+    expect(props.dealstage).toBeUndefined();
+    expect(props.dealname).toBeUndefined();
+  });
+
+  it("UPDATE still refreshes the tags (a second signal fired)", () => {
+    const props = dealUpdateProperties(
+      { ...LEAD, tags: { ...LEAD.tags, signalCount: 3 } },
+      "custom",
+    );
+    expect(props.signal_count).toBe("3");
+    expect(props.vertical).toBe("dermatology");
   });
 });
 

@@ -17,6 +17,7 @@ import {
   createDbTokenProvider,
   pushPracticeLead,
   recordStageForPractice,
+  sendReadiness,
   syncLeadQuality,
   syncPracticeLead,
 } from "@/src/crm/sync";
@@ -161,6 +162,23 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
         encryptionKey: KEY,
       }),
     ).rejects.toThrow(/403/);
+  });
+
+  it("a FAILED connect persists NO connection — no usable-looking state left behind", async () => {
+    // Storing the tokens before provisioning meant the user was told "connect
+    // failed" while getActiveConnection still resolved and sendReadiness reported
+    // connected:true — every later push then died with an opaque 502.
+    const forbidden = hubspotConnectMock({ propertiesForbidden: true });
+    await expect(
+      completeHubSpotConnect(t.db, oauthDeps(forbidden.fetch), {
+        code: "the-code",
+        encryptionKey: KEY,
+      }),
+    ).rejects.toThrow();
+
+    const active = await getActiveConnection(t.db);
+    expect(active.ok).toBe(false);
+    expect(await sendReadiness(t.db)).toEqual({ connected: false, canSend: false });
   });
 });
 
@@ -322,6 +340,56 @@ describe("pushPracticeLead (idempotent push + ROI event)", () => {
       .from(crmLinks)
       .where(eq(crmLinks.practiceId, practiceId));
     expect(links).toHaveLength(1);
+
+    // …and the lead IS counted, exactly once. Keying `lead_pushed` off "was the
+    // company created" lost it entirely here: the retry saw an existing companyId,
+    // reported created:false, and never logged the push that actually landed.
+    const pushed = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("re-pushing an already-landed lead logs no second lead_pushed", async () => {
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+
+    const pushed = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "lead_pushed"));
+    expect(pushed).toHaveLength(1);
+  });
+
+  it("a re-push does NOT clobber the stored stage the AE has moved the deal to", async () => {
+    const practiceId = await seedPractice(t);
+    const mock = hubspotApiMock();
+    const adapter = createHubSpotAdapter({
+      fetch: mock.fetch,
+      getAccessToken: async () => "tok",
+      sleep: async () => {},
+    });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+    // The AE advanced the deal; a later poll persisted that.
+    await upsertCrmLink(t.db, { practiceId, stage: "closedwon", cycleTimeDays: 5 });
+
+    await pushPracticeLead(t.db, adapter, { practiceId, lead: LEAD });
+
+    const [link] = await t.db
+      .select()
+      .from(crmLinks)
+      .where(eq(crmLinks.practiceId, practiceId));
+    expect(link.stage).toBe("closedwon");
   });
 });
 
@@ -453,6 +521,61 @@ describe("recordStageForPractice (stage move → cycle-time in the ROI read-back
       .from(roiEvents)
       .where(eq(roiEvents.eventType, "lead_pushed"));
     expect(pushed).toHaveLength(1);
+  });
+
+  it("a deal moved BACK into the appointment stage does not book a second meeting", async () => {
+    // Meeting rescheduled: appointmentscheduled -> qualifiedtobuy -> back again.
+    // Comparing against the previous stage only catches a repeated poll; the
+    // invariant we need is "first time, ever".
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_revisit" });
+
+    const stages = ["appointmentscheduled", "qualifiedtobuy", "appointmentscheduled"];
+    for (const dealstage of stages) {
+      const mock = hubspotApiMock({
+        deal: { dealstage, createdate: "2026-07-01T00:00:00Z" },
+      });
+      const adapter = createHubSpotAdapter({
+        fetch: mock.fetch,
+        getAccessToken: async () => "tok",
+        sleep: async () => {},
+      });
+      await recordStageForPractice(t.db, adapter, { practiceId });
+    }
+
+    const meeting = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "meeting_booked"));
+    expect(meeting).toHaveLength(1);
+  });
+
+  it("a won deal reopened and re-won does not log a second deal_won", async () => {
+    const practiceId = await seedPractice(t);
+    await upsertCrmLink(t.db, { practiceId, dealId: "dl_reopen" });
+
+    const stages = ["closedwon", "contractsent", "closedwon"];
+    for (const dealstage of stages) {
+      const mock = hubspotApiMock({
+        deal: {
+          dealstage,
+          createdate: "2026-07-01T00:00:00Z",
+          hs_v2_date_entered_closedwon: "2026-07-06T00:00:00Z",
+        },
+      });
+      const adapter = createHubSpotAdapter({
+        fetch: mock.fetch,
+        getAccessToken: async () => "tok",
+        sleep: async () => {},
+      });
+      await recordStageForPractice(t.db, adapter, { practiceId });
+    }
+
+    const won = await t.db
+      .select()
+      .from(roiEvents)
+      .where(eq(roiEvents.eventType, "deal_won"));
+    expect(won).toHaveLength(1);
   });
 
   it("a mid-pipeline stage logs NO milestone (walking the pipeline is not 4 meetings)", async () => {

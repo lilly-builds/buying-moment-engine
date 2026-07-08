@@ -13,7 +13,8 @@ import { WON_STAGE_ID } from "./stages";
 import {
   companyProperties,
   contactProperties,
-  dealProperties,
+  dealCreateProperties,
+  dealUpdateProperties,
   encodeTags,
   type PropertyMode,
 } from "./tags";
@@ -37,7 +38,8 @@ export { backoffDelayMs, HUBSPOT_FETCH_TIMEOUT_MS } from "./hubspot-http";
 export {
   companyProperties,
   contactProperties,
-  dealProperties,
+  dealCreateProperties,
+  dealUpdateProperties,
   encodeTags,
   PREFIXED_TAG_KEY,
   TAG_PROPERTY_KEYS,
@@ -203,10 +205,11 @@ export function createHubSpotAdapter(deps: HubSpotDeps): CrmAdapter {
       ? await request<HubSpotObject>(
           "PATCH",
           `/crm/v3/objects/deals/${existing.dealId}`,
-          { properties: dealProperties(lead, mode) },
+          // Tags only — `dealstage`/`dealname` belong to the AE once the deal exists.
+          { properties: dealUpdateProperties(lead, mode) },
         )
       : await request<HubSpotObject>("POST", "/crm/v3/objects/deals", {
-          properties: dealProperties(lead, mode),
+          properties: dealCreateProperties(lead, mode),
           associations: [
             assoc(company.id, ASSOCIATION_TYPE.dealToCompany),
             assoc(contactId, ASSOCIATION_TYPE.dealToContact),
@@ -252,15 +255,24 @@ export function createHubSpotAdapter(deps: HubSpotDeps): CrmAdapter {
       `/crm/v3/objects/deals/${ref.dealId}?properties=${DEAL_READ_PROPERTIES.join(",")}`,
     );
     const props = deal.properties ?? {};
+    const stage = props.dealstage ?? "";
     const enteredAt = parseDate(props.createdate);
     // `closedate` is set for closed-LOST too, so it can never mark a win. The
     // cycle we report is "deal created -> deal WON"; an open or lost deal has no
     // cycle time rather than a fabricated one (KTD: never claim an unsourceable
     // number). Verified live: the readable stage-entry property is
     // `hs_v2_date_entered_closedwon`.
-    const closedAt = parseDate(props[WON_STAGE_ENTERED_PROPERTY]);
+    //
+    // The stage guard is load-bearing, not belt-and-braces: a deal that WAS won
+    // and has since been reopened or lost still carries
+    // `hs_v2_date_entered_closedwon`. Reading it unconditionally reports a sales
+    // cycle for a deal that is not, right now, won. We do not assume HubSpot
+    // clears that timestamp — we simply never read it unless the deal says it is
+    // won.
+    const closedAt =
+      stage === WON_STAGE_ID ? parseDate(props[WON_STAGE_ENTERED_PROPERTY]) : null;
     return {
-      stage: props.dealstage ?? "",
+      stage,
       enteredAt,
       closedAt,
       cycleTimeDays: computeCycleTimeDays(enteredAt, closedAt),
