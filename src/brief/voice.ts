@@ -1,4 +1,5 @@
-import { parseMessagesResponse, readJsonBody } from "@/src/enrich/anthropic-client";
+import { streamToResponse } from "@/src/enrich/anthropic-client";
+import { consumeSseStream, describeFailure, StreamAccumulator } from "@/src/enrich/anthropic-stream";
 import {
   ANTHROPIC_API_URL,
   ANTHROPIC_API_VERSION,
@@ -114,13 +115,20 @@ export async function runVoice(
  * prompt is shorter, so a `cache_control` block would silently no-op while implying a
  * saving that never lands in `cost_events`. Same reasoning as `extract.ts` on Haiku.
  *
- * Non-streaming: `VOICE_MAX_TOKENS` is 16k, at the SDK's guidance ceiling for a
- * non-streamed request. Thinking is billed inside that budget, so the ceiling covers both.
+ * `stream: true` is not a nicety, it is R19 (P2-4). Un-streamed, a Messages response writes
+ * no headers until generation finishes; with `max_tokens: 16k` and adaptive thinking that can
+ * run tens of seconds, so `AbortSignal.timeout` fires on the fetch promise ITSELF — before
+ * `res.ok`, before the body, before the meter — on a call Anthropic already billed. The
+ * ledger then reads $0 for a call that cost money. `src/enrich/anthropic-client.ts` paid for
+ * this exact bug once (the westlake row: billed ~$1.27, recorded $0.00) and fixed it the same
+ * way. Streaming returns headers immediately, so the abort becomes a `bodyTimeout` mid-stream,
+ * which the client folds into a priced, resolved response.
  */
 export function buildVoiceRequestBody(request: VoiceRequest) {
   return {
     model: VOICE_MODEL,
     max_tokens: VOICE_MAX_TOKENS,
+    stream: true,
     system: VOICE_SYSTEM_PROMPT,
     thinking: { type: "adaptive" as const },
     messages: [{ role: "user", content: buildVoicePrompt(request) }],
@@ -134,14 +142,13 @@ export function buildVoiceRequestBody(request: VoiceRequest) {
 /**
  * Production binding. `apiKey` is injected, never read from module scope.
  *
- * Raw `fetch`, not the Anthropic SDK, and deliberately — the SDK throws on a non-2xx and
- * on a body it cannot decode. A billed 200 must RESOLVE so the meter writes its row. This
- * also matches `anthropic-client.ts`, `extract.ts` and `pdl-client.ts`, so there is one
- * HTTP idiom in the repo rather than two.
- *
- * `parseMessagesResponse` is reused as-is: it concatenates the top-level `text` blocks and
- * ignores the `thinking` blocks adaptive thinking emits, whose text is empty by default on
- * this model anyway (`display: "omitted"`).
+ * Raw `fetch`, not the Anthropic SDK, and deliberately — the SDK throws on a non-2xx and on
+ * a body it cannot decode. A billed 200 must RESOLVE so the meter writes its row. This is the
+ * same streaming idiom as `anthropicResearchClient`, reused whole: the accumulator prices the
+ * call from the tokens it saw even if the socket dies mid-body, and `streamToResponse` folds
+ * that into a resolved response rather than a throw. `VOICE_MODEL` is the fallback label for
+ * the rare stream that dies before `message_start`. The `thinking` deltas adaptive thinking
+ * emits are ignored — the accumulator keeps only `text_delta`s, which are the JSON answer.
  */
 export function anthropicVoiceClient(apiKey: string): VoiceClient {
   return {
@@ -154,12 +161,29 @@ export function anthropicVoiceClient(apiKey: string): VoiceClient {
           "content-type": "application/json",
         },
         body: JSON.stringify(buildVoiceRequestBody(request)),
+        // A total-duration guard, not a headers one — streaming took that job away. A working
+        // call resets `bodyTimeout` on every `ping`; only a genuinely stuck call trips this.
         signal: AbortSignal.timeout(VOICE_FETCH_TIMEOUT_MS),
       });
-      // Non-2xx is an UNBILLED call: throw, and the meter correctly records nothing.
-      // Past this line the request is billed, so nothing may throw.
+      // Non-2xx is an UNBILLED call: throw, and the meter correctly records nothing. Past this
+      // line the request is billed, so nothing may throw — a mid-stream death is caught below
+      // and priced, never propagated.
       if (!res.ok) throw new AnthropicRequestError(res.status, res.statusText);
-      return parseMessagesResponse(await readJsonBody(res), VOICE_MODEL);
+
+      const accumulator = new StreamAccumulator();
+      let failure: string | null = null;
+      if (res.body === null) {
+        failure = "no response body on a 200";
+      } else {
+        try {
+          await consumeSseStream(res.body, accumulator);
+        } catch (err) {
+          // The socket died on a call Anthropic already charged for. `describeFailure` digs
+          // out `err.cause.code`, so an abort reads `UND_ERR_...`, not "fetch failed".
+          failure = describeFailure(err);
+        }
+      }
+      return streamToResponse(accumulator, failure, VOICE_MODEL);
     },
   };
 }

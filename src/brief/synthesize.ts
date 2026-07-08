@@ -175,11 +175,13 @@ interface AttemptOutcome {
   reason: string;
   corrections: string[];
   /**
-   * A THROWN call was never billed — a 429, a timeout, a socket that died before headers.
-   * It tells us nothing about the practice, so retrying it immediately would answer a rate
-   * limit by spending money on the same rate limit. The loop stops and the caller decides
-   * when to come back. (Same reasoning as `waterfall.ts`'s `thrown` flag: a transient
-   * transport failure and a bad result are different facts and deserve different handling.)
+   * A THROWN call was never billed — a non-2xx, or a failure before the 200 ever landed (DNS,
+   * connect refused). This is TRUE only because the voice client streams (P2-4): headers
+   * arrive at once, so a timeout mid-generation is a `bodyTimeout` the client catches and
+   * PRICES, never a throw. The only things that reach this catch are genuinely unbilled, and
+   * retrying one immediately would answer a rate limit by spending money on the same rate
+   * limit. The loop stops and the caller decides when to come back. (Same reasoning as
+   * `waterfall.ts`'s `thrown` flag: a transport failure and a bad result are different facts.)
    */
   retryable: boolean;
 }
@@ -208,8 +210,9 @@ async function attemptVoice(
       attempt,
     );
   } catch (err) {
-    // Gate 0 — TRANSPORT. A non-2xx throws (correctly: it is unbilled, and the meter records
-    // nothing). It must not take a whole seeding run down with it, and it must be
+    // Gate 0 — TRANSPORT. A non-2xx (or a pre-200 network failure) throws, and it is unbilled
+    // so the meter correctly records nothing — see `retryable` above for why streaming is what
+    // makes that true. It must not take a whole seeding run down with it, and it must be
     // distinguishable from a BAD RESULT — only the latter is evidence about the practice.
     // Never retried, never persisted, never silently swallowed: logged with its message.
     return {

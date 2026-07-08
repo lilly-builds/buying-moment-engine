@@ -218,10 +218,16 @@ export const EMPTY_STREAM = "empty-stream";
  *  3. no events, no failure (a 200 that closed silently) -> unpriced, `EMPTY_STREAM`.
  *
  * Never throws. Everything reaching this function was billed the moment the 200 landed.
+ *
+ * `fallbackModel` labels the row only when the stream died before its `message_start` event
+ * carried the real model — always an already-unpriced row. It defaults to `RESEARCH_MODEL`
+ * for the agentic client; the brief's voice client passes `VOICE_MODEL`, exactly as
+ * `parseMessagesResponse` takes the same argument for the non-streaming path.
  */
 export function streamToResponse(
   accumulator: StreamAccumulator,
   failure: string | null,
+  fallbackModel: string = RESEARCH_MODEL,
 ): ResearchResponse {
   // A mid-stream `error` event on a 200 is Anthropic's own failure channel.
   const streamError = failure ?? accumulator.apiError ?? undefined;
@@ -230,7 +236,7 @@ export function streamToResponse(
     return {
       text: accumulator.text,
       usage: accumulator.usage,
-      model: accumulator.model ?? RESEARCH_MODEL,
+      model: accumulator.model ?? fallbackModel,
       ...(streamError === undefined ? {} : { streamError }),
     };
   }
@@ -238,7 +244,7 @@ export function streamToResponse(
   return {
     text: "",
     usage: ZERO_USAGE,
-    model: accumulator.model ?? RESEARCH_MODEL,
+    model: accumulator.model ?? fallbackModel,
     unpricedReason: streamError ?? EMPTY_STREAM,
     ...(streamError === undefined ? {} : { streamError }),
   };
