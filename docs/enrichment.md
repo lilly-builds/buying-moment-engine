@@ -14,11 +14,19 @@ Every claim on this page is labelled `verified (n=…)` or `inferred`. Nothing h
 
 2. **Extract** (`src/enrich/extract.ts`). One **Claude Haiku 4.5** call over the text we already hold, with structured outputs (`output_config.format`). The user message is a sequence of `=== SOURCE: <absoluteUrl> ===` blocks, so the model is physically unable to cite a page we do not have — no other URL appears in its context.
 
-3. **Verify** (`src/enrich/citations.ts`). Every fact arrives as `{value, sourceUrl, snippet}`. We assert the **snippet** is a verbatim, contiguous substring of the page it cites, after normalizing *both sides* identically (lowercase · collapse whitespace runs · curly quotes → straight · en/em-dash → hyphen). If it isn't, the fact is **dropped**, and the drop is returned and logged — never swallowed. ⚠️ We do **not** yet assert the `value` is supported by that snippet — see [Open defects](#open-defects).
+3. **Verify** (`src/enrich/citations.ts`). Every fact arrives as `{value, sourceUrl, snippet}` — `snippet` is the exhibit, `value` is what the brief renders. Three gates, in order:
+
+   1. **Do we hold the cited page?** If not → `url-not-held`. The model was shown every URL it was allowed to cite.
+   2. **Is the snippet on that page**, contiguously, after normalizing *both sides* identically (lowercase · collapse whitespace runs · curly quotes → straight · en/em-dash → hyphen)? If not → `snippet-not-verbatim`.
+   3. **Does the snippet contain the value**, as a whole word or phrase? If not → `value-not-in-snippet`.
+
+   Gate 3 runs only on **quotation** fields, where the value is a span lifted off the page (`ehr`, `incumbentTooling`, `yearFounded`, the decision-maker's `name` / `role` / `email`). It cannot run on **label** fields, where the value is the model's own word for what the snippet says (`specialty` — "Orthopedics" for "…orthopedic practice"; `website`; `linkedinUrl`; `buyingMomentContext`). Those are kept, and reported in `VerificationResult.paraphrased` so the brief never renders one inside quote marks. See [Limits](#limits-of-the-citation-check).
+
+   A fact that fails any gate is **dropped**, and the drop is returned and logged with its field, reason, value and snippet — never swallowed.
 
 4. **PDL gap-fill** (`src/enrich/pdl.ts`). Called *only* for the fields the extractor left blank *and* the stored contact cannot already fill — a practice whose staff page publishes the manager's name, email and LinkedIn makes **zero** PDL calls, and so does a re-run.
 
-5. **Persist.** Only facts whose snippet is verified reach `practice_facts`, each with its own evidence row carrying `source_url`, `snippet` and `detected_at`. ⚠️ **What is verified is the evidence, not yet the claim** — see [Open defects](#open-defects).
+5. **Persist.** Only verified facts reach `practice_facts`, each with its own evidence row carrying `source_url`, `snippet` and `detected_at`.
 
 An **agentic fallback** (Sonnet 5, server-side `web_search` + `web_fetch`) is retained for practices whose site we cannot read. It fires on a *bad result* — a thin scrape, an unparseable body, or zero verified facts — never on a thrown error, and it is capped by a run-wide spend budget. See [Escalation](#escalation).
 
@@ -30,17 +38,20 @@ The requirement (D2 / R5) is *"the brief never states an uncited fact."*
 
 Before this refactor, that was enforced by a schema that checked a fact **has** a `sourceUrl` and a `snippet` — never that the snippet is on that page. It *could not be*: the old mechanism let Claude browse, and we never held the bytes it read. A snippet stitched together from three separate parts of a page arrived carrying a real URL and looking exactly like a quotation.
 
-Holding the page makes the check arithmetic. It has caught fabrication **three times**:
+Holding the page makes the check arithmetic. It has caught fabrication **four times**:
 
 | when | practice | field | what happened |
 |---|---|---|---|
 | prompt experiment, round 1 | schlessinger-md-dermatology | `providerCount` | three names that appear on the team page as three separate `<h2>` headings, comma-joined into a sentence that appears nowhere |
 | prompt experiment, round 2 | virginia-womens-center | `locationsCount` | stitched from a location list |
-| **live production path** | schlessinger-md-dermatology | `firmographics.website` | `snippet-not-verbatim` |
+| live production path | schlessinger-md-dermatology | `firmographics.website` | `snippet-not-verbatim` |
+| **live, again** | schlessinger-md-dermatology | `firmographics.website` | `snippet-not-verbatim` — the same field, on a later run |
 
-**The third catch did not reproduce.** Re-running that one practice gave *identical* input (8,274 tokens — the scrape is deterministic) and *different* output (366 vs 352 tokens), with **zero drops**. `verified (n=2 identical calls)`.
+**And the same call, repeated, does not fabricate every time.** That third catch was re-run immediately on *identical* input (8,274 tokens — the scrape is deterministic) and produced *different* output (366 vs 352 tokens) with **zero drops**. It then fired again on the fourth run. `verified (n=3 calls on identical input: caught · clean · caught)`.
 
-So the fabrication is **stochastic**. Same page text, same prompt: the model stitched a snippet on one call and not the next. A defect that only appears sometimes cannot be caught by reading the output, by a model's self-reported confidence score, or by tightening the prompt. It can only be caught by holding the page.
+So the fabrication is **stochastic**. Same page text, same prompt: the model stitches a snippet on one call and not the next. A defect that only appears *sometimes* cannot be caught by reading the output, by a model's self-reported confidence score, or by tightening the prompt — those all inspect one sample. It can only be caught by holding the page, on every call.
+
+*(This is also why "we re-ran it and it was fine" is not evidence of anything. A stochastic defect is only ever absent from the sample you happened to look at.)*
 
 `tests/enrich/citations.test.ts` pins the round-1 catch against the real captured team-page text. Delete the verifier and that test goes red — that is the proof D2 is enforced rather than requested.
 
@@ -67,9 +78,21 @@ There is zero recall cost to the clean option, so we take it. Read-only public b
 
 `Allow:` directives are deliberately unimplemented — ignoring one can only ever make us *skip* a page, never crawl a forbidden one.
 
+### A redirect can move the origin under you
+
+`fetch(…, {redirect: "follow"})` hands back a 200 that may have come from a host you never asked about — and whose `robots.txt` you have therefore never read. An acquired practice's domain 301s to its parent DSO; the DSO disallows `/locations/`; we follow, take the body, and hold it. The old code discarded `res.url`, so it could not even tell.
+
+So the scraper reads `res.url`. If the homepage lands on a different origin, it **re-fetches that origin's `robots.txt`**, re-checks the landed path against it, and re-bases both link discovery and the page keys onto the host that actually served the text. Per-page, a bucket page that redirects off-origin is dropped rather than held under a URL that does not serve it.
+
+It is **not** treated as `blocked`: `https://toa.com/` → `https://www.toa.com` is everyday, and refusing it "to be safe" would silently delete real practices. `robots.txt` itself still follows redirects without re-basing — RFC 9309 §2.3.1.2 says a redirected `robots.txt` governs the authority that was asked.
+
+Covered by `tests/enrich/scrape.test.ts`, asserting on the *fetcher's call list* — "we obeyed the rules" is a claim about the requests we made, not the bytes we kept. Honest limit: **no practice in the live cohort cross-origin redirects**, so this path is proven by tests, not by the wild. What the live run does show is that it cost nothing: pages held per practice are identical before and after (6·7·5·5·3).
+
 ---
 
 ## Cost and latency · `verified (n=5 practices, 2026-07-08)`
+
+*Figures below are the A/B against the agentic mechanism, measured before the value gate landed. The gate added a fixed 521 input tokens per practice — current mean is **$0.0094**, and the comparison is unchanged at three significant figures. See [What the tightened check cost](#what-the-tightened-check-cost--verified-n5-practices-2026-07-08).*
 
 | | agentic (old) | scrape → extract |
 |---|---|---|
@@ -125,33 +148,46 @@ Making them provable means holding a substrate the agentic model actually read �
 
 ---
 
-## Open defects
+## Limits of the citation check
 
-Found by a fresh-eyes review, confirmed against the source, **not yet fixed**. Recorded here rather than in a private tracker, because this page's other claims are only worth what its honesty is worth.
+What the check does **not** prove, stated plainly, because the claims above are only worth what this section is worth.
 
-### 1. The verifier proves the citation exists, never that it supports the claim
+**A label field's wording is never verified.** `specialty`, `website`, `linkedinUrl` and `buyingMomentContext` carry a value the model wrote *about* the snippet. Containment cannot be required of them — `"Orthopedics"` is not a substring of `"…orthopedic practice."` — so the citation is proven and the wording is not. `buyingMomentContext` is the one that can still mislead: `{value: "Opening a fourth location in Q3", snippet: "We are opening a fourth location."}` verifies, because a summary is what the field *is*. They are reported in `VerificationResult.paraphrased`, and the brief renders them as plain text, never inside quotation marks (`src/brief/schema.ts` makes the dangerous rendering unrepresentable rather than merely discouraged).
 
-Each fact is `{value, sourceUrl, snippet}`. `value` is what a brief renders; `snippet` is the exhibit. `verifyFact` reads `sourceUrl` and `snippet`, and never touches `value`.
+**So the headline claim is scoped:** a fabricated *quotation-field* value cannot reach the database. A label field's *phrasing* is the model's, always was, and is marked as such.
 
-So this passes:
+**A true span can still carry a wrong meaning.** `{value: "2004", snippet: "Suite 2004, 100 Biscayne Blvd."}` passes every gate: `2004` really is a whole word on that page. A citation check proves provenance, not semantics. Nothing here fixes that, and no amount of string matching will.
 
-```json
-{ "value": "Epic",
-  "sourceUrl": "https://x.example/patients",
-  "snippet": "Our patient portal is powered by ModMed EMA." }
-```
+**`value ⊂ snippet` is a word match, not a substring match — and it took a review to get that right.** `snippet.includes(value)` verified `role: "COO"` against the real Schlessinger team page, because `coo` sits inside `coordinators`. EHR vendor names are the worst case in the language: `Epic` ⊂ `Epicare`, `Athena` ⊂ `AthenaHealth`, `EMA` ⊂ `ModMedEMA`. The match must now land on word boundaries. Measured over every quotation fact in all fixtures plus the captured page: **15/15 true facts survive, 0 false drops.**
 
-The snippet is genuinely on the page. The answer contradicts it. `practice_facts.value = 'Epic'` is written, cited to a sentence that says ModMed — and `classifyVertical` reads the same unchecked string.
+**The prompt and the verifier are one contract, and they can drift apart silently.** An earlier draft of prompt rule 8 handed the model a role *vocabulary* ("practice manager … OWNER-PHYSICIAN") while rule 5 demanded `role` appear verbatim in its snippet. The real Schlessinger page prints no role noun anywhere, so the model returned `role: "Owner-Physician"`, the verifier dropped it as a fabrication, the dropped role collapsed the entire contact — and the drift alarm blamed the model for obeying its instructions. `tests/enrich/extract.test.ts` now pins the two together. **A verifier stricter than its prompt does not catch lies; it deletes truths.**
 
-The repo's own fixture already carries a milder instance: `buyingMomentContext[0].value = "…in Q3"` against a snippet that says "this fall."
+**The escalation path is not value-checked at all.** It holds no pages, so its facts exit at gate 1 as `unverifiable`. Value-checking them would enforce a contract Sonnet was never given — see [Escalation](#escalation).
 
-**The fix is not a blanket containment check.** Some `value`s *are* quotations (`ehr`, `decisionMaker.name`, `decisionMaker.role`, `decisionMaker.email`, `firmographics.yearFounded`) and some are model-authored labels by design (`specialty` — "Orthopedics" vs "…orthopedic practice"; `incumbentTooling` — "Podium reviews" vs "Reviews collected via Podium"; `website`; `linkedinUrl`; `buyingMomentContext`). The quotation fields must be checked; the label fields must be *declared* as unverified paraphrase so the brief never renders one inside quote marks.
+---
 
-### 2. `robots.txt` is not re-checked across a cross-origin redirect
+## What the tightened check cost · `verified (n=5 practices, 2026-07-08)`
 
-`scrape.ts` uses `redirect: "follow"` and discards `res.url`. `robots.txt` is fetched once, from the *requested* origin. If a practice's URL 301s to a different host — an acquired practice pointing at its parent DSO — we fetch that host without ever reading its rules, and key the held text under a URL that does not serve it (which breaks the provenance the URL key exists to carry).
+The value gate was measured before shipping, on the same five real practices:
 
-Matters because the honest-UA / robots claim above is this scraper's whole thesis, on a public repo.
+| | before the value gate | after |
+|---|---|---|
+| facts verified | 17 | **18** |
+| facts dropped | 1 | 1 |
+| `value-not-in-snippet` drops | — | **0** |
+| decision-maker named | 2 / 5 | **2 / 5** |
+| pages held | 6·7·5·5·3 | **6·7·5·5·3** (identical) |
+| mean cost / practice | $0.0088 | $0.0094 |
+
+**Zero false drops.** The one drop in both runs is the same stochastic `firmographics.website` `snippet-not-verbatim` — a label field, untouched by the new gate.
+
+**Decision-maker recall did not regress**, which was the live risk in requiring `role` to be quoted: the two practices that publish a person still yield one. The three that do not, still do not — those pages name no manager (see [Known gaps](#known-gaps)).
+
+Honest `n`: only **4 of the 18** verified facts were quotation-class (two named contacts × `name` + `role`). No practice in this cohort publishes an EHR, so gate 3 has never fired on `ehr` against live data. The 0-false-drop result is real and it is small.
+
+The prompt grew by exactly **521 input tokens** per practice (identical on all five — it is a fixed system prompt), which is the entire +7% cost. Buying a closed fabrication hole for six hundredths of a cent per practice is not a difficult trade.
+
+`scripts/experiment-2-mechanism-ab.ts --out ./experiment-2b-results.jsonl` · $0.0470 spent.
 
 ---
 
