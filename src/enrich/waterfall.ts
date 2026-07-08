@@ -12,6 +12,7 @@ import {
   computeGaps,
   factsFromFindings,
   hasGap,
+  normalizeLinkedinUrl,
   subtractFilled,
   type Gaps,
 } from "./gaps";
@@ -220,8 +221,11 @@ async function persistContact(
   // PDL may fill ONLY the fields Claude left blank. A Claude-cited value always
   // wins: it has a source URL, PDL's does not.
   const email = dm.email?.value ?? (gaps.email ? pdlResult?.workEmail : null);
-  const linkedinUrl =
-    dm.linkedinUrl?.value ?? (gaps.linkedinUrl ? pdlResult?.linkedinUrl : null);
+  // PDL's LinkedIn URL arrives scheme-less. Normalize at the persist boundary, so a
+  // broken `href` can never reach the contact card (U9).
+  const linkedinUrl = normalizeLinkedinUrl(
+    dm.linkedinUrl?.value ?? (gaps.linkedinUrl ? pdlResult?.linkedinUrl : null),
+  );
 
   await upsertContact(db, {
     practiceId,
@@ -229,7 +233,7 @@ async function persistContact(
     name: dm.name?.value ?? null,
     email: email ?? null,
     emailProvider: email ? (dm.email ? "claude_research" : "pdl") : null,
-    linkedinUrl: linkedinUrl ?? null,
+    linkedinUrl,
     linkedinProvider: linkedinUrl
       ? dm.linkedinUrl
         ? "claude_research"

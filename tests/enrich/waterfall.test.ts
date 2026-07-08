@@ -8,6 +8,7 @@ import {
   computeGaps,
   factsFromFindings,
   hasGap,
+  normalizeLinkedinUrl,
   subtractFilled,
 } from "@/src/enrich/gaps";
 import type { ResearchFindings } from "@/src/enrich/types";
@@ -100,6 +101,39 @@ describe("subtractFilled — the DB closes gaps too, so a re-run does not re-spe
         linkedinUrl: null,
       }),
     ).toEqual({ email: false, linkedinUrl: false });
+  });
+});
+
+describe("normalizeLinkedinUrl — a scheme-less URL is a dead link in U9", () => {
+  it("prefixes https:// when PDL omits the scheme", () => {
+    expect(normalizeLinkedinUrl("linkedin.com/in/dana-whitfield")).toBe(
+      "https://linkedin.com/in/dana-whitfield",
+    );
+  });
+
+  it("leaves an https:// URL untouched", () => {
+    expect(normalizeLinkedinUrl("https://linkedin.com/in/dana")).toBe(
+      "https://linkedin.com/in/dana",
+    );
+  });
+
+  it("leaves an http:// URL untouched — we do not silently rewrite the scheme", () => {
+    expect(normalizeLinkedinUrl("http://linkedin.com/in/dana")).toBe(
+      "http://linkedin.com/in/dana",
+    );
+  });
+
+  it("is case-insensitive about the scheme", () => {
+    expect(normalizeLinkedinUrl("HTTPS://linkedin.com/in/dana")).toBe(
+      "HTTPS://linkedin.com/in/dana",
+    );
+  });
+
+  it("absent / blank stays null — never the string 'https://'", () => {
+    expect(normalizeLinkedinUrl(null)).toBeNull();
+    expect(normalizeLinkedinUrl(undefined)).toBeNull();
+    expect(normalizeLinkedinUrl("")).toBeNull();
+    expect(normalizeLinkedinUrl("   ")).toBeNull();
   });
 });
 

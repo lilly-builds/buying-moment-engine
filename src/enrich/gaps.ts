@@ -56,6 +56,27 @@ export function subtractFilled(
   };
 }
 
+/** `scheme://` — an absolute URL. Anything else is a bare host + path. */
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * PDL returns LinkedIn URLs scheme-less (`linkedin.com/in/...`). Persisted verbatim,
+ * U9 renders `href="linkedin.com/in/..."` — which a browser resolves as a RELATIVE
+ * path, i.e. a dead link on the contact card. Prefix `https://` when no scheme is
+ * present; leave an already-absolute URL exactly as it came.
+ *
+ * Applied to the Claude-cited value too. Its citation makes it trustworthy, not
+ * well-formed, and one normalizer at the persist boundary beats two rules.
+ */
+export function normalizeLinkedinUrl(
+  url: string | null | undefined,
+): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (trimmed === "") return null;
+  return URL_SCHEME.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 /**
  * Flatten findings into the cited facts we persist. Firmographics, EHR, incumbent
  * tooling and buying-moment context all land in `practice_facts`, each with its own

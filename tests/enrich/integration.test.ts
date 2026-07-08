@@ -77,7 +77,11 @@ describe("enrichment waterfall (integration)", () => {
     expect(contact.role).toBe("Practice Administrator");
     expect(contact.email).toBe("dana.whitfield@sunshinederm.example");
     expect(contact.emailProvider).toBe("pdl");
-    expect(contact.linkedinUrl).toBe("linkedin.com/in/dana-whitfield-example");
+    // PDL hands back `linkedin.com/in/...` with no scheme. Persisted verbatim, U9's
+    // `href` would resolve as a relative path — a dead link. Normalized at persist.
+    expect(contact.linkedinUrl).toBe(
+      "https://linkedin.com/in/dana-whitfield-example",
+    );
     expect(contact.linkedinProvider).toBe("pdl");
     // The page Claude cited for name/role survives alongside PDL's fill.
     expect(contact.sourceUrl).toBe("https://sunshinederm.example/team");
