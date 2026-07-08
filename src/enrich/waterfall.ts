@@ -220,23 +220,26 @@ export async function enrichPractice(
         city: practice.city,
         state: practice.state,
         websiteUrl: practice.websiteUrl,
-        pages: primary.pages,
       },
     );
 
     if (outcome.attempted) {
-      escalated = true;
+      // `escalated` answers "did $1.27 leave the account?", not "did we try?". A THROWN
+      // call is unbilled — the meter wrote nothing, and neither may the spend report.
+      // Reporting $0 as $1.27 is the Westlake bug pointing the other way.
+      escalated = outcome.billed;
       log("enrich.escalated", {
         practice: practice.name,
         trigger: primary.trigger,
+        billed: outcome.billed,
         spent: deps.escalation.budget.spent,
         of: deps.escalation.budget.max,
       });
       if (outcome.ok) {
         findings = outcome.findings;
-        factsDropped += outcome.dropped.length;
+        // Nothing is DROPPED on this path: the agentic model read the live web, not our
+        // cleaned copy, so we hold no substrate that could refute it. See `escalation.ts`.
         factsUnverifiable = outcome.unverifiable.length;
-        if (outcome.dropped.length > 0) logDrops(log, practice.name, outcome.dropped);
         if (outcome.unverifiable.length > 0) {
           // We paid for facts we cannot prove. Say so, every time.
           log("enrich.unverifiable_facts", {

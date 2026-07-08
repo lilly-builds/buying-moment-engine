@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import researchFixture from "./fixtures/anthropic-research-response.json";
-import { SUNSHINE_PAGES } from "./fixtures/held-pages";
 import { FakeResearchClient, recordingMeter } from "./doubles";
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
 import {
@@ -26,7 +25,6 @@ const REQUEST = {
   city: "Miami",
   state: "FL",
   websiteUrl: "https://sunshinederm.example",
-  pages: new Map<string, string>(),
 };
 
 describe("EscalationBudget — triggering is free, firing is $1.27", () => {
@@ -58,11 +56,11 @@ describe("EscalationBudget — triggering is free, firing is $1.27", () => {
   });
 });
 
-describe("runEscalation — the agentic path is held to the same standard where we can check", () => {
-  it("holds NO pages: every fact is kept, counted as unverifiable, and NOT called a lie", async () => {
-    // Escalation exists precisely because we could not read this practice's site. Its
-    // facts cite pages we never fetched. That is the pre-refactor assurance level, and
-    // it is what a rare fallback costs.
+describe("runEscalation — it reads the live web, so our cleaned text cannot judge it", () => {
+  it("EVERY fact comes back unverifiable, and NONE is called a lie", async () => {
+    // Escalation exists because the free path could not read this practice. The agentic
+    // model `web_fetch`ed the live pages; we hold, at best, a pruned and reordered copy.
+    // We cannot prove its facts. We also cannot refute them. Both statements are honest.
     const { meter, rows } = recordingMeter();
     const outcome = await runEscalation(
       { client: FakeResearchClient.fromFixture(researchFixture), meter, budget: createEscalationBudget(1) },
@@ -72,61 +70,55 @@ describe("runEscalation — the agentic path is held to the same standard where 
     expect(outcome.attempted).toBe(true);
     if (!outcome.attempted || !outcome.ok) throw new Error("expected an ok escalation");
 
-    expect(outcome.dropped).toEqual([]);
-    expect(outcome.unverifiable.map((f) => f.reason)).toEqual(
-      new Array(outcome.unverifiable.length).fill("url-not-held"),
-    );
     expect(outcome.unverifiable.length).toBeGreaterThan(0);
+    expect(outcome.unverifiable.every((f) => f.reason === "url-not-held")).toBe(true);
     expect(outcome.findings.ehr?.value).toBe("ModMed EMA");
+    expect(outcome.billed).toBe(true);
     expect(rows).toHaveLength(1); // one paid agentic call, metered
   });
 
-  it("holds the page: a snippet that is NOT on it is dropped, agentic or not", async () => {
-    // No citation exemption. Where we can check, we check.
+  it("REGRESSION: a TRUE snippet that `cleanHtml` pruned is not dropped as fabrication", async () => {
+    // The bug this guards: verifying Sonnet's live-page snippets against our cleaned copy.
+    // `cleanHtml` deletes nav/header/footer, drops paragraphs under 20 chars, and emits all
+    // headings BEFORE all prose — so a span the model copied verbatim off the real page can
+    // be absent from ours. Dropping it would destroy a true fact, on the $1.27 path, and
+    // file it under `enrich.citation_drops` — the prompt-drift alarm.
     const base = parseMessagesResponse(researchFixture);
-    const fabricated = new FakeResearchClient(async () => ({
+    const fromLivePage = new FakeResearchClient(async () => ({
       ...base,
-      text: base.text.replace(
-        "Our patient portal is powered by ModMed EMA.",
-        "The practice migrated to Epic in 2023.",
-      ),
+      // A short `<li>ModMed EMA</li>`: real on the live page, pruned from our copy.
+      text: base.text.replace("Our patient portal is powered by ModMed EMA.", "ModMed EMA"),
     }));
     const { meter } = recordingMeter();
 
     const outcome = await runEscalation(
-      { client: fabricated, meter, budget: createEscalationBudget(1) },
-      { ...REQUEST, pages: SUNSHINE_PAGES },
+      { client: fromLivePage, meter, budget: createEscalationBudget(1) },
+      REQUEST,
     );
 
     if (!outcome.attempted || !outcome.ok) throw new Error("expected an ok escalation");
-    expect(outcome.findings.ehr).toBeNull();
-    expect(outcome.dropped).toMatchObject([{ field: "ehr", reason: "snippet-not-verbatim" }]);
-    // Everything else was verbatim on a page we hold, so nothing is merely "unproven".
-    expect(outcome.unverifiable).toEqual([]);
+    expect(outcome.findings.ehr?.value).toBe("ModMed EMA"); // kept
+    expect(outcome.unverifiable.map((f) => f.field)).toContain("ehr"); // and flagged
   });
 
-  it("paid $1.27 and every fact was refuted -> a recorded failure, never a partial write", async () => {
+  it("paid $1.27 and the model returned nothing -> a recorded failure, never a partial write", async () => {
     const base = parseMessagesResponse(researchFixture);
-    const allFake = new FakeResearchClient(async () => ({
-      ...base,
-      text: base.text.replaceAll(/"snippet": "[^"]*"/g, '"snippet": "Nothing on any page says this."'),
-    }));
+    const empty = new FakeResearchClient(async () => ({ ...base, text: "{}" }));
     const { meter, rows } = recordingMeter();
 
     const outcome = await runEscalation(
-      { client: allFake, meter, budget: createEscalationBudget(1) },
-      { ...REQUEST, pages: SUNSHINE_PAGES },
+      { client: empty, meter, budget: createEscalationBudget(1) },
+      REQUEST,
     );
 
-    expect(outcome).toMatchObject({ attempted: true, ok: false });
+    expect(outcome).toMatchObject({ attempted: true, ok: false, billed: true });
     if (outcome.attempted && !outcome.ok) expect(outcome.reason).toMatch(/no usable facts/);
     expect(rows).toHaveLength(1); // the money is on the ledger regardless
   });
 
-  it("a THROWN escalation fails the practice, not the cohort — and the budget is not refunded", async () => {
-    // A throw is unbilled, so not refunding makes the cap conservative: it can only ever
-    // authorize LESS spend than `max`, never more. Erring the other way is how a cap of 3
-    // quietly becomes $3.81 on a run meant to cost $0.10.
+  it("a THROWN escalation is UNBILLED — and must never report as $1.27 spent", async () => {
+    // The inverse of the Westlake bug: free recorded as paid. The budget is still consumed,
+    // so the cap can only ever authorize LESS spend than `max`, never more.
     const budget = createEscalationBudget(1);
     const { meter, rows } = recordingMeter();
 
@@ -135,19 +127,19 @@ describe("runEscalation — the agentic path is held to the same standard where 
       REQUEST,
     );
 
-    expect(outcome).toMatchObject({ attempted: true, ok: false });
-    expect(rows).toEqual([]); // unbilled
+    expect(outcome).toMatchObject({ attempted: true, ok: false, billed: false });
+    expect(rows).toEqual([]); // the meter wrote nothing, correctly
     expect(budget.take()).toBe(false); // and the attempt is still counted
   });
 
-  it("a malformed escalation body is a recorded failure, and is still metered", async () => {
+  it("a malformed escalation body IS billed, and says so", async () => {
     const { meter, rows } = recordingMeter();
     const outcome = await runEscalation(
       { client: FakeResearchClient.malformed(), meter, budget: createEscalationBudget(1) },
       REQUEST,
     );
 
-    expect(outcome).toMatchObject({ attempted: true, ok: false });
+    expect(outcome).toMatchObject({ attempted: true, ok: false, billed: true });
     expect(rows).toHaveLength(1);
     expect(rows[0].costUsd).toBeGreaterThan(0);
   });

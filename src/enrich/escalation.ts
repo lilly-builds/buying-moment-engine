@@ -70,29 +70,71 @@ export interface EscalationDeps {
   practiceId?: string | null;
 }
 
+/**
+ * Deliberately carries NO page map. The pages we hold cannot adjudicate what the agentic
+ * model read off the live web — see `runEscalation`. Passing them would only tempt a
+ * future reader to verify against the wrong substrate.
+ */
 export interface EscalationRequest {
   practiceName: string;
   city?: string | null;
   state?: string | null;
   websiteUrl?: string | null;
-  /** Whatever the scraper did manage to hold. Often empty — that is why we are here. */
-  pages: Map<string, string>;
 }
 
 export type EscalationOutcome =
   /** The budget was spent, or already zero. NOTHING was called and nothing was billed. */
   | { attempted: false }
-  | { attempted: true; ok: true; findings: ResearchFindings; dropped: DroppedFact[]; unverifiable: DroppedFact[] }
-  | { attempted: true; ok: false; reason: string };
+  | {
+      attempted: true;
+      ok: true;
+      /** Always true: a resolved agentic response means Anthropic returned a 200. */
+      billed: true;
+      findings: ResearchFindings;
+      unverifiable: DroppedFact[];
+    }
+  | {
+      attempted: true;
+      ok: false;
+      /**
+       * `false` ONLY when the call THREW before a 200 — a 429, a DNS failure. The meter
+       * correctly wrote nothing, so `escalated` must not claim we bought anything.
+       * Reporting $0 as $1.27 is the Westlake bug pointing the other way.
+       */
+      billed: boolean;
+      reason: string;
+    };
 
 /**
- * Run the agentic path ONCE, then hold its answer to the same standard as the primary
- * path wherever we can. Facts citing a page we hold must be verbatim on it. Facts citing
- * the open web are kept, counted, and flagged — see `VerifyOptions.unheldUrl`.
+ * Run the agentic path ONCE.
  *
- * A THROW here is caught: the escalation was the last resort, and a rate limit on the
- * last resort should fail the practice, not the cohort.
+ * ─── Why its facts are NOT verified against the pages we hold ─────────────────
+ *
+ * The obvious thing — "hold the agentic path to the same standard, it cites pages we
+ * have" — is wrong, and it is wrong in the direction that destroys true facts.
+ *
+ * Sonnet did not read our text. It `web_fetch`ed the LIVE page. Our copy came out of
+ * `cleanHtml`, which deletes `nav`/`header`/`footer`, drops every paragraph under 20
+ * characters, emits all headings BEFORE all prose (so document order is gone), dedupes
+ * repeated sections, and truncates at 8k. Every one of those is invisible to the
+ * verifier's normalizer. A snippet Sonnet copied verbatim off the real page can be
+ * absent from ours — and would then be reported as `snippet-not-verbatim`, i.e. as
+ * fabrication, on the one path that costs $1.27.
+ *
+ * Worse, it poisons the signal: `dropped` is the prompt-drift alarm. Filling it with
+ * false positives from a substrate mismatch makes the alarm useless.
+ *
+ * So we verify against NOTHING. Every agentic fact comes back `unverifiable`
+ * (`url-not-held`) and is persisted at the pre-refactor assurance level — which is
+ * exactly what a rare fallback should cost, and is what the mechanism plan authorized.
+ * Making these facts *provable* means holding a substrate Sonnet actually read (raw
+ * per-URL page text, unpruned). That is a real improvement and it is not this change.
+ *
+ * A THROW is caught: escalation was the last resort, and a rate limit on the last resort
+ * should fail the practice, not the cohort.
  */
+const NO_SUBSTRATE_WE_CAN_VERIFY_AGAINST: ReadonlyMap<string, string> = new Map();
+
 export async function runEscalation(
   deps: EscalationDeps,
   request: EscalationRequest,
@@ -111,26 +153,30 @@ export async function runEscalation(
       },
     );
   } catch (err) {
+    // UNBILLED. The meter wrote nothing, and neither may the spend report.
     return {
       attempted: true,
       ok: false,
+      billed: false,
       reason: `escalation failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
   if (!outcome.ok) {
-    return { attempted: true, ok: false, reason: `escalation: ${outcome.reason}` };
+    // A billed 200 whose body would not parse. The money is on the ledger.
+    return { attempted: true, ok: false, billed: true, reason: `escalation: ${outcome.reason}` };
   }
 
-  const { verified, dropped, unverifiable } = verifyFindings(outcome.findings, request.pages, {
-    unheldUrl: "keep-unverifiable",
-  });
+  const { verified, unverifiable } = verifyFindings(
+    outcome.findings,
+    new Map(NO_SUBSTRATE_WE_CAN_VERIFY_AGAINST),
+    { unheldUrl: "keep-unverifiable" },
+  );
 
   if (isEmptyFindings(verified)) {
-    // We paid $1.27 and every fact was refuted by a page we hold. That is a real,
-    // recordable outcome — not a crash, and never a partial write.
-    return { attempted: true, ok: false, reason: "escalation returned no usable facts" };
+    // We paid $1.27 and the model returned nothing at all. Recordable, never a partial write.
+    return { attempted: true, ok: false, billed: true, reason: "escalation returned no usable facts" };
   }
 
-  return { attempted: true, ok: true, findings: verified, dropped, unverifiable };
+  return { attempted: true, ok: true, billed: true, findings: verified, unverifiable };
 }

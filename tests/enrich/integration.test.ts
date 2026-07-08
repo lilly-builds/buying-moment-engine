@@ -598,10 +598,43 @@ describe("enrichment waterfall (integration)", () => {
     expect(result.escalationTrigger).toBe("no-verified-facts");
     expect(result.escalated).toBe(true);
     expect(result.status).toBe("enriched");
-    // We DO hold the pages this time, so the agentic path is checked against them —
-    // and its snippets are the genuine ones, so nothing is dropped or unproven.
-    expect(result.factsUnverifiable).toBe(0);
+    // We hold pages, but they are `cleanHtml`'s pruned and reordered copy — NOT what the
+    // agentic model read off the live web. They cannot adjudicate its snippets, so every
+    // agentic fact is `unverifiable` rather than falsely refuted. See `escalation.ts`.
+    expect(result.factsUnverifiable).toBe(7);
+    expect(result.factsDropped).toBeGreaterThan(0); // the PRIMARY path's drops, still counted
     expect(await t.db.select().from(practiceFacts)).toHaveLength(5);
+  });
+
+  it("a THROWN escalation is UNBILLED — `escalated` must not claim $1.27 that never left", async () => {
+    // The inverse of the Westlake $0.00 bug: free reported as paid. U8's escalation-spend
+    // readout is derived from this field.
+    const practiceId = await seedPractice("Blocked Derm", "miami-fl");
+    const budget = createEscalationBudget(3);
+    const { meter, rows } = recordingMeter();
+
+    const result = await enrichPractice(
+      {
+        db: t.db,
+        scrape: emptyScraper("unreachable").scrape,
+        extract: FakeExtractClient.fromFixture(researchFixture),
+        pdl: FakePdlClient.fromFixture(personNotFound),
+        meter,
+        escalation: {
+          client: FakeResearchClient.throwing(new AnthropicRequestError(429, "rate limited")),
+          budget,
+        },
+        now: () => NOW,
+        logger: SILENT,
+      },
+      { id: practiceId, name: "Blocked Derm", websiteUrl: "https://blocked.example" },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.escalationTrigger).toBe("thin-scrape");
+    expect(result.escalated).toBe(false); // nothing was bought
+    expect(rows).toEqual([]); // and the meter agrees
+    expect(budget.spent).toBe(1); // the attempt is still counted: the cap under-authorizes
   });
 
   it("a VERIFIED result never escalates — no wasted $1.27", async () => {
