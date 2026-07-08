@@ -120,13 +120,14 @@ export interface RenderedBrief {
  * Merge a stored brief with the live signal view.
  *
  * The headline is the loudest claim on the card, so it is defended twice — code decides it,
- * the model never gets the final say. It falls back to the honest constant when the brief
- * was WRITTEN with no moment (`factual.zeroSignal` — belt behind the synthesizer's own
- * gate, P1-1) OR when every signal it was written against has since EXPIRED
- * (`live.signalCount === 0` — the KTD verbatim: "a stored brief must never claim a buying
- * moment that has expired", P1-2). Only a brief with a moment still live shows the model's
- * headline; and `voice.headline` is null on the zero-signal variant anyway, so even that
- * path cannot fall through to invented urgency.
+ * the model never gets the final say. It stands ONLY while the specific moment it cites is
+ * still firing: one of its `headlineEvidenceIds` must still be a fresh signal. That is the
+ * render-time mirror of the generation-time `headlineCitesASignal`, and it is stricter than a
+ * count check for a reason — if the headline cited a staffing spike that has since expired, an
+ * unrelated phone-complaints signal firing would keep `signalCount` at 1 while the headline
+ * named a moment that is over (KTD: "a stored brief must never claim a buying moment that has
+ * expired"). Otherwise it falls back to the honest constant. The zero-signal variant resolves
+ * there too — its `headlineEvidenceIds` is empty — and `voice.headline` is null there anyway.
  */
 export function renderBrief(
   brief: StoredBrief,
@@ -134,14 +135,17 @@ export function renderBrief(
   now: Date,
 ): RenderedBrief {
   const live = liveSignalView(signalRows, now);
+  const freshSignalEvidenceIds = new Set(live.firedSignals.map((signal) => signal.evidenceId));
+  const headlineStillLive =
+    !brief.factual.zeroSignal &&
+    brief.voice.headlineEvidenceIds.some((id) => freshSignalEvidenceIds.has(id));
   return {
     factual: brief.factual,
     voice: brief.voice,
     live,
-    headline:
-      brief.factual.zeroSignal || live.signalCount === 0
-        ? ZERO_SIGNAL_HEADLINE
-        : (brief.voice.headline ?? ZERO_SIGNAL_HEADLINE),
+    headline: headlineStillLive
+      ? (brief.voice.headline ?? ZERO_SIGNAL_HEADLINE)
+      : ZERO_SIGNAL_HEADLINE,
     stale: isBriefStale(brief.factual, signalRows, now),
   };
 }

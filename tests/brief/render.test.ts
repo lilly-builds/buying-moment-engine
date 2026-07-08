@@ -53,7 +53,9 @@ function input(signals: SignalRow[]): BriefInput {
 
 const VOICE: VoiceBrief = {
   headline: "They are hiring for the front desk",
-  headlineEvidenceIds: [],
+  // A real persisted fired-signal brief cites its signal here (generation enforces it). The
+  // staffing signal's evidence id is `ev-staffing_spike` — see `signal()` above.
+  headlineEvidenceIds: ["ev-staffing_spike"],
   callOpener: "Your phones are winning.",
   callOpenerEvidenceIds: [],
   personalizationSnippet: "You have been in Omaha a long time.",
@@ -192,6 +194,22 @@ describe("renderBrief", () => {
     const rendered = renderBrief({ factual, voice: VOICE }, rows, NOW);
     expect(rendered.stale).toBe(false);
     expect(rendered.headline).toBe("They are hiring for the front desk");
+  });
+
+  it("drops the headline when its OWN signal expired, even if an unrelated one still fires (finding 1)", () => {
+    // The headline cited the staffing spike. Render after it expired but while phone-complaints
+    // still fires: signalCount is 1, so a count-only belt would have shown the hiring headline
+    // over a moment that is over. The KTD forbids exactly that.
+    const rows = [
+      signal("staffing_spike", new Date("2026-07-31T00:00:00Z")),
+      signal("phone_complaints", new Date("2026-09-29T00:00:00Z")),
+    ];
+    const { factual } = assembleFactual(input(rows), NOW);
+    const later = new Date("2026-08-15T00:00:00Z");
+    const rendered = renderBrief({ factual, voice: VOICE }, rows, later);
+    expect(rendered.live.signalCount).toBe(1);
+    expect(rendered.headline).toBe("No buying moment detected yet");
+    expect(rendered.stale).toBe(true);
   });
 });
 

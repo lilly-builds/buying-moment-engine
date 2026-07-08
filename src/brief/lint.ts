@@ -355,9 +355,17 @@ const QUANTIFIER_SCOPED_FIELDS: ReadonlySet<string> = new Set([
   "personalizationSnippet",
 ]);
 
+/**
+ * "Got a few minutes?" quantifies OUR ask, not the evidence — the same distinction the
+ * duration exemptions draw. Strip a vague quantifier bound to a time unit before checking, so
+ * a natural CTA does not cost a retry, while "a few patients" (no time unit) still fires.
+ */
+const VAGUE_TIME_ASK =
+  /\b(?:a couple of|a couple|a few|several)\s+(?:seconds?|minutes?|mins?|moments?)\b/gi;
+
 /** Vague quantifiers present in `text`, in list order so the report is stable. */
 export function vagueQuantifiers(text: string): string[] {
-  const normalized = text.toLowerCase().replace(WHITESPACE_RUN, " ");
+  const normalized = text.toLowerCase().replace(WHITESPACE_RUN, " ").replace(VAGUE_TIME_ASK, " ");
   return VAGUE_QUANTIFIERS.filter((q) => normalized.includes(q));
 }
 

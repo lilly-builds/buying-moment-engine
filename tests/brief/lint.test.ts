@@ -279,6 +279,13 @@ describe("vagueQuantifiers (P2-8)", () => {
   it("does not fire on a precise, honest phrasing", () => {
     expect(vagueQuantifiers("A patient wrote that they could not get through.")).toEqual([]);
   });
+
+  it("does not fire on a vague TIME ask — that quantifies our ask, not the evidence (finding 3)", () => {
+    expect(vagueQuantifiers("Got a few minutes this week?")).toEqual([]);
+    expect(vagueQuantifiers("Grab a couple of minutes and I will show you.")).toEqual([]);
+    // But the same quantifier on a countable noun still fires.
+    expect(vagueQuantifiers("A few patients mentioned it.")).toEqual(["a few"]);
+  });
 });
 
 describe("longSentences", () => {
