@@ -1,15 +1,34 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Inter_Tight, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/**
+ * EliseAI's three real families (U2 / R15). `document.fonts` on eliseai.com
+ * confirms the live site loads all three:
+ *   Inter Tight   — display / headings, at the 450 "book" weight
+ *   Inter         — body copy, nav items, buttons
+ *   IBM Plex Mono — stat labels + count chips (NOT hero eyebrows; see tokens.ts)
+ *
+ * Inter and Inter Tight are variable fonts, so they take no `weight`. IBM Plex
+ * Mono is not variable, so its weights are enumerated.
+ */
+const interTight = Inter_Tight({
+  variable: "--font-inter-tight",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const ibmPlexMono = IBM_Plex_Mono({
+  variable: "--font-ibm-plex-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -26,7 +45,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${interTight.variable} ${inter.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
