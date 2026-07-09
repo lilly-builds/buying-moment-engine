@@ -79,7 +79,7 @@ export default async function PracticeBriefPage({
   }
 
   const rendered = renderBrief(result.brief, signalRows, now);
-  return <BriefView brief={rendered} nowMs={now.getTime()} />;
+  return <BriefView brief={rendered} nowMs={now.getTime()} practiceId={id} />;
 }
 
 /**

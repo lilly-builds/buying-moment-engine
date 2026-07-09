@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Badge,
+  Button,
   ButtonLink,
   Card,
   PageContainer,
@@ -92,23 +93,74 @@ function ClaimRow({
   );
 }
 
-/** One editable touch in the 3-touch sequence. Genuinely editable — uncontrolled fields. */
-function TouchEditor({ touch }: { touch: RenderedBrief["voice"]["sequence"]["touches"][number] }) {
+/** An editable touch, lifted into `OutreachMode` state so the Send button ships the AE's edits. */
+type EditableTouch = {
+  touchNumber: number;
+  channel: string;
+  subject: string;
+  body: string;
+};
+
+type SendStatus = "idle" | "sending" | "sent" | "error";
+
+/** The send affordance handed to an email touch — the button + its live status. */
+type TouchSend = {
+  status: SendStatus;
+  message: string | null;
+  canSend: boolean;
+  onSend: () => void;
+};
+
+function sendLabelFor(status: SendStatus): string {
+  if (status === "sending") return "Sending…";
+  if (status === "sent") return "Sent ✓";
+  return "Send email";
+}
+
+/**
+ * One editable touch in the 3-touch sequence — controlled, so its edits reach the
+ * send. Email touches carry a purple Send button in the header row (right-aligned)
+ * that enrolls the contact and ships THIS touch's exact subject + body.
+ */
+function TouchEditor({
+  touch,
+  onChange,
+  send,
+}: {
+  touch: EditableTouch;
+  onChange: (patch: Partial<EditableTouch>) => void;
+  send?: TouchSend;
+}) {
   const rows = Math.max(4, touch.body.split("\n").length + 3);
   return (
     <div className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4">
-      <div className="flex items-center gap-2">
-        <Badge tone="neutral" size="sm">
-          Touch {touch.touchNumber}
-        </Badge>
-        <Badge tone="neutral" size="sm">
-          {CHANNEL_LABEL[touch.channel] ?? touch.channel}
-        </Badge>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Badge tone="neutral" size="sm">
+            Touch {touch.touchNumber}
+          </Badge>
+          <Badge tone="neutral" size="sm">
+            {CHANNEL_LABEL[touch.channel] ?? touch.channel}
+          </Badge>
+        </div>
+        {send ? (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={send.onSend}
+            // Disable while sending AND after a success — one enrollment per click,
+            // never a duplicate email. An error re-enables it for a retry.
+            disabled={!send.canSend || send.status === "sending" || send.status === "sent"}
+          >
+            {sendLabelFor(send.status)}
+          </Button>
+        ) : null}
       </div>
       {touch.channel === "call" ? (
         <textarea
           aria-label={`Touch ${touch.touchNumber} notes`}
-          defaultValue={touch.body}
+          value={touch.body}
+          onChange={(e) => onChange({ body: e.target.value })}
           rows={rows}
           className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
         />
@@ -116,17 +168,31 @@ function TouchEditor({ touch }: { touch: RenderedBrief["voice"]["sequence"]["tou
         <>
           <input
             aria-label={`Touch ${touch.touchNumber} subject`}
-            defaultValue={touch.subject}
+            value={touch.subject}
+            onChange={(e) => onChange({ subject: e.target.value })}
             className="w-full rounded-panel border-0 bg-surface px-3 py-2 font-sans text-sm font-book text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand"
           />
           <textarea
             aria-label={`Touch ${touch.touchNumber} body`}
-            defaultValue={touch.body}
+            value={touch.body}
+            onChange={(e) => onChange({ body: e.target.value })}
             rows={rows}
             className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
           />
         </>
       )}
+      {/* Send status — the honest outcome of the enrollment, D9-safe (no address). */}
+      {send?.message ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className={`font-sans text-sm ${
+            send.status === "error" ? "text-danger" : "text-ink-body"
+          }`}
+        >
+          {send.message}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -170,9 +236,84 @@ function SignalDetail({ signal, nowMs }: { signal: FiredSignal; nowMs: number })
 }
 
 /** ⚡ Outreach mode — who to reach, and the message that goes out. */
-function OutreachMode({ brief }: { brief: RenderedBrief }) {
+function OutreachMode({ brief, practiceId }: { brief: RenderedBrief; practiceId: string }) {
   const { factual, voice } = brief;
   const contact = factual.contact;
+
+  // The 3-touch sequence is directly editable (D7); lift it into state so the Send
+  // button ships the AE's exact edited subject + body, not the stored draft.
+  const [touches, setTouches] = useState<EditableTouch[]>(() =>
+    voice.sequence.touches.map((t) => ({
+      touchNumber: t.touchNumber,
+      channel: t.channel,
+      subject: t.subject,
+      body: t.body,
+    })),
+  );
+  // Per-touch send state, keyed by touch number — each email touch owns its own
+  // button + status, so sending touch 1 never mislabels touch 2.
+  const [sendState, setSendState] = useState<
+    Record<number, { status: SendStatus; message: string | null }>
+  >({});
+
+  function updateTouch(touchNumber: number, patch: Partial<EditableTouch>) {
+    setTouches((prev) =>
+      prev.map((t) => (t.touchNumber === touchNumber ? { ...t, ...patch } : t)),
+    );
+  }
+
+  const hasEmail = Boolean(contact?.email);
+
+  async function handleSend(touchNumber: number) {
+    const touch = touches.find((t) => t.touchNumber === touchNumber);
+    if (!touch) return;
+    setSendState((prev) => ({ ...prev, [touchNumber]: { status: "sending", message: null } }));
+    try {
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          practiceId,
+          subject: touch.subject,
+          body: touch.body,
+          cta: voice.sequence.namedCta,
+        }),
+      });
+      const data: { error?: string } = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSendState((prev) => ({
+          ...prev,
+          [touchNumber]: {
+            status: "sent",
+            message: "Enrolled — the email is sending through your connected inbox.",
+          },
+        }));
+      } else {
+        setSendState((prev) => ({
+          ...prev,
+          [touchNumber]: { status: "error", message: data.error ?? "Send failed." },
+        }));
+      }
+    } catch {
+      setSendState((prev) => ({
+        ...prev,
+        [touchNumber]: { status: "error", message: "Send failed — couldn't reach the server." },
+      }));
+    }
+  }
+
+  function sendFor(touch: EditableTouch): TouchSend | undefined {
+    if (touch.channel !== "email") return undefined; // only email touches send
+    const s = sendState[touch.touchNumber] ?? { status: "idle" as const, message: null };
+    return {
+      status: s.status,
+      message: s.message,
+      // No contact address → nothing to send to (the route would 422 anyway).
+      canSend: hasEmail,
+      onSend: () => handleSend(touch.touchNumber),
+    };
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-5">
       {/* Who to contact */}
@@ -245,16 +386,7 @@ function OutreachMode({ brief }: { brief: RenderedBrief }) {
       {/* Recommended action */}
       <Card variant="elevated" padding="lg" className="lg:col-span-3">
         <div className="flex flex-col gap-5">
-          <SectionHeader
-            title="Recommended action"
-            size="h3"
-            as="h2"
-            action={
-              <ButtonLink variant="primary" size="sm" href="#send">
-                {voice.sequence.namedCta}
-              </ButtonLink>
-            }
-          />
+          <SectionHeader title="Recommended action" size="h3" as="h2" />
 
           <div className="flex flex-col gap-2">
             <span className="font-sans text-sm text-ink-muted">
@@ -270,11 +402,22 @@ function OutreachMode({ brief }: { brief: RenderedBrief }) {
               3-touch sequence · editable
             </span>
             <div className="flex flex-col gap-3">
-              {voice.sequence.touches.map((touch) => (
-                <TouchEditor key={touch.touchNumber} touch={touch} />
+              {touches.map((touch) => (
+                <TouchEditor
+                  key={touch.touchNumber}
+                  touch={touch}
+                  onChange={(patch) => updateTouch(touch.touchNumber, patch)}
+                  send={sendFor(touch)}
+                />
               ))}
             </div>
           </div>
+
+          {!hasEmail ? (
+            <p className="font-sans text-sm text-ink-muted">
+              No contact email on this brief yet — nothing to send.
+            </p>
+          ) : null}
         </div>
       </Card>
     </div>
@@ -424,7 +567,15 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
   );
 }
 
-export function BriefView({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
+export function BriefView({
+  brief,
+  nowMs,
+  practiceId,
+}: {
+  brief: RenderedBrief;
+  nowMs: number;
+  practiceId: string;
+}) {
   const [mode, setMode] = useState<BriefMode>("outreach");
   const { factual } = brief;
   const location = [factual.city, factual.state].filter(Boolean).join(", ");
@@ -465,7 +616,7 @@ export function BriefView({ brief, nowMs }: { brief: RenderedBrief; nowMs: numbe
       <main className="flex flex-1 flex-col">
         <PageContainer className="pb-12 pt-6">
           {mode === "outreach" ? (
-            <OutreachMode brief={brief} />
+            <OutreachMode brief={brief} practiceId={practiceId} />
           ) : (
             <PrepMode brief={brief} nowMs={nowMs} />
           )}
