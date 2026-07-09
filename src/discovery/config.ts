@@ -37,8 +37,26 @@ export const CLASSIFY_MAX_TOKENS = 512;
  */
 export const CLASSIFY_FETCH_TIMEOUT_MS = 60_000;
 
+/** `cost_events` provider + pipeline_step values — the scoreboard slices spend on these. */
+export const DISCOVERY_PROVIDER_GOOGLE = "google_places";
+export const PIPELINE_STEP_DISCOVERY_SEARCH = "discovery.search";
+export const PIPELINE_STEP_DISCOVERY_DETAILS = "discovery.details";
 /** `cost_events.pipeline_step` for the discovery review-qualifier (scoreboard slice). */
 export const PIPELINE_STEP_CLASSIFY = "discovery.classify";
+
+/**
+ * Per-ICP-category enumeration cap (one Text Search page is 20). Bounds spend:
+ * worst case per run is `categories × (1 search + limit × (1 details + reviews × 1 classify))`.
+ */
+export const DEFAULT_PER_CATEGORY_LIMIT = 20;
+
+/**
+ * A review qualifies a place only when the model returns `qualifies=true` AND its
+ * advisory confidence clears this floor — a second precision guard on top of the
+ * prompt's. Deliberately a run-level default, not a tenant field yet: it is tuned
+ * from the first live runs (Open Questions) before being promoted per-tenant.
+ */
+export const DEFAULT_CONFIDENCE_FLOOR = 0.6;
 
 // ─── Google Places pricing on the discovery path (K8) ─────────────────────────
 //
