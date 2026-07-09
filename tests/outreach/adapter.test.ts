@@ -15,7 +15,7 @@ const recipient: Recipient = {
   email: "qa@sandbox.test",
   classification: "sandbox",
 };
-const touch: SendTouchInput = { recipient, touchNumber: 1, body: "hello", cta: "book a call" };
+const touch: SendTouchInput = { recipient, touchNumber: 1, subject: "hi", body: "hello", cta: "book a call" };
 
 describe("Outreach adapter — inert without credentials (the demo state)", () => {
   it("throws OutreachGatedError and makes ZERO network calls (spy)", async () => {
@@ -98,7 +98,7 @@ describe("Outreach adapter — contract when credentialed (mocked OAuth; never l
     });
     const real: Recipient = { contactId: "p_real", email: "owner@real.com", classification: "real_practice" };
     await expect(
-      adapter.sendTouch({ recipient: real, touchNumber: 1, body: "hi" }),
+      adapter.sendTouch({ recipient: real, touchNumber: 1, subject: "hi", body: "hi" }),
     ).rejects.toThrow(RealPracticeSendBlockedError);
     expect(calls).toHaveLength(0);
   });

@@ -25,9 +25,9 @@ const recipient: Recipient = {
 function goodSequence(): ApprovedSequence {
   return {
     touches: [
-      { touchNumber: 1, body: "Touch one" },
-      { touchNumber: 2, body: "Touch two" },
-      { touchNumber: 3, body: "Touch three", cta: "Grab 15 minutes Thursday?" },
+      { touchNumber: 1, subject: "Subject one", body: "Touch one" },
+      { touchNumber: 2, subject: "Subject two", body: "Touch two" },
+      { touchNumber: 3, subject: "Subject three", body: "Touch three", cta: "Grab 15 minutes Thursday?" },
     ],
   };
 }
@@ -67,6 +67,12 @@ describe("validateSequence", () => {
     expect(() => validateSequence(seq)).toThrow(/empty body/);
   });
 
+  it("rejects an empty subject", () => {
+    const seq = goodSequence();
+    seq.touches[0].subject = "";
+    expect(() => validateSequence(seq)).toThrow(/empty subject/);
+  });
+
   it("rejects a missing named CTA on the final touch", () => {
     const seq = goodSequence();
     seq.touches[2].cta = "";
@@ -76,9 +82,9 @@ describe("validateSequence", () => {
   it("rejects mis-numbered touches", () => {
     const seq: ApprovedSequence = {
       touches: [
-        { touchNumber: 1, body: "a" },
-        { touchNumber: 2, body: "b" },
-        { touchNumber: 4, body: "c", cta: "cta" },
+        { touchNumber: 1, subject: "a", body: "a" },
+        { touchNumber: 2, subject: "b", body: "b" },
+        { touchNumber: 4, subject: "c", body: "c", cta: "cta" },
       ],
     };
     expect(() => validateSequence(seq)).toThrow(/1, 2, 3/);
@@ -138,6 +144,7 @@ describe("advanceCadence — the app owns the 3-touch schedule + reply halt", ()
 
     expect(sent).toHaveLength(TOUCH_COUNT);
     expect(sent.map((s) => s.touchNumber)).toEqual([1, 2, 3]);
+    expect(sent.map((s) => s.subject)).toEqual(["Subject one", "Subject two", "Subject three"]);
     expect(sent.map((s) => s.body)).toEqual(["Touch one", "Touch two", "Touch three"]);
     // Every touch carries the sequence's named next-step CTA.
     expect(sent.every((s) => s.cta === "Grab 15 minutes Thursday?")).toBe(true);

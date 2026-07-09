@@ -15,13 +15,20 @@ import { assertSandboxRecipient, type SandboxConfig } from "./guard";
 /**
  * HubSpot binding of the send adapter (R10, U11) — the whole-body-`{{custom_body}}`
  * -token trick (spec § Stack). HubSpot Sequence templates are token-only (no
- * free-text-body param), so to ship the AE's EXACT edited plain-text body we:
+ * free-text-body param), so to ship the AE's EXACT edited subject + plain-text body we:
  *
- *   1. write that body into ONE custom contact property (`gtm_maestro_custom_body`), then
- *   2. enroll the contact into a Sequence whose single step is `{{ contact.gtm_maestro_custom_body }}`.
+ *   1. write the edited subject + body into TWO custom contact properties
+ *      (`gtm_maestro_custom_subject`, `gtm_maestro_custom_body`), then
+ *   2. enroll the contact into a Sequence whose single step has
+ *      Subject = `{{ contact.gtm_maestro_custom_subject }}` and
+ *      Body    = `{{ contact.gtm_maestro_custom_body }}`.
+ *
+ * Subject is tokenised too (a deliberate extension of the spec's body-only lock,
+ * 2026-07-09) because the subject line drives open rate — an AE shipping someone
+ * else's static subject is a real weakness for cold email.
  *
  * It then sends through the rep's OWN connected inbox, so HubSpot's native
- * open/click/reply tracking + CRM logging come free while the exact body ships.
+ * open/click/reply tracking + CRM logging come free while the exact email ships.
  * The Sequence itself is a one-time per-portal artifact (its id is config); the
  * app owns the 3-touch cadence (`cadence.ts`), not HubSpot's scheduler.
  *
@@ -37,6 +44,9 @@ import { assertSandboxRecipient, type SandboxConfig } from "./guard";
 
 /** The custom contact property the AE's edited body is written into. */
 export const CUSTOM_BODY_PROPERTY = "gtm_maestro_custom_body";
+
+/** The custom contact property the AE's edited subject line is written into. */
+export const CUSTOM_SUBJECT_PROPERTY = "gtm_maestro_custom_subject";
 
 /** Dated Sequences API version (the `{v}` in the plan; matches platform 2026.03). */
 export const HUBSPOT_SEQUENCES_VERSION = "2026-03";
@@ -65,6 +75,18 @@ export function customBodyPropertyPayload(): Record<string, unknown> {
     type: "string",
     // textarea = multi-line, so plain-text bodies with newlines round-trip intact.
     fieldType: "textarea",
+    groupName: LEAD_PROPERTY_GROUP,
+  };
+}
+
+/** The single-line contact property the edited subject line writes into (pure). */
+export function customSubjectPropertyPayload(): Record<string, unknown> {
+  return {
+    name: CUSTOM_SUBJECT_PROPERTY,
+    label: "GTM Maestro — email subject",
+    type: "string",
+    // A subject is one line — single-line text.
+    fieldType: "text",
     groupName: LEAD_PROPERTY_GROUP,
   };
 }
@@ -106,15 +128,15 @@ export interface HubSpotSendDeps extends HubSpotHttpDeps {
 const ALREADY_EXISTS = [409] as const;
 
 /**
- * Create the `gtm_maestro_custom_body` contact property (+ its group) if absent.
+ * Create the subject + body contact properties (+ their group) if absent.
  * Idempotent (tolerate 409, like `ensureLeadProperties`): a write to a property
- * that does not exist 400s, so the token trick needs this provisioned first.
+ * that does not exist 400s, so the token trick needs both provisioned first.
  * Ideally this rides connect-time provisioning; kept on the send path so U11 does
  * not reach into U10's connect flow. Called once per sender (memoised below).
  */
-export async function ensureCustomBodyProperty(
+export async function ensureSendProperties(
   deps: HubSpotHttpDeps,
-): Promise<{ created: boolean }> {
+): Promise<{ created: string[] }> {
   const request = createHubSpotRequest(deps);
   await request(
     "POST",
@@ -122,13 +144,14 @@ export async function ensureCustomBodyProperty(
     { name: LEAD_PROPERTY_GROUP, label: "GTM Maestro" },
     { tolerate: ALREADY_EXISTS },
   );
-  const res = await request(
-    "POST",
-    "/crm/v3/properties/contacts",
-    customBodyPropertyPayload(),
-    { tolerate: ALREADY_EXISTS },
-  );
-  return { created: !isTolerated(res) };
+  const created: string[] = [];
+  for (const payload of [customSubjectPropertyPayload(), customBodyPropertyPayload()]) {
+    const res = await request("POST", "/crm/v3/properties/contacts", payload, {
+      tolerate: ALREADY_EXISTS,
+    });
+    if (!isTolerated(res)) created.push(String(payload.name));
+  }
+  return { created };
 }
 
 export function createHubSpotSender(deps: HubSpotSendDeps): SendAdapter {
@@ -146,7 +169,7 @@ export function createHubSpotSender(deps: HubSpotSendDeps): SendAdapter {
   let ensured: Promise<unknown> | null = null;
   function ensureOnce(): Promise<unknown> {
     if (!ensured) {
-      ensured = shouldProvision ? ensureCustomBodyProperty(deps) : Promise.resolve();
+      ensured = shouldProvision ? ensureSendProperties(deps) : Promise.resolve();
     }
     return ensured;
   }
@@ -164,9 +187,13 @@ export function createHubSpotSender(deps: HubSpotSendDeps): SendAdapter {
 
     await ensureOnce();
 
-    // 1. Write the EXACT edited body into the one custom contact property.
+    // 1. Write the EXACT edited subject + body into the two custom contact
+    //    properties (one PATCH). The Sequence step's Subject + Body tokens render them.
     await request("PATCH", `/crm/v3/objects/contacts/${recipient.contactId}`, {
-      properties: { [CUSTOM_BODY_PROPERTY]: input.body },
+      properties: {
+        [CUSTOM_SUBJECT_PROPERTY]: input.subject,
+        [CUSTOM_BODY_PROPERTY]: input.body,
+      },
     });
 
     // 2. Enroll the contact — HubSpot sends the `{{custom_body}}`-token step

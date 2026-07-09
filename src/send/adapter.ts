@@ -33,11 +33,13 @@ export interface Recipient {
 
 export type SendProvider = "hubspot" | "outreach";
 
-/** One touch handed to the adapter — the AE's approved, edited plain-text body. */
+/** One touch handed to the adapter — the AE's approved, edited plain-text email. */
 export interface SendTouchInput {
   recipient: Recipient;
   /** Which touch in the 3-touch cadence (1..3) — for traceability. */
   touchNumber: number;
+  /** The exact edited subject line the AE approved (shipped verbatim). */
+  subject: string;
   /** The exact edited plain-text body the AE approved (shipped verbatim). */
   body: string;
   /** The named next-step CTA carried on the sequence (R4). */

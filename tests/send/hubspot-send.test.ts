@@ -3,6 +3,7 @@ import type { Recipient } from "@/src/send/adapter";
 import {
   createHubSpotSender,
   CUSTOM_BODY_PROPERTY,
+  CUSTOM_SUBJECT_PROPERTY,
   HUBSPOT_SEQUENCES_VERSION,
   MAX_CUSTOM_BODY_CHARS,
   BodyTooLongError,
@@ -61,15 +62,21 @@ function findCall(calls: FetchCall[], pred: (c: FetchCall) => boolean): FetchCal
 }
 
 describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
-  it("writes the EXACT multi-line body into the custom property and enrolls the contact", async () => {
+  it("writes the EXACT subject + multi-line body into the custom properties and enrolls", async () => {
     const { fetch: f, calls } = sendMock();
     const sender = createHubSpotSender(deps(f));
 
+    const subject = "Losing the phone battle around screening season?";
     const body =
       "Hi Dana,\n\nSaw you're hiring 3 front-desk coordinators — the phones are winning.\n\n" +
       "EliseAI answers every call, books the appt, and never puts a patient on hold.\n\n— Rep";
 
-    const result = await sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 1, body });
+    const result = await sender.sendTouch({
+      recipient: sandboxRecipient,
+      touchNumber: 1,
+      subject,
+      body,
+    });
 
     expect(result).toEqual({
       provider: "hubspot",
@@ -78,10 +85,11 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
       enrolled: true,
     });
 
-    // The body is written VERBATIM (newlines intact) into the one custom property.
+    // Subject + body are written VERBATIM (newlines intact) into the two properties.
     const patch = findCall(calls, (c) => c.method === "PATCH");
     expect(patch.path).toBe("/crm/v3/objects/contacts/ct_42");
     const patched = (patch.body as { properties: Record<string, string> }).properties;
+    expect(patched[CUSTOM_SUBJECT_PROPERTY]).toBe(subject);
     expect(patched[CUSTOM_BODY_PROPERTY]).toBe(body);
 
     // The enrollment references the sequence, the contact, and the rep's inbox,
@@ -96,15 +104,16 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
     });
   });
 
-  it("provisions the custom property AT MOST once per sender (idempotent)", async () => {
+  it("provisions the subject + body properties AT MOST once per sender (idempotent)", async () => {
     const { fetch: f, calls } = sendMock();
     const sender = createHubSpotSender(deps(f));
-    await sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 1, body: "one" });
-    await sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 2, body: "two" });
+    await sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 1, subject: "s1", body: "one" });
+    await sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 2, subject: "s2", body: "two" });
     const propertyCreates = calls.filter(
       (c) => c.method === "POST" && c.path === "/crm/v3/properties/contacts",
     );
-    expect(propertyCreates).toHaveLength(1);
+    // Exactly two creates total (subject + body), created once — never re-created.
+    expect(propertyCreates).toHaveLength(2);
   });
 
   it("provisionProperty:false makes ZERO schema calls — only PATCH + enroll (live grant)", async () => {
@@ -113,11 +122,12 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
     const result = await sender.sendTouch({
       recipient: sandboxRecipient,
       touchNumber: 1,
+      subject: "hi",
       body: "hello",
     });
     expect(result.enrolled).toBe(true);
     // No /crm/v3/properties/* traffic — exactly what a grant without
-    // crm.schemas.contacts.write can do: write the body + enroll.
+    // crm.schemas.contacts.write can do: write subject + body + enroll.
     expect(calls.some((c) => c.path.startsWith("/crm/v3/properties/"))).toBe(false);
     expect(calls.map((c) => c.method).sort()).toEqual(["PATCH", "POST"]);
   });
@@ -133,7 +143,7 @@ describe("HubSpot send — D9 firewall (nothing fires at a real practice)", () =
       classification: "real_practice",
     };
     await expect(
-      sender.sendTouch({ recipient: real, touchNumber: 1, body: "hi" }),
+      sender.sendTouch({ recipient: real, touchNumber: 1, subject: "hi", body: "hi" }),
     ).rejects.toThrow(RealPracticeSendBlockedError);
     expect(calls).toHaveLength(0);
   });
@@ -147,7 +157,7 @@ describe("HubSpot send — D9 firewall (nothing fires at a real practice)", () =
       classification: "sandbox",
     };
     await expect(
-      sender.sendTouch({ recipient: smuggled, touchNumber: 1, body: "hi" }),
+      sender.sendTouch({ recipient: smuggled, touchNumber: 1, subject: "hi", body: "hi" }),
     ).rejects.toThrow(RealPracticeSendBlockedError);
     expect(calls).toHaveLength(0);
   });
@@ -159,7 +169,7 @@ describe("HubSpot send — body length guard (experiment #2 limits)", () => {
     const sender = createHubSpotSender(deps(f));
     const tooLong = "x".repeat(MAX_CUSTOM_BODY_CHARS + 1);
     await expect(
-      sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 1, body: tooLong }),
+      sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 1, subject: "hi", body: tooLong }),
     ).rejects.toThrow(BodyTooLongError);
     expect(calls).toHaveLength(0);
   });

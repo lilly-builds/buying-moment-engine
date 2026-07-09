@@ -22,6 +22,7 @@ export const DEFAULT_TOUCH_OFFSETS_MS: readonly number[] = [0, 3 * DAY_MS, 6 * D
 
 export interface SequenceTouch {
   touchNumber: number; // 1..3
+  subject: string;
   body: string;
   cta?: string | null;
 }
@@ -56,6 +57,9 @@ export function validateSequence(sequence: ApprovedSequence): void {
     }
   }
   for (const t of touches) {
+    if (!t.subject || t.subject.trim().length === 0) {
+      throw new MalformedSequenceError(`touch ${t.touchNumber} has an empty subject`);
+    }
     if (!t.body || t.body.trim().length === 0) {
       throw new MalformedSequenceError(`touch ${t.touchNumber} has an empty body`);
     }
@@ -176,6 +180,7 @@ export async function advanceCadence(
   await deps.adapter.sendTouch({
     recipient,
     touchNumber: due,
+    subject: touch.subject,
     body: touch.body,
     cta: namedCta,
   });

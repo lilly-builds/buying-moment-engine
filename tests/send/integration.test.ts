@@ -88,7 +88,7 @@ describe("send with an expired access token", () => {
       email: "qa@sandbox.test",
       classification: "sandbox",
     };
-    const result = await sender.sendTouch({ recipient, touchNumber: 1, body: "hello" });
+    const result = await sender.sendTouch({ recipient, touchNumber: 1, subject: "hi", body: "hello" });
     expect(result.enrolled).toBe(true);
 
     // Exactly ONE refresh, despite several HubSpot calls that all needed a token.
