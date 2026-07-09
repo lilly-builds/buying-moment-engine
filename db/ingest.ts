@@ -226,6 +226,19 @@ export async function upsertPractice(db: Database, args: UpsertPracticeArgs) {
  * website (the incoming one if it won the race, or the pre-existing one otherwise) so
  * the caller enriches from the value that actually persisted.
  */
+/** Read a practice's stored website (the scrape seed), or null if none on file. */
+export async function getPracticeWebsite(
+  db: Database,
+  practiceId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ websiteUrl: practices.websiteUrl })
+    .from(practices)
+    .where(eq(practices.id, practiceId))
+    .limit(1);
+  return row?.websiteUrl ?? null;
+}
+
 export async function setPracticeWebsite(
   db: Database,
   practiceId: string,
