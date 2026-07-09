@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Database } from "./types";
 import { evidence, practices, rawSignals, signals } from "./schema";
 import {
@@ -175,6 +175,14 @@ export interface UpsertPracticeArgs {
   city?: string | null;
   state?: string | null;
   vertical?: (typeof practices.$inferInsert)["vertical"];
+  /**
+   * The scrape seed (R-W1). Set ONLY when creating: the `ON CONFLICT DO NOTHING`
+   * path leaves an existing practice untouched, so a re-seen lead never clobbers a
+   * website already on file. Filling a previously-null website on an existing row is
+   * `setPracticeWebsite`'s job (Plan B), not this one — keeping this upsert a pure
+   * "create-or-return" with no hidden mutation.
+   */
+  websiteUrl?: string | null;
 }
 
 /** Idempotent practice upsert on (normalized_name, geo_key). */
@@ -188,6 +196,7 @@ export async function upsertPractice(db: Database, args: UpsertPracticeArgs) {
       geoKey: args.geoKey,
       city: args.city ?? null,
       state: args.state ?? null,
+      websiteUrl: args.websiteUrl ?? null,
       vertical: args.vertical ?? "unclassified",
     })
     .onConflictDoNothing({
@@ -204,6 +213,31 @@ export async function upsertPractice(db: Database, args: UpsertPracticeArgs) {
     )
     .limit(1);
   return row;
+}
+
+/**
+ * Fill a practice's website (Plan B / R-W2) WITHOUT clobbering one already on file.
+ * The `IS NULL` guard is the whole point: "if the source gave us a site, keep it"
+ * (D13 / R17 — never blindly overwrite a real value). A deliberate name-search fills
+ * the gap; it does not overrule a website captured at the source. Returns the stored
+ * website (the incoming one if it won the race, or the pre-existing one otherwise) so
+ * the caller enriches from the value that actually persisted.
+ */
+export async function setPracticeWebsite(
+  db: Database,
+  practiceId: string,
+  websiteUrl: string,
+): Promise<string | null> {
+  await db
+    .update(practices)
+    .set({ websiteUrl })
+    .where(and(eq(practices.id, practiceId), isNull(practices.websiteUrl)));
+  const [row] = await db
+    .select({ websiteUrl: practices.websiteUrl })
+    .from(practices)
+    .where(eq(practices.id, practiceId))
+    .limit(1);
+  return row?.websiteUrl ?? null;
 }
 
 export interface UpsertSignalArgs {
