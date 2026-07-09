@@ -41,7 +41,12 @@ that would send an email. Report the sequence ID at the end.
    - In that email, use ONLY personalization tokens (no other text):
        Subject = {{ contact.gtm_maestro_custom_subject }}
        Body    = {{ contact.gtm_maestro_custom_body }}
-   - Save the step, then click "Create sequence".
+   - A DYNAMIC sequence will NOT save with only one step. Add a SECOND step —
+     a rep-led "Call task" (e.g. title "Call contact to follow up") is fine. It only
+     queues for the rep after engagement; it does not affect the automated email
+     that carries our tokens.
+   - Click Save. THEN read the sequence's numeric id from the URL (the number that
+     replaces `new-dynamic` in `…/sequence/<ID>/edit`).
 
 3. CONNECTED INBOX:
    - Ensure a sending inbox is connected for the acting user (Settings → General →
@@ -70,6 +75,8 @@ by the app, and ONLY to sandbox/test addresses (D9).
    - **Step 1 → Automated email.** Using the Personalize / contact-token menu (remove all
      other text): **Subject** = `{{ contact.gtm_maestro_custom_subject }}`,
      **Body** = `{{ contact.gtm_maestro_custom_body }}`. **Save**, then **Create sequence**.
+   - **Add a 2nd step** (a rep "Call task") — a dynamic sequence can't save on one
+     step. **Save**, then read the numeric id from the URL (replaces `new-dynamic`).
 3. **Connected inbox** — connect the rep's sending inbox if prompted.
 4. **Grab the sequence ID** from the URL (`…/sequence/<ID>`).
 
@@ -100,6 +107,12 @@ so the property is created here (Part A/B) rather than by the app.
   Add: a `subject` column (migration) + a per-touch subject input in the brief
   card's sequence editor, so the edited subject flows sequence row → send path.
   Deferred deliberately until the live HubSpot send is proven end-to-end.
+- **Multi-touch mapping onto HubSpot enrollment (verify live).** The app owns the
+  3-touch cadence and models each touch as its own write-body + enroll. Confirm how
+  that maps onto one HubSpot sequence: can the same contact be re-enrolled per touch,
+  or does an active enrollment block it (→ unenroll-then-re-enroll, or one enrollment
+  per touch via distinct single-step sequences)? The first live send proves ONE touch;
+  resolve the 3-touch mechanics when multi-touch is exercised.
 
 ## Gotchas (learned the hard way)
 - **Exact internal names.** `gtm_maestro_custom_subject` + `gtm_maestro_custom_body` —
