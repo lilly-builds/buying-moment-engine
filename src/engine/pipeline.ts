@@ -33,8 +33,13 @@ import { resolvePractice, type PracticeCandidate } from "./resolver";
  * OUT OF SCOPE (next): the single-practice pull-mode API route reuses this exact conductor.
  */
 
-/** The Plan-B website search (U3), pre-bound with its fetchers + meter by the caller. */
+/**
+ * The Plan-B website search (U3), pre-bound with its fetchers + meter by the caller.
+ * Receives the resolved practice `id` so the bound resolver can attribute its Places
+ * spend to this practice (an honest $/brief includes the lookup cost).
+ */
 export type WebsiteResolver = (practice: {
+  id: string;
   name: string;
   city?: string | null;
   state?: string | null;
@@ -144,6 +149,7 @@ export async function runLeadToBrief(
   let website = (await getPracticeWebsite(deps.db, practiceId)) ?? lead.websiteUrl ?? null;
   if (!website && deps.resolveWebsite) {
     const found = await deps.resolveWebsite({
+      id: practiceId,
       name: lead.name,
       city: lead.city,
       state: lead.state,
