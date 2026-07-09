@@ -143,9 +143,12 @@ export async function ingestRawSignal(
     if (inserted.length === 0) return { status: "duplicate" };
 
     // Promote raw -> normalized (exact match). See file header for the U5 boundary.
+    // A source-provided website (R-W1) rides the payload → seeds the practice at
+    // creation; the upsert's ON CONFLICT DO NOTHING keeps any website already on file.
     const practice = await upsertPractice(tx, {
       name: data.practiceHint,
       geoKey: data.geoKey ?? "unknown",
+      websiteUrl: readString(data.payload, "website"),
     });
     const [ev] = await tx
       .insert(evidence)

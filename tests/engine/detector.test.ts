@@ -93,6 +93,18 @@ describe("candidateToRawSignals", () => {
     expect(first.dedupeHash).not.toBe(second.dedupeHash);
   });
 
+  it("carries a source-provided website on EVERY raw signal's payload (R-W1)", () => {
+    const withSite = { ...candidate, website: "https://sunshinederm.com" };
+    const raws = candidateToRawSignals(withSite);
+    expect(raws).toHaveLength(2);
+    for (const raw of raws) expect(raw.payload.website).toBe("https://sunshinederm.com");
+  });
+
+  it("omits website from the payload when the source has none", () => {
+    const [first] = candidateToRawSignals(candidate);
+    expect(first.payload.website).toBeUndefined();
+  });
+
   it("returns no raw signals for a candidate with no evidence", () => {
     expect(candidateToRawSignals({ ...candidate, evidence: [] })).toEqual([]);
   });
