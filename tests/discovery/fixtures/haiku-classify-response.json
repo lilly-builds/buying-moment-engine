@@ -1,0 +1,17 @@
+{
+  "id": "msg_classify_demo",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5",
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"qualifies\": true, \"confidence\": 0.86, \"category\": \"cannot-get-through\"}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 512,
+    "output_tokens": 24
+  }
+}
