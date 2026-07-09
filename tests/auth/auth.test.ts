@@ -5,20 +5,25 @@ import {
   parseAllowlist,
   requireSession,
 } from "@/src/lib/auth";
-// `verifySharedSecret` / `@/src/lib/secret` were removed with Clay — nothing calls a
-// shared-secret callback now that PDL is synchronous. See src/lib/auth.ts publicPaths.
 
 describe("isPublicPath (R18)", () => {
   const PROD = true;
   const DEV = false;
 
-  it("always leaves /login reachable, or the redirect loops", () => {
+  it("always leaves /login and the magic-link callback reachable, or the redirect loops", () => {
     for (const env of [PROD, DEV]) {
       expect(isPublicPath("/login", env)).toBe(true);
+      // /auth/callback exchanges the OTP code for a session and re-checks the
+      // allowlist itself — it must be reachable without a session because it is
+      // how you get one. Public in prod too, where real logins happen.
+      expect(isPublicPath("/auth/callback", env)).toBe(true);
     }
   });
 
-  it("does NOT expose the removed Clay callback in any environment", () => {
+  it("no longer exempts the enrich callback U5 deleted", () => {
+    // The route is gone (PDL is synchronous — no inbound callback exists). A
+    // lingering allowlist entry would silently ship the path unauthenticated if
+    // anything ever re-added it. This test is the thing that notices.
     for (const env of [PROD, DEV]) {
       expect(isPublicPath("/api/enrich-callback", env)).toBe(false);
     }
@@ -33,19 +38,22 @@ describe("isPublicPath (R18)", () => {
     }
   });
 
-  it("opens /styleguide in dev for brand review", () => {
+  it("opens /styleguide and /signals in dev for design review", () => {
     expect(isPublicPath("/styleguide", DEV)).toBe(true);
+    expect(isPublicPath("/signals", DEV)).toBe(true);
   });
 
-  it("KEEPS /styleguide behind auth in production", () => {
-    // U2's styleguide reads nothing from the database, but R18 says the deployed
-    // app serves no page to a non-allowlisted visitor. This is the line that
-    // keeps the dev convenience from leaking into prod.
+  it("KEEPS the dev-only visual surfaces behind auth in production", () => {
+    // Neither reads the database, but R18 says the deployed app serves no page to
+    // a non-allowlisted visitor. This is the line that keeps the dev convenience
+    // from leaking into prod.
     expect(isPublicPath("/styleguide", PROD)).toBe(false);
+    expect(isPublicPath("/signals", PROD)).toBe(false);
   });
 
   it("does not open a path merely because it is prefixed by a public one", () => {
     expect(isPublicPath("/loginsomething", PROD)).toBe(false);
+    expect(isPublicPath("/auth/callbackevil", PROD)).toBe(false);
     expect(isPublicPath("/styleguide-secrets", DEV)).toBe(false);
   });
 });

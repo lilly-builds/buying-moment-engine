@@ -579,20 +579,36 @@ export default function StyleguidePage() {
         <Section
           eyebrow="Components"
           title="Card"
-          description="Flat by default — .feature-card-opt1 carries no box-shadow on the live site. Elevation is an explicit opt-in."
+          description="Flat by default — .feature-card-opt1 carries no box-shadow on the live site. Elevation is an explicit opt-in. `glass` is the odd one out: translucent, so it only reads over a colour/image (shown below on the health hero) — the /signals intro uses it over the blue."
         >
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {(["flat", "elevated", "outlined", "dark"] as const).map((v) => (
-              <Card key={v} variant={v} padding="md">
+          <div className="flex flex-col gap-6">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              {(["flat", "elevated", "outlined", "dark"] as const).map((v) => (
+                <Card key={v} variant={v} padding="md">
+                  <div className="flex flex-col gap-2">
+                    <code className="font-mono text-xs uppercase opacity-60">{v}</code>
+                    <p className="font-display text-h5">Georgia Dermatology</p>
+                    <p className={v === "dark" ? "text-sm text-white/70" : "text-sm text-ink-muted"}>
+                      Atlanta, GA · 4 locations
+                    </p>
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            {/* glass — translucent, so it must sit on a coloured surface to be seen. */}
+            <div
+              className="rounded-card p-8"
+              style={{ backgroundImage: gradients.healthHero }}
+            >
+              <Card variant="glass" padding="md" className="max-w-xs">
                 <div className="flex flex-col gap-2">
-                  <code className="font-mono text-xs uppercase opacity-60">{v}</code>
-                  <p className="font-display text-h5">Georgia Dermatology</p>
-                  <p className={v === "dark" ? "text-sm text-white/70" : "text-sm text-ink-muted"}>
-                    Atlanta, GA · 4 locations
-                  </p>
+                  <code className="font-mono text-xs uppercase opacity-60">glass</code>
+                  <p className="font-display text-h5 text-ink">Georgia Dermatology</p>
+                  <p className="text-sm text-ink-muted">Atlanta, GA · 4 locations</p>
                 </div>
               </Card>
-            ))}
+            </div>
           </div>
         </Section>
 

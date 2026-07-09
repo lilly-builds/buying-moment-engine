@@ -68,3 +68,16 @@ export type { TopNavProps, TopNavTone } from "./top-nav";
 
 export { SegmentedControl } from "./segmented-control";
 export type { SegmentedControlProps, SegmentedOption } from "./segmented-control";
+
+export { SourceLink } from "./source-link";
+export type { SourceLinkProps } from "./source-link";
+
+// -- U12 scoreboard figures: a number is a form, not a chart. ------------------
+export { StatTile } from "./stat-tile";
+export type { StatTileProps, StatHonesty, StatDelta } from "./stat-tile";
+
+export { Meter } from "./meter";
+export type { MeterProps, MeterTone } from "./meter";
+
+export { StatRing } from "./stat-ring";
+export type { StatRingProps, RingAccent } from "./stat-ring";

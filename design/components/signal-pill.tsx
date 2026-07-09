@@ -23,8 +23,18 @@ const LABELS: Record<SignalKind, string> = {
   "growth-events": "Growth event",
 };
 
+export type SignalPillSize = "sm" | "md";
+
+const SIZES: Record<SignalPillSize, string> = {
+  // Default — a qualifier beneath the practice name in the feed.
+  sm: "px-4 py-1.5 text-xs",
+  // Bigger — where the signal is the subject, e.g. the brief's buying-moment rows.
+  md: "px-5 py-2 text-sm",
+};
+
 export interface SignalPillProps {
   kind: SignalKind;
+  size?: SignalPillSize;
   className?: string;
 }
 
@@ -34,15 +44,15 @@ export interface SignalPillProps {
  * stop. A stale lead is signalled by the `FreshnessClock` turning amber, not by
  * bleaching its signals.
  */
-export function SignalPill({ kind, className }: SignalPillProps) {
+export function SignalPill({ kind, size = "sm", className }: SignalPillProps) {
   return (
     <span
       className={cn(
         // `w-fit` — a chip in a flex column would otherwise stretch. See tag.tsx.
-        // Sized one step down from `Tag` (px-4/py-1.5/text-xs vs px-5/py-2/text-sm):
-        // a signal is a qualifier on the practice, not a peer of it.
-        "inline-flex w-fit items-center gap-1.5 rounded-pill px-4 py-1.5",
-        "font-sans text-xs leading-none text-white",
+        // `sm` sits one step down from `Tag` (a signal qualifies the practice in the
+        // feed); `md` matches `Tag` where the signal IS the subject (the brief).
+        "inline-flex w-fit items-center gap-1.5 rounded-pill font-sans leading-none text-white",
+        SIZES[size],
         className,
       )}
       // Inline, not a Tailwind class: the gradient is a data-driven token, and

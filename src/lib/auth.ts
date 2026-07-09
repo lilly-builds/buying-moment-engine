@@ -25,20 +25,32 @@ export function isAllowlisted(
 /**
  * Routes reachable without a session.
  *
- * `/login` must always stay open or the redirect to /login would loop.
- * (The `/api/enrich-callback` route was removed with Clay — PDL is a synchronous
- * request/response API, so no inbound callback exists to keep public.)
+ * `/login` and `/auth/callback` must always stay open or the redirect to /login
+ * would loop. `/auth/callback` is where Supabase lands the magic-link code — it
+ * exchanges the code for a session and re-checks the allowlist before letting the
+ * visitor anywhere else, so it is safe to reach without an existing session (it is
+ * how you GET one).
  *
- * `/styleguide` is open ONLY outside production. It is U2's visual-QA surface: it
- * renders design tokens and empty component variants, and reads nothing from the
- * database — there is no lead, contact, or signal on it. Keeping it gated in
+ * `/api/enrich-callback` USED to be listed here. U5 deleted that route — PDL is a
+ * SYNCHRONOUS request/response API (spec § Stack), so no inbound callback exists —
+ * and the main merge removed its auth exemption with it. It stays removed: an
+ * allowlist entry that names a route nobody serves is dead auth surface that would
+ * silently ship the path unauthenticated if it were ever re-added. (The auth
+ * magic-link patch was authored before that cleanup and still listed it; we kept
+ * it out on purpose.)
+ *
+ * `/styleguide` and `/signals` are open ONLY outside production. Both are visual
+ * surfaces that read NOTHING from the database — the styleguide renders tokens and
+ * empty component variants; /signals is the Data Sources intro (static source
+ * labels + an animation, no lead/contact/signal on it). Keeping them gated in
  * production preserves R18 (the deployed app never serves a page to a
- * non-allowlisted visitor); opening it in dev means brand review doesn't require
- * a Supabase round-trip. If it ever grows a real practice on it, delete this.
+ * non-allowlisted visitor); opening them in dev means brand/design review doesn't
+ * require a Supabase round-trip. If either ever grows a real practice on it, drop
+ * it from this list.
  */
 export function publicPaths(isProduction: boolean): string[] {
-  const paths = ["/login"];
-  if (!isProduction) paths.push("/styleguide");
+  const paths = ["/login", "/auth/callback"];
+  if (!isProduction) paths.push("/styleguide", "/signals");
   return paths;
 }
 

@@ -172,6 +172,12 @@ export const themeVars = {
   "--shadow-soft": "0 4px 8px -2px #1818191a, 0 2px 4px -2px #1818190f", // VERIFIED-CSS
   "--shadow-card": "0 12px 16px -6px #18181914, 0 4px 6px -4px #18181908", // VERIFIED-CSS
   "--shadow-ring": "0 0 1px #a9a8a6, 0 2px 4px #0000000a", // VERIFIED-CSS
+
+  // Motion — /signals connector pulse + staggered card glide-in. Mirrored into @theme so
+  // Tailwind emits `animate-signal-flow` / `animate-card-glide-in` (keyframes live in globals.css).
+  "--animate-signal-flow": "signal-flow 1.8s linear infinite",
+  "--animate-card-glide-in":
+    "card-glide-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both",
 } as const;
 
 export type ThemeVar = keyof typeof themeVars;
