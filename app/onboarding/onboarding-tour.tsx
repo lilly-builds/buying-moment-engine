@@ -204,6 +204,21 @@ export function OnboardingTour() {
       const now = getSnapshot();
       const cur = steps.find((s) => s.order === now.step);
       if (!cur) return;
+
+      // Cross-page moves happen only on an explicit "Next →" (an engage click on a
+      // real link, e.g. "View brief", lets the link navigate itself). Resolve the
+      // destination BEFORE advancing: if it can't resolve — e.g. an empty feed has
+      // no brief to open — stay put so this step's card + Skip remain reachable
+      // rather than stranding the tour on a page it can't render.
+      let navTo: string | null = null;
+      if (viaNext && cur.nextHref === "feed") {
+        navTo = "/";
+      } else if (viaNext && cur.nextHref === "first-brief") {
+        const link = document.querySelector<HTMLAnchorElement>('[data-tour="open-brief"] a');
+        navTo = link?.getAttribute("href") ?? null;
+        if (!navTo) return; // nothing to open — don't advance off this page
+      }
+
       const completed = now.completed.includes(cur.id)
         ? now.completed
         : [...now.completed, cur.id];
@@ -213,16 +228,7 @@ export function OnboardingTour() {
         return;
       }
       writeState({ status: "active", step: next.order, completed });
-      // Cross-page moves happen only on an explicit "Next →". An engage click on a
-      // real link (e.g. "View brief") lets the link do its own navigation.
-      if (viaNext && cur.nextHref) {
-        if (cur.nextHref === "feed") router.push("/");
-        else if (cur.nextHref === "first-brief") {
-          const link = document.querySelector<HTMLAnchorElement>('[data-tour="open-brief"] a');
-          const href = link?.getAttribute("href");
-          if (href) router.push(href);
-        }
-      }
+      if (navTo) router.push(navTo);
     },
     [router, steps],
   );
