@@ -248,6 +248,9 @@ export function demoBrief(now: Date): RenderedBrief {
     factual,
     voice,
     headline: voice.headline ?? "Front desk underwater right as a 5th location opens",
+    // Happy-path demo: the prose was written against exactly these fresh signals,
+    // so nothing has diverged and no "regenerate" affordance should show.
+    stale: false,
     live: {
       signalCount: 3,
       freshness: "today",
