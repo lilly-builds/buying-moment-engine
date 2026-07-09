@@ -1,6 +1,10 @@
+import { inngest } from "./inngest";
+import { getDb } from "@/db/client";
 import type { Database } from "@/db/types";
 import { createMeter, type Meter } from "@/src/roi/cost-meter";
 import { drizzleCostRecorder } from "@/db/cost-recorder";
+import { getTenantProfile } from "@/src/discovery/tenants";
+import { selectMetro } from "@/src/discovery/rotation";
 import {
   isPlaceFresh,
   upsertDiscoveryCandidate,
@@ -394,3 +398,25 @@ export function buildLiveDiscoveryDeps(params: {
     classifyClient: anthropicClassifyClient(apiKey),
   };
 }
+
+/** Which tenant the scheduled discovery cron runs for (config-level tenancy, K2). */
+export const DEFAULT_DISCOVERY_TENANT_ID = "eliseai";
+/** Weekly, Monday 09:00 UTC — one metro per run, so metros rotate on the cadence (U6/R9). */
+export const DISCOVERY_CRON = "0 9 * * 1";
+
+/**
+ * Scheduled run (Inngest cron). Builds production deps lazily inside the handler so
+ * import + `next build` stay keyless; only a live cron reads DATABASE_URL /
+ * ANTHROPIC_API_KEY. Rotation picks this run's single metro (U6). Mirrors
+ * `runDetectorsJob` (`jobs/run-detectors.ts`).
+ */
+export const runDiscoveryJob = inngest.createFunction(
+  { id: "run-discovery", triggers: [{ cron: DISCOVERY_CRON }] },
+  async () => {
+    const db = getDb();
+    const now = new Date();
+    const tenant = getTenantProfile(DEFAULT_DISCOVERY_TENANT_ID);
+    const metro = selectMetro(tenant, now);
+    return runDiscovery(buildLiveDiscoveryDeps({ db, now, tenant, metro }));
+  },
+);
