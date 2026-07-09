@@ -48,9 +48,14 @@ that would send an email. Report the sequence ID at the end.
    - Click Save. THEN read the sequence's numeric id from the URL (the number that
      replaces `new-dynamic` in `…/sequence/<ID>/edit`).
 
-3. CONNECTED INBOX:
-   - Ensure a sending inbox is connected for the acting user (Settings → General →
-     Email, or when the sequence prompts). Without this, enrollment cannot send.
+3. CONNECTED INBOX (MANDATORY — the enrollment API refuses without it):
+   - Settings (gear) → Your Preferences "General" → "Email" tab → "Connect personal
+     email" → Gmail/Outlook → OAuth consent as the ACTING user's address.
+   - The acting user (the one whose userId enrolls) must be the one whose inbox is
+     connected. Without it the enrollment returns HTTP 400
+     `SequenceStandardFriendlyError.PUBLIC_ENROLL_NO_CONNECTED_EMAILS`:
+     "User <id> for Portal <id> has no connected inboxes … required to enroll from
+     the public API." This is a Google OAuth consent — no CLI/API can do it headlessly.
 
 4. HAND BACK:
    - The sequence's numeric ID (the number in the URL after /sequence/).
@@ -77,7 +82,9 @@ by the app, and ONLY to sandbox/test addresses (D9).
      **Body** = `{{ contact.gtm_maestro_custom_body }}`. **Save**, then **Create sequence**.
    - **Add a 2nd step** (a rep "Call task") — a dynamic sequence can't save on one
      step. **Save**, then read the numeric id from the URL (replaces `new-dynamic`).
-3. **Connected inbox** — connect the rep's sending inbox if prompted.
+3. **Connected inbox** (required) — gear → **General** → **Email** tab →
+   **Connect personal email** → Gmail/Outlook → consent as the acting user. Skipping
+   this makes enrollment 400 (`PUBLIC_ENROLL_NO_CONNECTED_EMAILS`).
 4. **Grab the sequence ID** from the URL (`…/sequence/<ID>`).
 
 ---
