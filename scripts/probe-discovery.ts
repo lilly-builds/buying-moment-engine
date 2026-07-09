@@ -42,6 +42,8 @@ interface Args {
   limit: number;
   target: number;
   confidenceFloor?: number;
+  ratingThreshold?: number;
+  rePullWindowDays?: number;
   dryRun: boolean;
 }
 
@@ -56,6 +58,8 @@ function parseArgs(argv: string[]): Args {
     limit: Number(get("--limit") ?? 10),
     target: Number(get("--target") ?? 5),
     confidenceFloor: get("--confidence") ? Number(get("--confidence")) : undefined,
+    ratingThreshold: get("--rating-threshold") ? Number(get("--rating-threshold")) : undefined,
+    rePullWindowDays: get("--repull-window") ? Number(get("--repull-window")) : undefined,
     dryRun: argv.includes("--dry-run"),
   };
 }
@@ -121,7 +125,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const tenant = narrowIcp(getTenantProfile(TENANT_ID), args.icp);
+  let tenant = narrowIcp(getTenantProfile(TENANT_ID), args.icp);
+  if (args.ratingThreshold !== undefined) {
+    tenant = { ...tenant, ratingThreshold: args.ratingThreshold };
+  }
+  if (args.rePullWindowDays !== undefined) {
+    tenant = { ...tenant, rePullWindowDays: args.rePullWindowDays };
+  }
   const metro = args.metro ?? tenant.metros[0];
   const now = new Date();
 
@@ -130,7 +140,7 @@ async function main(): Promise<void> {
   console.log(`  database:    ${maskDb(process.env.DATABASE_URL as string)}`);
   console.log(`  metro:       ${metro}`);
   console.log(`  ICP:         ${tenant.icp.map((e) => e.category).join(", ")}`);
-  console.log(`  per-cat cap: ${args.limit}   confidence floor: ${args.confidenceFloor ?? "default"}`);
+  console.log(`  per-cat cap: ${args.limit}   rating<${tenant.ratingThreshold} checked   confidence floor: ${args.confidenceFloor ?? "default"}`);
   console.log(`  target:      ${args.target} qualified prospects`);
   console.log(
     `  cost ceiling ~ ${usd(tenant.icp.length * (0.032 + args.limit * 0.04))} (funnel makes real spend much lower)`,

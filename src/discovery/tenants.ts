@@ -58,8 +58,15 @@ export type TenantProfile = z.output<typeof tenantProfileSchema>;
  *
  * `rePullWindowDays: 90` matches the `phone_complaints` freshness window
  * (`src/engine/freshness.ts`) — do not re-pay for a place more often than its
- * emitted signal stays fresh. `ratingThreshold: 4.0` sends the low-rated tail
- * (where the pain lives) to the qualifier and skips the well-loved practices.
+ * emitted signal stays fresh.
+ *
+ * `ratingThreshold: 4.9` was TUNED from the first live run (2026-07-09): the top
+ * Google results for a metro's ICP cluster at 4.6-5.0 with hundreds-to-thousands of
+ * reviews each, so a 4.8-star practice still carries ~100+ one-star reviews where
+ * phone-access pain lives. Phone pain is orthogonal to overall rating; the funnel's
+ * real job is only to skip the near-perfect (>= 4.9) tail for cost, not to pre-judge
+ * on stars. A place Details lookup is cheap (~4¢, 5 reviews), so checking broadly is
+ * affordable. Tune further from live metrics (Open Questions).
  */
 const eliseaiProfile: TenantProfileInput = {
   id: "eliseai",
@@ -73,7 +80,7 @@ const eliseaiProfile: TenantProfileInput = {
   qualificationPrompt:
     "The reviewer describes a first-hand problem reaching this practice by phone or getting a timely response to a call: long hold times, calls that ring out or go unanswered, being unable to get through, no callback after leaving a message, or a full/broken voicemail. This is front-desk phone-access and patient-communication failure — NOT in-person waiting-room waits, billing disputes, or clinical/bedside-manner complaints.",
   signalKind: "phone_complaints",
-  ratingThreshold: 4.0,
+  ratingThreshold: 4.9,
   rePullWindowDays: 90,
   rotation: { anchorISO: "2026-01-05T00:00:00Z", cadenceDays: 7 },
 };

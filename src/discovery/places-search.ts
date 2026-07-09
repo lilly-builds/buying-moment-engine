@@ -182,3 +182,47 @@ export async function fetchPlacesTextSearch(
   }
   return res.json();
 }
+
+const GOOGLE_PLACES_DETAILS_URL =
+  "https://maps.googleapis.com/maps/api/place/details/json";
+
+/**
+ * Discovery's Place Details fetcher — like the detector's `fetchGooglePlaceDetails`
+ * but requests `reviews_sort=newest`. The legacy Details endpoint returns at most 5
+ * reviews; its DEFAULT `most_relevant` sort is Google-curated and skews positive,
+ * which starves the qualifier of the negative reviews the signal lives in — measured
+ * live (2026-07-09): 50 most_relevant reviews across 10 highly-rated Austin derm
+ * practices yielded ZERO phone-access complaints, though those practices carry
+ * hundreds of 1-stars each. `newest` is an unfiltered recent sample — a far better
+ * shot at surfacing a complaint within the 5-review ceiling. The ceiling itself
+ * (only 5 reviews per place) is the deferred multi-source-depth follow-up.
+ *
+ * Kept separate from the detector's fetcher so that path is unchanged. Structurally
+ * a `FetchPlaceDetailsFn` (it reads only `placeId`).
+ */
+export async function fetchPlaceDetailsNewest(query: {
+  placeId: string;
+}): Promise<unknown> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "GOOGLE_PLACES_API_KEY not configured — live Place Details requires credentials (see bme-research-docs/docs/google-places-api-research.md)",
+    );
+  }
+
+  const url = new URL(GOOGLE_PLACES_DETAILS_URL);
+  url.searchParams.set("place_id", query.placeId);
+  url.searchParams.set("fields", "place_id,name,url,reviews");
+  url.searchParams.set("reviews_sort", "newest");
+  url.searchParams.set("key", apiKey);
+
+  const res = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(TEXT_SEARCH_FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Google Places Details error: ${res.status} ${res.statusText}`,
+    );
+  }
+  return res.json();
+}

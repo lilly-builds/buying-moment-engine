@@ -17,6 +17,7 @@ import {
 } from "@/src/engine/resolver";
 import { computeExpiresAt } from "@/src/engine/freshness";
 import {
+  fetchPlaceDetailsNewest,
   fetchPlacesTextSearch,
   GOOGLE_TEXT_SEARCH_UNIT_COST_USD,
   metroToGeoKey,
@@ -27,7 +28,6 @@ import {
   type PlaceCandidate,
 } from "@/src/discovery/places-search";
 import {
-  fetchGooglePlaceDetails,
   googlePlaceDetailsResponseSchema,
   type FetchPlaceDetailsFn,
 } from "@/src/detectors/phone-complaints-google-places";
@@ -403,7 +403,9 @@ export function buildLiveDiscoveryDeps(params: {
     logger: params.logger,
     meter: params.meter ?? createMeter(drizzleCostRecorder(params.db)),
     searchFetcher: fetchPlacesTextSearch,
-    detailsFetcher: fetchGooglePlaceDetails,
+    // Newest reviews, not Google's positive-skewed "most_relevant" default — the
+    // qualifier needs the negative tail (see fetchPlaceDetailsNewest).
+    detailsFetcher: fetchPlaceDetailsNewest,
     classifyClient: anthropicClassifyClient(apiKey),
   };
 }
