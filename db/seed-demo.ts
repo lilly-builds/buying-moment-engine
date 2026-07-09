@@ -64,7 +64,10 @@ interface FunnelSpec {
   deal: boolean;
   cycleDays?: number;
   hours: number;
-  feedback?: { thumb: "up" | "down"; reason?: string };
+  feedback?: {
+    thumb: "up" | "down";
+    reason?: "too_small" | "wrong_specialty" | "already_customer" | "bad_timing";
+  };
   costUsd: number;
 }
 
@@ -206,7 +209,7 @@ async function seedFunnel(db: Database, now: Date, p: FunnelSpec, practiceId: st
         practiceId,
         aeEmail: AE_EMAIL,
         thumb: p.feedback.thumb,
-        reason: p.feedback.reason as never,
+        reason: p.feedback.reason ?? null,
       })
       .onConflictDoNothing({ target: [feedback.practiceId, feedback.aeEmail] });
   }
