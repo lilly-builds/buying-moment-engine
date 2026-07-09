@@ -29,6 +29,13 @@
       "when": 1783514924894,
       "tag": "0003_enrichment_waterfall",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783626358645,
+      "tag": "0004_discovery_candidates",
+      "breakpoints": true
     }
   ]
 }
