@@ -336,6 +336,15 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
       log("discovery.search.malformed", { metro, category: icp.category });
       continue;
     }
+    if (parsed.data.status !== "OK") {
+      // Legible diagnostics for a non-OK Google status (REQUEST_DENIED = key/API not
+      // enabled; ZERO_RESULTS = genuinely nothing). normalize returns [] either way.
+      log("discovery.search.status", {
+        metro,
+        category: icp.category,
+        status: parsed.data.status,
+      });
+    }
 
     const candidates = normalizeTextSearchResponse(parsed.data, {
       category: icp.category,
