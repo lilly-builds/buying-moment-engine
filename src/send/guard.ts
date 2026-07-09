@@ -1,4 +1,4 @@
-import type { Recipient } from "./adapter";
+import type { Recipient, RecipientClassification } from "./adapter";
 
 /**
  * D9 send firewall (R7/D9, U11). The demo NEVER fires an email at a real practice
@@ -82,6 +82,30 @@ export function isSandboxEmail(email: string, config: SandboxConfig): boolean {
 }
 
 /**
+ * Throw unless an (address, classification) target is safe to send to (D9). Both
+ * the explicit `sandbox` classification AND the address check must pass. This is
+ * the address-level twin of `assertSandboxRecipient`, split out so the send route
+ * can run the firewall on the recipient it resolved SERVER-SIDE *before* any
+ * network I/O — i.e. before the CRM push that mints the provider `contactId`. Both
+ * entry points share this one implementation, so neither condition can drift.
+ */
+export function assertSandboxTarget(
+  target: { email: string; classification: RecipientClassification },
+  config: SandboxConfig,
+): void {
+  if (target.classification !== "sandbox") {
+    throw new RealPracticeSendBlockedError(
+      "recipient is not classified as a sandbox contact",
+    );
+  }
+  if (!isSandboxEmail(target.email, config)) {
+    throw new RealPracticeSendBlockedError(
+      "recipient address is not a registered sandbox address",
+    );
+  }
+}
+
+/**
  * Throw unless `recipient` is safe to send to (D9). Both the explicit `sandbox`
  * classification AND the address check must pass. Call this before ANY I/O.
  */
@@ -89,14 +113,5 @@ export function assertSandboxRecipient(
   recipient: Recipient,
   config: SandboxConfig,
 ): void {
-  if (recipient.classification !== "sandbox") {
-    throw new RealPracticeSendBlockedError(
-      "recipient is not classified as a sandbox contact",
-    );
-  }
-  if (!isSandboxEmail(recipient.email, config)) {
-    throw new RealPracticeSendBlockedError(
-      "recipient address is not a registered sandbox address",
-    );
-  }
+  assertSandboxTarget(recipient, config);
 }

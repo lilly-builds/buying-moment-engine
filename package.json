@@ -11,7 +11,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "npx tsx scripts/seed-demo.ts"
+    "db:seed": "npx tsx scripts/seed-demo.ts",
+    "db:seed:sandbox": "npx tsx scripts/seed-sandbox.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

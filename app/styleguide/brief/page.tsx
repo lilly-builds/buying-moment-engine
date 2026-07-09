@@ -14,5 +14,13 @@ export const metadata: Metadata = {
  */
 export default function BriefPreviewPage() {
   const now = new Date();
-  return <BriefView brief={demoBrief(now)} nowMs={now.getTime()} />;
+  // A styleguide preview reads no DB and never sends; a placeholder id keeps the
+  // Send button inert (a POST would 401/404 for this non-existent practice).
+  return (
+    <BriefView
+      brief={demoBrief(now)}
+      nowMs={now.getTime()}
+      practiceId="styleguide-preview"
+    />
+  );
 }
