@@ -42,46 +42,50 @@ export type UpsertBriefResult = {
 };
 
 /**
- * Write the brief. Returns which of the two things happened, because they mean different
- * things to the ROI scoreboard: a `regenerated` brief spent a second Opus call on a
- * practice that had already been briefed once.
+ * Write the brief, atomically. Returns which of the two things happened, because they mean
+ * different things to the ROI scoreboard: a `regenerated` brief spent a second Opus call on
+ * a practice that had already been briefed once.
+ *
+ * ONE statement, not a SELECT then an INSERT-or-UPDATE. Under a parallel seeding run (U15
+ * briefs a whole metro) two workers reaching the same practice would both read "missing",
+ * both INSERT, and one would die on the `practice_id` unique constraint — after paying for
+ * its Opus call. `ON CONFLICT DO UPDATE` lets Postgres settle it.
+ *
+ * The insert leaves `regenerated_at` NULL; the conflict path sets it. So the returned row
+ * distinguishes the two cases with no second query and no race of its own: a non-null
+ * `regenerated_at` means the update branch ran.
  */
 export async function upsertBrief(
   db: Database,
   args: UpsertBriefArgs,
 ): Promise<UpsertBriefResult> {
-  const [existing] = await db
-    .select({ id: briefs.id })
-    .from(briefs)
-    .where(eq(briefs.practiceId, args.practiceId))
-    .limit(1);
-
-  if (!existing) {
-    const [inserted] = await db
-      .insert(briefs)
-      .values({
-        practiceId: args.practiceId,
-        factual: args.factual,
-        voice: args.voice,
-        schemaVersion: BRIEF_SCHEMA_VERSION,
-        generatedAt: args.now,
-      })
-      .returning({ id: briefs.id });
-    return { briefId: inserted.id, status: "generated" };
-  }
-
-  await db
-    .update(briefs)
-    .set({
+  const [row] = await db
+    .insert(briefs)
+    .values({
+      practiceId: args.practiceId,
       factual: args.factual,
       voice: args.voice,
       schemaVersion: BRIEF_SCHEMA_VERSION,
-      // `generated_at` is deliberately absent: the first generation keeps its timestamp.
-      regeneratedAt: args.now,
+      generatedAt: args.now,
     })
-    .where(eq(briefs.id, existing.id));
+    .onConflictDoUpdate({
+      target: briefs.practiceId,
+      set: {
+        factual: args.factual,
+        voice: args.voice,
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        // `generated_at` is deliberately absent from `set`: the FIRST generation keeps its
+        // timestamp forever, and `regenerated_at` carries the latest. "Has this ever been
+        // rewritten, and when" is answerable from the row without an audit table.
+        regeneratedAt: args.now,
+      },
+    })
+    .returning({ id: briefs.id, regeneratedAt: briefs.regeneratedAt });
 
-  return { briefId: existing.id, status: "regenerated" };
+  return {
+    briefId: row.id,
+    status: row.regeneratedAt === null ? "generated" : "regenerated",
+  };
 }
 
 export type GetBriefResult =

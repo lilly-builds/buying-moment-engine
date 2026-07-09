@@ -4,6 +4,7 @@ import type { Database } from "@/db/types";
 import { isFresh } from "@/src/engine/freshness";
 import { getPack, PACK_VERTICALS, type PackVertical, type VerticalPack } from "@/src/packs";
 import type { DetectorKind } from "@/src/ingest/validate";
+import type { GroundingParts } from "./lint";
 
 /**
  * Everything the brief is allowed to know, read once, in one place (U6).
@@ -256,28 +257,43 @@ export function allowedEvidenceIds(
 }
 
 /**
- * Every string a number in the brief may legitimately have come from — the same inputs
- * the model was shown, plus the pack's own cited figures.
+ * Every string a number in the brief may legitimately have come from, split into what may
+ * be asserted about THIS practice (`evidence`) and the pack's own cited figures (`pack`,
+ * allowed only inside a rebuttal). See `lint.ts#GroundingParts` for why the split exists.
  *
- * Deliberately does NOT include the contact's email or LinkedIn URL: a digit inside
- * `jsmith2@clinic.com` would silently ground the statistic "2" everywhere in the brief.
- * A URL is an address, not a measurement.
+ * Takes the FRESH signals the caller actually showed the model, never `input.signals`: a
+ * digit that lives only in an expired signal's snippet grounds prose the model never saw
+ * (P2-5).
+ *
+ * The `evidence` bucket deliberately excludes the contact's email and LinkedIn URL (a digit
+ * inside `jsmith2@clinic.com` would ground the statistic "2"), and now also the `website`
+ * fact's VALUE for the same reason — a URL is an address, not a measurement. Its snippet
+ * stays: that is real page text the model was shown. `ehrSignals[].name` is dropped from the
+ * corpus entirely — it is never shown to the model, so it can ground nothing (P1-3, P2-5).
  */
-export function groundingParts(input: BriefInput): string[] {
+export function groundingParts(
+  input: BriefInput,
+  signals: readonly SignalRow[],
+): GroundingParts {
   const pack = input.pack;
-  return [
-    input.practice.name,
-    input.practice.city,
-    input.practice.state,
-    ...input.facts.flatMap((fact) => [fact.value, fact.evidence.snippet]),
-    ...input.signals.map((signal) => signal.evidence.snippet),
-    pack.painFit.line,
-    pack.opener.exampleOpener,
-    ...pack.opener.vocabulary,
-    ...(pack.proofPoint.tag === "real"
-      ? [pack.proofPoint.caseStudy, ...pack.proofPoint.metrics]
-      : []),
-    ...pack.roiBenchmark.items.map((item) => item.label),
-    ...pack.ehrSignals.map((ehr) => ehr.name),
-  ].filter((part): part is string => typeof part === "string" && part.length > 0);
+  return {
+    evidence: [
+      input.practice.name,
+      input.practice.city,
+      input.practice.state,
+      ...input.facts.flatMap((fact) =>
+        fact.field === "website" ? [fact.evidence.snippet] : [fact.value, fact.evidence.snippet],
+      ),
+      ...signals.map((signal) => signal.evidence.snippet),
+    ],
+    pack: [
+      pack.painFit.line,
+      pack.opener.exampleOpener,
+      ...pack.opener.vocabulary,
+      ...(pack.proofPoint.tag === "real"
+        ? [pack.proofPoint.caseStudy, ...pack.proofPoint.metrics]
+        : []),
+      ...pack.roiBenchmark.items.map((item) => item.label),
+    ],
+  };
 }

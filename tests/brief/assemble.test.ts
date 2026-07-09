@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assembleFactual, signalFingerprint } from "@/src/brief/assemble";
-import type { BriefInput, FactRow, SignalRow } from "@/src/brief/inputs";
+import { freshSignals, groundingParts, type BriefInput, type FactRow, type SignalRow } from "@/src/brief/inputs";
+import { buildGroundingCorpus } from "@/src/brief/lint";
 import { getPack } from "@/src/packs";
 import { ZERO_SIGNAL_HEADLINE } from "@/src/brief/schema";
 
@@ -207,6 +208,42 @@ describe("assembleFactual", () => {
     );
     expect(factual.contact!.linkedinHref).toBe("https://www.linkedin.com/in/joito");
     expect(factual.contact!.bestChannel).toBe("linkedin");
+  });
+});
+
+describe("groundingParts (P2-5, P1-3)", () => {
+  function withSnippet(row: SignalRow, snippet: string): SignalRow {
+    return { ...row, evidence: { ...row.evidence, snippet } };
+  }
+
+  it("grounds a FRESH signal's number, never an expired one's", () => {
+    const fresh = withSnippet(signal("staffing_spike", new Date("2026-07-31T00:00:00Z")), "Hiring 3 front-desk staff.");
+    const expired = withSnippet(signal("growth_events", new Date("2026-07-02T00:00:00Z")), "Now serving 888 patients.");
+    const briefInput = input({ signals: [fresh, expired] });
+
+    // The caller passes the FRESH set, exactly as `attemptVoice` does. The expired signal was
+    // never shown to the model, so its 888 must not ground prose (P2-5).
+    const corpus = buildGroundingCorpus(groundingParts(briefInput, freshSignals(briefInput.signals, NOW)));
+    expect(corpus.evidence.has("3")).toBe(true);
+    expect(corpus.evidence.has("888")).toBe(false);
+  });
+
+  it("keeps the pack's proof figures in the pack set, out of the evidence set (P1-3)", () => {
+    const briefInput = input();
+    const corpus = buildGroundingCorpus(groundingParts(briefInput, freshSignals(briefInput.signals, NOW)));
+    // Texas Dermatology's 2,000 calls / 250 new patients are the pack's proof — never this
+    // practice's numbers, so evidence must not hold them and pack must.
+    expect(corpus.evidence.has("2000")).toBe(false);
+    expect(corpus.pack.has("2000")).toBe(true);
+    expect(corpus.pack.has("250")).toBe(true);
+  });
+
+  it("drops the website fact's URL value but keeps its snippet (P2-5)", () => {
+    const website = fact("website", "https://clinic-2020.example", "Visit our Omaha office.");
+    const briefInput = input({ facts: [fact("specialty", "Dermatology"), website] });
+    const corpus = buildGroundingCorpus(groundingParts(briefInput, freshSignals(briefInput.signals, NOW)));
+    // 2020 lives only in the URL — an address, not a measurement — so it must not ground a stat.
+    expect(corpus.evidence.has("2020")).toBe(false);
   });
 });
 

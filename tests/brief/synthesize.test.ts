@@ -5,6 +5,7 @@ import { citationClosure, headlineCitesASignal, synthesizeBrief } from "@/src/br
 import type { VoiceRequest } from "@/src/brief/prompts/voice";
 import { renderBrief } from "@/src/brief/render";
 import { buildBriefInput } from "@/src/brief/inputs";
+import { AnthropicRequestError } from "@/src/enrich/types";
 import { recordingMeter } from "../enrich/doubles";
 import { createTestDb, type TestDb } from "../setup";
 import { FakeVoiceClient, malformedVoiceClient } from "./doubles";
@@ -192,6 +193,38 @@ describe("synthesizeBrief", () => {
     expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
   });
 
+  it("kills a zero-signal brief whose model invented a buying moment (P1-1)", async () => {
+    // Zero signals, but the model returns a headline anyway, citing nothing. SHAPE passes
+    // (a string is valid), CLOSURE's old id check passes ([] ⊆ allowed), TRUTH passes (no
+    // digits). The variant lock is the only thing that catches it — and it must.
+    const ids = await seedGoldenPractice(t.db, { withSignals: false });
+    const invented = (req: VoiceRequest) => ({
+      ...goodVoice(req),
+      headline: "They just opened a second location",
+      headlineEvidenceIds: [],
+    });
+    const { deps: d } = deps(t, FakeVoiceClient.always(invented));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "closure", attempts: 2 });
+    expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
+  });
+
+  it("kills a fired-signal brief whose model returned a null headline (P1-1, the inverse)", async () => {
+    // A moment fired, so the card's spine is the timing thesis — a null headline would render
+    // "No buying moment detected yet" over live signals, the same lie in the other direction.
+    const ids = await seedGoldenPractice(t.db);
+    const nulled = (req: VoiceRequest) => ({
+      ...goodVoice(req),
+      headline: null,
+      headlineEvidenceIds: [],
+    });
+    const { deps: d } = deps(t, FakeVoiceClient.always(nulled));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "closure" });
+  });
+
   it("kills a brief whose headline cites a firmographic instead of a signal", async () => {
     // Closure alone would pass this: the id is real. But the headline is the buying moment,
     // and "founded in 2004" is not one. The timing thesis is the spine of the card (D1).
@@ -218,6 +251,44 @@ describe("synthesizeBrief", () => {
     const result = await synthesizeBrief(d, ids.practiceId);
     expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: 2 });
     expect(result.status === "failed" && result.reason).toContain("ungrounded-number");
+  });
+
+  it("kills a brief that asserts the pack's own proof numbers about this practice (P1-3)", async () => {
+    // The two-holes-into-one exploit: the dermatology pack's 2,000 calls and 250 new patients,
+    // stated about the prospect in a touch body, citing nothing. Closure passes (empty ids are
+    // legal on a touch), but the corpus split means the pack's numbers ground only a rebuttal.
+    const ids = await seedGoldenPractice(t.db);
+    const packNumbers = (req: VoiceRequest) => {
+      const voice = goodVoice(req);
+      const [t1, t2, t3] = voice.sequence.touches;
+      return {
+        ...voice,
+        sequence: {
+          ...voice.sequence,
+          touches: [
+            { ...t1, body: "You are fielding roughly 2,000 calls a month and losing 250 new patients to voicemail." },
+            t2,
+            t3,
+          ],
+        },
+      };
+    };
+    const { deps: d } = deps(t, FakeVoiceClient.always(packNumbers));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: 2 });
+    expect(result.status === "failed" && result.reason).toContain("ungrounded-number");
+    expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
+  });
+
+  it("kills a brief whose personalization snippet cites no evidence at all (P1-3 belt)", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    const uncited = (req: VoiceRequest) => ({ ...goodVoice(req), personalizationEvidenceIds: [] });
+    const { deps: d } = deps(t, FakeVoiceClient.always(uncited));
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "closure" });
+    expect(result.status === "failed" && result.reason).toContain("personalizationSnippet");
   });
 
   it("retries once with the violations attached, and persists when the retry is clean", async () => {
@@ -291,6 +362,27 @@ describe("synthesizeBrief", () => {
     expect(rows).toEqual([]);
   });
 
+  // ─── transport failures are not the practice's fault, and are never retried ───────────
+  it("does not retry an unbilled transport failure, and spends nothing on it", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    let calls = 0;
+    const rateLimited = {
+      async generate(): Promise<never> {
+        calls += 1;
+        throw new AnthropicRequestError(429, "Too Many Requests");
+      },
+    };
+    const { deps: d, rows } = deps(t, rateLimited);
+
+    const result = await synthesizeBrief(d, ids.practiceId);
+    expect(result).toMatchObject({ status: "failed", gate: "transport", attempts: 1 });
+    // Answering a 429 with a second immediate call spends money on the same 429.
+    expect(calls).toBe(1);
+    // A thrown call was never billed, so the meter must record nothing (R19, both ways).
+    expect(rows).toEqual([]);
+    expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
+  });
+
   // ─── persistence ──────────────────────────────────────────────────────────────────────
   it("regenerates in place rather than accumulating briefs", async () => {
     const ids = await seedGoldenPractice(t.db);
@@ -302,6 +394,22 @@ describe("synthesizeBrief", () => {
     expect(second.status).toBe("regenerated");
     if (first.status === "failed" || second.status === "failed") throw new Error("unexpected");
     expect(second.briefId).toBe(first.briefId);
+  });
+
+  it("survives two seeders racing the same practice", async () => {
+    // U15 briefs a metro in parallel. A SELECT-then-INSERT would let both workers read
+    // "missing", both INSERT, and one die on the practice_id unique constraint — after
+    // paying for its Opus call. One statement, and Postgres settles it.
+    const ids = await seedGoldenPractice(t.db);
+    const { deps: d } = deps(t, FakeVoiceClient.always(goodVoice));
+
+    const [a, b] = await Promise.all([
+      synthesizeBrief(d, ids.practiceId),
+      synthesizeBrief(d, ids.practiceId),
+    ]);
+    expect([a.status, b.status].filter((s) => s === "failed")).toEqual([]);
+    if (a.status === "failed" || b.status === "failed") throw new Error("unexpected");
+    expect(a.briefId).toBe(b.briefId);
   });
 });
 

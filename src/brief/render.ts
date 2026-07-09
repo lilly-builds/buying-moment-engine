@@ -105,28 +105,48 @@ export interface RenderedBrief {
   voice: VoiceBrief;
   /** Read live from `signals`, never from the stored JSON. */
   live: LiveSignalView;
-  /** `voice.headline`, or the deterministic constant on the zero-signal variant. */
+  /** The live headline: the model's when a moment is firing, the constant otherwise. */
   headline: string;
+  /**
+   * The fresh signal set has diverged from what the prose was written against — a new
+   * signal fired, or one expired past its window. A UI gates a "regenerate this brief"
+   * affordance on this. It is a READ, not a scheduler (Lilly's ruling): nothing here
+   * regenerates anything, and the card still renders honestly until it does.
+   */
+  stale: boolean;
 }
 
 /**
  * Merge a stored brief with the live signal view.
  *
- * The headline resolution is the one place the two tiers touch: the model writes it when
- * a moment fired, and code supplies the constant when none did. `voice.headline` is null
- * on the zero-signal variant precisely so this cannot silently fall through to prose about
- * a buying moment that never happened.
+ * The headline is the loudest claim on the card, so it is defended twice — code decides it,
+ * the model never gets the final say. It stands ONLY while the specific moment it cites is
+ * still firing: one of its `headlineEvidenceIds` must still be a fresh signal. That is the
+ * render-time mirror of the generation-time `headlineCitesASignal`, and it is stricter than a
+ * count check for a reason — if the headline cited a staffing spike that has since expired, an
+ * unrelated phone-complaints signal firing would keep `signalCount` at 1 while the headline
+ * named a moment that is over (KTD: "a stored brief must never claim a buying moment that has
+ * expired"). Otherwise it falls back to the honest constant. The zero-signal variant resolves
+ * there too — its `headlineEvidenceIds` is empty — and `voice.headline` is null there anyway.
  */
 export function renderBrief(
   brief: StoredBrief,
   signalRows: readonly SignalRow[],
   now: Date,
 ): RenderedBrief {
+  const live = liveSignalView(signalRows, now);
+  const freshSignalEvidenceIds = new Set(live.firedSignals.map((signal) => signal.evidenceId));
+  const headlineStillLive =
+    !brief.factual.zeroSignal &&
+    brief.voice.headlineEvidenceIds.some((id) => freshSignalEvidenceIds.has(id));
   return {
     factual: brief.factual,
     voice: brief.voice,
-    live: liveSignalView(signalRows, now),
-    headline: brief.voice.headline ?? brief.factual.headline ?? ZERO_SIGNAL_HEADLINE,
+    live,
+    headline: headlineStillLive
+      ? (brief.voice.headline ?? ZERO_SIGNAL_HEADLINE)
+      : ZERO_SIGNAL_HEADLINE,
+    stale: isBriefStale(brief.factual, signalRows, now),
   };
 }
 
