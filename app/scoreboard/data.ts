@@ -262,7 +262,7 @@ export function buildScoreboardData(inputs: ScoreboardInputs): ScoreboardData {
     return {
       endGoals: [
         metric(
-          "Deals won, this quarter",
+          "Deals won",
           String(deals),
           "modeled",
           "Are we closing more? The revenue outcome every sign below points at.",
@@ -294,7 +294,7 @@ export function buildScoreboardData(inputs: ScoreboardInputs): ScoreboardData {
           "Fix the sequences that aren't landing.",
         ),
         metric(
-          "Hours saved this month",
+          "Hours saved",
           String(Math.round(hours)),
           "measured",
           "Free reps to sell more → roll it out wider.",
