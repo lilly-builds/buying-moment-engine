@@ -106,6 +106,21 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
     );
     expect(propertyCreates).toHaveLength(1);
   });
+
+  it("provisionProperty:false makes ZERO schema calls — only PATCH + enroll (live grant)", async () => {
+    const { fetch: f, calls } = sendMock();
+    const sender = createHubSpotSender({ ...deps(f), provisionProperty: false });
+    const result = await sender.sendTouch({
+      recipient: sandboxRecipient,
+      touchNumber: 1,
+      body: "hello",
+    });
+    expect(result.enrolled).toBe(true);
+    // No /crm/v3/properties/* traffic — exactly what a grant without
+    // crm.schemas.contacts.write can do: write the body + enroll.
+    expect(calls.some((c) => c.path.startsWith("/crm/v3/properties/"))).toBe(false);
+    expect(calls.map((c) => c.method).sort()).toEqual(["PATCH", "POST"]);
+  });
 });
 
 describe("HubSpot send — D9 firewall (nothing fires at a real practice)", () => {

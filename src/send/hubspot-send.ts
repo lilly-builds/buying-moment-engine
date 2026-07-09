@@ -91,6 +91,16 @@ export interface HubSpotSendDeps extends HubSpotHttpDeps {
   userId: string;
   /** D9 firewall config — which addresses are sandbox (fail-closed if empty). */
   sandbox: SandboxConfig;
+  /**
+   * Auto-create the custom body property on first send (default true). Set false
+   * when the property is provisioned OUT OF BAND — e.g. against a live grant that
+   * lacks `crm.schemas.contacts.write` (verified on portal 246709373: the U10
+   * grant holds `crm.objects.contacts.write` for the PATCH + the Sequences send
+   * scope, but not the contacts-SCHEMA write provisioning needs). The property is
+   * then created once in HubSpot and the send path only writes + enrolls, which
+   * the grant already permits.
+   */
+  provisionProperty?: boolean;
 }
 
 const ALREADY_EXISTS = [409] as const;
@@ -131,9 +141,13 @@ export function createHubSpotSender(deps: HubSpotSendDeps): SendAdapter {
   ) => Promise<T>;
 
   // Provision the custom property AT MOST once per sender, lazily on first send.
+  // Skipped entirely when the property is provisioned out of band (see deps).
+  const shouldProvision = deps.provisionProperty ?? true;
   let ensured: Promise<unknown> | null = null;
   function ensureOnce(): Promise<unknown> {
-    if (!ensured) ensured = ensureCustomBodyProperty(deps);
+    if (!ensured) {
+      ensured = shouldProvision ? ensureCustomBodyProperty(deps) : Promise.resolve();
+    }
     return ensured;
   }
 
