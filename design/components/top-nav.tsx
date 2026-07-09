@@ -46,6 +46,16 @@ const NAV_ITEMS: readonly NavItem[] = [
     label: "Scoreboard",
     isActive: (p) => p.startsWith("/scoreboard"),
   },
+  {
+    href: "/signals",
+    label: "Signals",
+    isActive: (p) => p.startsWith("/signals"),
+  },
+  {
+    href: "/integrations",
+    label: "Integrations",
+    isActive: (p) => p.startsWith("/integrations"),
+  },
 ];
 
 export type TopNavTone = "light" | "dark";
