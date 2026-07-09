@@ -1,0 +1,29 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "place_id": "ChIJrundberg_derm",
+      "name": "Rundberg Dermatology",
+      "formatted_address": "1200 Rundberg Ln, Austin, TX 78753, USA",
+      "rating": 2.8,
+      "user_ratings_total": 176,
+      "types": ["doctor", "health", "point_of_interest"]
+    },
+    {
+      "place_id": "ChIJbright_skin",
+      "name": "Bright Skin Dermatology",
+      "formatted_address": "900 W 5th St, Austin, TX 78703, USA",
+      "rating": 4.9,
+      "user_ratings_total": 412,
+      "types": ["doctor", "health"]
+    },
+    {
+      "place_id": "ChIJhill_country_skin",
+      "name": "Hill Country Skin Clinic",
+      "formatted_address": "55 N Loop Blvd, Austin, TX 78751, USA",
+      "user_ratings_total": 2,
+      "types": ["doctor"]
+    }
+  ],
+  "next_page_token": "CqQCF0oScDemoTokenForNextPage"
+}
