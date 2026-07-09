@@ -9,12 +9,29 @@ import { deriveSigningKey, STATE_COOKIE } from "@/src/crm/oauth-state";
 export const runtime = "nodejs";
 
 /**
- * HubSpot "Connect" OAuth callback (R8, R18, U10). HubSpot redirects the
+ * HubSpot "Connect" OAuth callback (R8, R18, U10, U17). HubSpot redirects the
  * allowlisted user's browser here with `?code` + `?state`; we verify the state
  * against the signed cookie set at initiation (anti-CSRF), exchange the code,
  * and store the per-tenant tokens ENCRYPTED. Session-gated (R18): only a
  * logged-in, allowlisted user can connect a CRM.
+ *
+ * This is a BROWSER redirect target, not an API fetch — so every outcome lands
+ * the user back on the Connections page (`/integrations`) with a status the page
+ * renders as a banner, rather than showing them raw JSON. No secret ever rides
+ * the query string; `?error` carries a stable, non-sensitive code.
  */
+
+/** Land the user back on the Connections page with a readable status. */
+function backToConnections(
+  request: NextRequest,
+  status: "connected" | { error: string },
+): NextResponse {
+  const url = new URL("/integrations", request.nextUrl.origin);
+  if (status === "connected") url.searchParams.set("connected", "hubspot");
+  else url.searchParams.set("error", status.error);
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request: NextRequest) {
   const auth = await guardMutation();
   if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
@@ -26,7 +43,7 @@ export async function GET(request: NextRequest) {
     deps = readOAuthDeps();
   } catch {
     // Config absent (HUBSPOT_* / TOKEN_ENCRYPTION_KEY empty until U15).
-    return NextResponse.json({ error: "CRM not configured" }, { status: 503 });
+    return backToConnections(request, { error: "not_configured" });
   }
 
   const params = request.nextUrl.searchParams;
@@ -40,13 +57,8 @@ export async function GET(request: NextRequest) {
   });
 
   const res = result.ok
-    ? NextResponse.json({
-        ok: true,
-        provider: "hubspot",
-        portalId: result.portalId,
-        scopes: result.scopes,
-      })
-    : NextResponse.json({ error: result.error }, { status: result.status });
+    ? backToConnections(request, "connected")
+    : backToConnections(request, { error: "connect_failed" });
   // Single-use handshake: clear the state cookie on every outcome.
   res.cookies.set(STATE_COOKIE, "", {
     httpOnly: true,

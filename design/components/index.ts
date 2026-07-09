@@ -43,6 +43,9 @@ export type {
 export { Card } from "./card";
 export type { CardProps, CardVariant, CardPadding } from "./card";
 
+export { Input, Textarea } from "./field";
+export type { InputProps, TextareaProps } from "./field";
+
 export { Badge } from "./badge";
 export type { BadgeProps, BadgeTone, BadgeSize } from "./badge";
 

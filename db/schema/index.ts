@@ -15,4 +15,5 @@ export * from "./entities";
 export * from "./brief";
 export * from "./crm";
 export * from "./roi";
+export * from "./integrations";
 export * from "./discovery";
