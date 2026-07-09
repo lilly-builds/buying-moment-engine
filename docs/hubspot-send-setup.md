@@ -92,6 +92,15 @@ Then the send runs with `createHubSpotSender({ …, provisionProperty: false })`
 (the body write) + the Sequences send scope, but **not** `crm.schemas.contacts.write`,
 so the property is created here (Part A/B) rather than by the app.
 
+## Deferred follow-up (after HubSpot send is proven live)
+- **Subject editability in UI + DB (U9/U6).** The send path already ships an
+  editable subject (it writes `gtm_maestro_custom_subject`), but the AE cannot yet
+  *edit and persist* a subject: `db/schema/brief.ts` `sequences` has `body`/`cta`
+  but no `subject` column, and the U9 inline sequence editor has no subject field.
+  Add: a `subject` column (migration) + a per-touch subject input in the brief
+  card's sequence editor, so the edited subject flows sequence row → send path.
+  Deferred deliberately until the live HubSpot send is proven end-to-end.
+
 ## Gotchas (learned the hard way)
 - **Exact internal names.** `gtm_maestro_custom_subject` + `gtm_maestro_custom_body` —
   not the auto-generated variants. The app references these literals; a mismatch fails silently.
