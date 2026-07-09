@@ -188,8 +188,11 @@ export function demoBrief(now: Date): RenderedBrief {
   const voice: RenderedBrief["voice"] = {
     headline: "Front desk underwater right as a 5th location opens",
     headlineEvidenceIds: [EV.staffing, EV.growth],
+    // Kept within VOICE_LIMITS.callOpener (320) so this fixture is a brief a real
+    // generation could actually produce — and so it survives `getBrief`'s re-validation
+    // when seeded into the DB (the styleguide renders it un-validated; the real route does not).
     callOpener:
-      "Hi Dana — most derm groups your size are losing the phone battle around screening season, and the ones winning right now aren't adding front-desk headcount, they're making sure zero new-patient calls ring out. With the 5th location opening, I'd love to show you how practices like Texas Dermatology capture 250+ new patients a month without hiring.",
+      "Hi Dana — most derm groups your size are losing the phone battle at screening season, and the ones winning aren't adding front-desk headcount, they're making sure zero new-patient calls ring out. With the 5th location opening, I'd love to show you how practices like Texas Dermatology capture 250+ new patients a month.",
     callOpenerEvidenceIds: [EV.staffing, EV.growth, EV.reviews],
     personalizationSnippet:
       "You're hiring three front-desk coordinators this week and just announced a fifth clinic — the phones are about to get louder, not quieter.",
