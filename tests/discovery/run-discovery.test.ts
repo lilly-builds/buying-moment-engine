@@ -202,6 +202,24 @@ describe("runDiscovery — end to end", () => {
     expect(feed[0].signals.map((s) => s.kind)).toEqual(["phone_complaints"]);
   });
 
+  it("refreshes a re-qualified place's freshness so it never ages off the feed (recurring source)", async () => {
+    // Run 1: qualifies at NOW -> phone_complaints signal expires NOW+90d.
+    await runDiscovery(baseDeps(t));
+    expect(await feedPractices(t.db, NOW)).toHaveLength(1);
+
+    // 91 days on, the run-1 signal has expired -> the prospect is OFF the feed...
+    const later = new Date(NOW.getTime() + 91 * 24 * 60 * 60 * 1000);
+    expect(await feedPractices(t.db, later)).toHaveLength(0);
+
+    // ...but a re-pull (cache has also expired) that STILL qualifies must REFRESH the
+    // signal's freshness, putting the prospect back on the feed — not leave it frozen.
+    const summary = await runDiscovery(baseDeps(t, { now: later }));
+    expect(summary.qualified).toBe(1);
+    const feed = await feedPractices(t.db, later);
+    expect(feed).toHaveLength(1);
+    expect(feed[0].signals.map((s) => s.kind)).toEqual(["phone_complaints"]);
+  });
+
   it("stores NO review text anywhere after a full run (R5, Google ToS)", async () => {
     await runDiscovery(baseDeps(t));
 
@@ -247,5 +265,9 @@ describe("runDiscovery — end to end", () => {
     expect(summary.qualified).toBe(0);
     // The run did not throw — it returned a summary.
     expect(summary.ran).toBe(true);
+    // The throwing Details call recorded NO cost row, so the call counter (printed
+    // next to metered USD) must not count it; the search did succeed.
+    expect(summary.calls.details).toBe(0);
+    expect(summary.calls.search).toBe(1);
   });
 });

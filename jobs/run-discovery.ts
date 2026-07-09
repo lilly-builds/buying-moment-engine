@@ -205,9 +205,9 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
       return;
     }
 
-    // 3. Place Details + reviews (the ~4¢ SKU) — metered.
+    // 3. Place Details + reviews (the ~4¢ SKU) — metered. Counter AFTER the metered
+    //    call resolves: a throw records no cost row, so it must not count either.
     summary.checked += 1;
-    summary.calls.details += 1;
     const detailsRaw = await meter(
       {
         provider: DISCOVERY_PROVIDER_GOOGLE,
@@ -224,6 +224,7 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
           geoKey: candidate.geoKey,
         }),
     );
+    summary.calls.details += 1;
 
     const parsed = googlePlaceDetailsResponseSchema.safeParse(detailsRaw);
     if (!parsed.success || parsed.data.status !== "OK" || !parsed.data.result) {
@@ -244,11 +245,13 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
     let bestConfidence = 0;
     let bestCategory = "";
     for (const review of reviews) {
-      summary.calls.classify += 1;
       const outcome = await runClassify(
         { client: deps.classifyClient, meter, practiceId: null },
         { qualificationPrompt: tenant.qualificationPrompt, reviewText: review.text },
       );
+      // Counter AFTER runClassify resolves: a billed-malformed 200 records a row and
+      // resolves (counts); only a non-2xx throws (no row) and skips this line.
+      summary.calls.classify += 1;
       if (!outcome.ok) {
         log("discovery.classify.failed", { placeId: candidate.placeId, reason: outcome.reason });
         continue;
@@ -292,6 +295,10 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
       detectedAt: now,
       expiresAt,
       signalSource: `discovery:${tenant.id}`,
+      // Recurring source: a re-pull that still qualifies must REFRESH freshness, or
+      // the prospect ages off the feed one window after first discovery and never
+      // returns despite continued confirmation.
+      refresh: true,
     });
 
     await archive(candidate, vertical, "qualified", true, tenant.signalKind);
@@ -309,7 +316,6 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
     // Enumerate this category in the metro — one metered Text Search call.
     let raw: unknown;
     try {
-      summary.calls.search += 1;
       raw = await meter(
         {
           provider: DISCOVERY_PROVIDER_GOOGLE,
@@ -321,6 +327,8 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
         },
         () => deps.searchFetcher({ category: icp.category, metro, geoKey }),
       );
+      // Counter AFTER the metered call: a throwing search records no cost row.
+      summary.calls.search += 1;
     } catch (err) {
       summary.errored += 1;
       log("discovery.search.error", {
