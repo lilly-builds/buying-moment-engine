@@ -1,9 +1,20 @@
-import { asc, eq, ne, sql } from "drizzle-orm";
+import { asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Database } from "./types";
-import { practices, signals } from "./schema";
+import {
+  briefs,
+  costEvents,
+  crmLinks,
+  evidence,
+  feedback,
+  practices,
+  roiEvents,
+  sequences,
+  signals,
+} from "./schema";
 import { isFresh } from "@/src/engine/freshness";
 import type { DetectorKind } from "@/src/ingest/validate";
 import { PACK_VERTICALS, type PackVertical } from "@/src/packs";
+import type { SignalRow } from "@/src/brief/inputs";
 
 /**
  * Derived read helpers. Signal count is DERIVED — distinct fired signal kinds,
@@ -19,6 +30,203 @@ export async function signalCount(
     .from(signals)
     .where(eq(signals.practiceId, practiceId));
   return Number(row?.n ?? 0);
+}
+
+/** postgres `numeric` comes back as a string; coerce to number, keep null. */
+function numericToNumber(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Every signal for one practice, joined to the evidence that proves it — exactly the
+ * `SignalRow[]` `renderBrief` needs to compute the live buying-moment view (U9).
+ *
+ * The signal read is the SAME join, order, and numeric coercion as
+ * `src/brief/inputs.ts#buildBriefInput`, but returns ONLY signals: the deep-brief route
+ * renders a STORED brief and needs the live signal set, not the whole generation input
+ * (facts, contact, pack) or its `unclassified-vertical` failure path. Deliberately NOT
+ * filtered by freshness — `liveSignalView` runs `freshSignals` itself, and `isBriefStale`
+ * needs the full set to notice a signal that has expired out of the window.
+ */
+export async function practiceSignalRows(
+  db: Database,
+  practiceId: string,
+): Promise<SignalRow[]> {
+  const rows = await db
+    .select({
+      kind: signals.kind,
+      signalSource: signals.signalSource,
+      detectedAt: signals.detectedAt,
+      expiresAt: signals.expiresAt,
+      signalConfidence: signals.confidence,
+      evidenceId: evidence.id,
+      sourceUrl: evidence.sourceUrl,
+      snippet: evidence.snippet,
+      evidenceDetectedAt: evidence.detectedAt,
+      evidenceConfidence: evidence.confidence,
+    })
+    .from(signals)
+    .innerJoin(evidence, eq(signals.evidenceId, evidence.id))
+    .where(eq(signals.practiceId, practiceId))
+    .orderBy(asc(signals.kind), asc(signals.detectedAt), asc(evidence.id));
+
+  return rows.map((row) => ({
+    kind: row.kind,
+    signalSource: row.signalSource,
+    detectedAt: row.detectedAt,
+    expiresAt: row.expiresAt,
+    confidence: numericToNumber(row.signalConfidence),
+    evidence: {
+      id: row.evidenceId,
+      sourceUrl: row.sourceUrl,
+      snippet: row.snippet,
+      detectedAt: row.evidenceDetectedAt,
+      confidence: numericToNumber(row.evidenceConfidence),
+    },
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROI scoreboard aggregation (U12 / D10)
+//
+// The scoreboard is COMPUTED, never stored: raw `roi_events` + `cost_events` (+ the
+// AE `feedback` and `crm_links` the tool already writes), sliced per vertical. These
+// functions return the raw rows; `app/scoreboard/data.ts#buildScoreboardData` shapes
+// them into the view's `ScoreboardData` and applies the honesty tags (D10).
+//
+// Per-vertical slicing joins `roi_events → practices.vertical` rather than reading
+// `roi_events.vertical`: the milestone writer (`src/crm/sync.ts#recordStageForPractice`)
+// leaves that column NULL on `meeting_booked` / `deal_won`, so the practice's own
+// vertical is the only reliable slice. The funnel milestones are exactly-once per
+// practice (R8/R12), so a count is "how many practices reached this step".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The tool's funnel + activity events, tagged with the practice's vertical. */
+export interface RoiEventRow {
+  practiceId: string;
+  /** `practices.vertical` — may be `unclassified`; the assembler buckets on the slug. */
+  vertical: string;
+  eventType: string;
+  payload: unknown;
+}
+
+/**
+ * Every funnel / activity event, joined to its practice's vertical. INNER join: an event
+ * with no practice (`practice_id` is nullable on `roi_events`) cannot be sliced by
+ * vertical and does not belong to the funnel, so it is dropped here.
+ */
+export async function roiEventRows(db: Database): Promise<RoiEventRow[]> {
+  return db
+    .select({
+      practiceId: practices.id,
+      vertical: practices.vertical,
+      eventType: roiEvents.eventType,
+      payload: roiEvents.payload,
+    })
+    .from(roiEvents)
+    .innerJoin(practices, eq(practices.id, roiEvents.practiceId))
+    .where(
+      inArray(roiEvents.eventType, [
+        "lead_pushed",
+        "meeting_booked",
+        "deal_won",
+        "time_saved_estimate",
+      ]),
+    );
+}
+
+/** Total metered spend (`cost_events.cost_usd`) grouped by the paying practice's vertical. */
+export interface CostByVerticalRow {
+  /** Null when the cost row has no practice (infra / unattributed) — counts only in "all". */
+  vertical: string | null;
+  costUsd: number;
+}
+
+export async function costByVertical(db: Database): Promise<CostByVerticalRow[]> {
+  const rows = await db
+    .select({
+      vertical: practices.vertical,
+      total: sql<string>`coalesce(sum(${costEvents.costUsd}), 0)`,
+    })
+    .from(costEvents)
+    .leftJoin(practices, eq(practices.id, costEvents.practiceId))
+    .groupBy(practices.vertical);
+  return rows.map((row) => ({ vertical: row.vertical, costUsd: Number(row.total) }));
+}
+
+/** One AE lead-quality verdict, tagged with the practice's vertical. */
+export interface FeedbackRow {
+  vertical: string;
+  thumb: "up" | "down";
+  reason: string | null;
+}
+
+export async function feedbackRows(db: Database): Promise<FeedbackRow[]> {
+  return db
+    .select({
+      vertical: practices.vertical,
+      thumb: feedback.thumb,
+      reason: feedback.reason,
+    })
+    .from(feedback)
+    .innerJoin(practices, eq(practices.id, feedback.practiceId));
+}
+
+/** A deal's cycle time (`crm_links.cycle_time_days`), tagged with the practice's vertical. */
+export interface CycleRow {
+  vertical: string;
+  cycleTimeDays: number | null;
+}
+
+export async function cycleRows(db: Database): Promise<CycleRow[]> {
+  const rows = await db
+    .select({
+      vertical: practices.vertical,
+      cycle: crmLinks.cycleTimeDays,
+    })
+    .from(crmLinks)
+    .innerJoin(practices, eq(practices.id, crmLinks.practiceId));
+  return rows.map((row) => ({
+    vertical: row.vertical,
+    cycleTimeDays: numericToNumber(row.cycle),
+  }));
+}
+
+/** Which signal KINDS a practice carried — the attribution for "which signals convert". */
+export interface PracticeKindRow {
+  practiceId: string;
+  kind: DetectorKind;
+}
+
+export async function practiceSignalKinds(db: Database): Promise<PracticeKindRow[]> {
+  return db.select({ practiceId: signals.practiceId, kind: signals.kind }).from(signals);
+}
+
+/** Touch count per stored sequence (one brief's outreach), tagged with the vertical. */
+export interface SequenceTouchRow {
+  vertical: string;
+  briefId: string;
+  touches: number;
+}
+
+export async function sequenceTouchRows(db: Database): Promise<SequenceTouchRow[]> {
+  const rows = await db
+    .select({
+      vertical: practices.vertical,
+      briefId: sequences.briefId,
+      touches: sql<number>`count(*)::int`,
+    })
+    .from(sequences)
+    .innerJoin(briefs, eq(briefs.id, sequences.briefId))
+    .innerJoin(practices, eq(practices.id, briefs.practiceId))
+    .groupBy(practices.vertical, sequences.briefId);
+  return rows.map((row) => ({
+    vertical: row.vertical,
+    briefId: row.briefId,
+    touches: Number(row.touches),
+  }));
 }
 
 /** One fired signal, as the feed row needs it: which kind, how old, when it dies. */
