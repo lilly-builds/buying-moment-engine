@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
+  Button,
   ButtonLink,
   Card,
   FreshnessClock,
+  Input,
   SectionHeader,
   SegmentedControl,
   SignalPill,
@@ -56,9 +58,15 @@ export interface FeedProps {
  * tag (the name says it, the filter acts on it), no location line (that is a
  * call-prep decision, so it lives in the brief). See design/rules.ts.
  */
-function FeedCard({ item }: { item: FeedItem }) {
+function FeedCard({ item, first = false }: { item: FeedItem; first?: boolean }) {
   const pills = toSignalKinds(item.signalKinds);
   const windowDays = windowDaysFor(item.freshestKind);
+
+  const viewBrief = (
+    <ButtonLink variant="primary" size="sm" href={`/practice/${item.id}`}>
+      View brief
+    </ButtonLink>
+  );
 
   return (
     <Card variant="flat" padding="md">
@@ -82,9 +90,9 @@ function FeedCard({ item }: { item: FeedItem }) {
             staleAfterDays={windowDays}
             stale={!item.freshestIsFresh}
           />
-          <ButtonLink variant="primary" size="sm" href={`/practice/${item.id}`}>
-            View brief
-          </ButtonLink>
+          {/* The tour spotlights the first row's action for step 2 ("Tap one to
+              open it") — wrapped so the coach-through has a stable target. */}
+          {first ? <span data-tour="open-brief">{viewBrief}</span> : viewBrief}
         </div>
       </div>
     </Card>
@@ -93,11 +101,20 @@ function FeedCard({ item }: { item: FeedItem }) {
 
 export function Feed({ items }: FeedProps) {
   const [vertical, setVertical] = useState<FeedFilterValue>("all");
+  const [query, setQuery] = useState("");
 
-  const rows =
+  const byVertical =
     vertical === "all"
       ? items
       : items.filter((item) => item.vertical === vertical);
+
+  const trimmed = query.trim().toLowerCase();
+  const rows = useMemo(
+    () => (trimmed ? byVertical.filter((item) => item.name.toLowerCase().includes(trimmed)) : byVertical),
+    [byVertical, trimmed],
+  );
+
+  const noMatch = trimmed.length > 0 && rows.length === 0;
 
   return (
     // Transparent: the health-blue hero is now the page surface (see app/page.tsx),
@@ -120,9 +137,41 @@ export function Feed({ items }: FeedProps) {
         }
       />
 
+      {/* Search the feed by name — an obvious control, so the tour doesn't explain it. */}
+      <div className="flex flex-col gap-2">
+        <form
+          onSubmit={(e) => e.preventDefault()}
+          className="flex flex-wrap items-center gap-3 rounded-card bg-white/10 p-2 backdrop-blur-sm"
+        >
+          <Input
+            aria-label="Search your feed by name"
+            placeholder="Search your feed by name…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="min-w-0 flex-1"
+          />
+          <Button type="submit" variant="primary" size="sm">
+            Search
+          </Button>
+        </form>
+        {noMatch ? (
+          <p className="font-sans text-sm text-white/80">No leads in your feed match that name.</p>
+        ) : null}
+      </div>
+
       <div className="flex flex-col gap-4">
         {rows.length > 0 ? (
-          rows.map((item) => <FeedCard key={item.id} item={item} />)
+          rows.map((item, i) =>
+            i === 0 ? (
+              // The tour spotlights the top of the list for step 1 ("Your hottest
+              // leads are up top"). `first` also exposes the row's open-brief hook.
+              <div key={item.id} data-tour="feed-top">
+                <FeedCard item={item} first />
+              </div>
+            ) : (
+              <FeedCard key={item.id} item={item} />
+            ),
+          )
         ) : (
           <Card variant="flat" padding="lg">
             <div className="flex flex-col items-center gap-2 py-8 text-center">

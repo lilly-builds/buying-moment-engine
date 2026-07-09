@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Badge,
   ButtonLink,
@@ -12,6 +12,8 @@ import {
   SourceLink,
   TopNav,
 } from "@/design/components";
+import { LeadFeedback } from "@/design/components/brief/lead-feedback";
+import { SendGate } from "@/design/components/brief/send-gate";
 import { gradients } from "@/design/tokens";
 import type { RenderedBrief, FiredSignal } from "@/src/brief/render";
 import { windowDaysFor } from "@/src/brief/render";
@@ -93,17 +95,36 @@ function ClaimRow({
 }
 
 /** One editable touch in the 3-touch sequence. Genuinely editable — uncontrolled fields. */
-function TouchEditor({ touch }: { touch: RenderedBrief["voice"]["sequence"]["touches"][number] }) {
+function TouchEditor({
+  touch,
+  spotlight = false,
+  sendTourTarget = false,
+}: {
+  touch: RenderedBrief["voice"]["sequence"]["touches"][number];
+  spotlight?: boolean;
+  sendTourTarget?: boolean;
+}) {
   const rows = Math.max(4, touch.body.split("\n").length + 3);
+  const isEmail = touch.channel !== "call";
   return (
-    <div className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4">
-      <div className="flex items-center gap-2">
-        <Badge tone="neutral" size="sm">
-          Touch {touch.touchNumber}
-        </Badge>
-        <Badge tone="neutral" size="sm">
-          {CHANNEL_LABEL[touch.channel] ?? touch.channel}
-        </Badge>
+    <div
+      data-tour={spotlight ? "edit-email" : undefined}
+      className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Badge tone="neutral" size="sm">
+            Touch {touch.touchNumber}
+          </Badge>
+          <Badge tone="neutral" size="sm">
+            {CHANNEL_LABEL[touch.channel] ?? touch.channel}
+          </Badge>
+        </div>
+        {/* The email's own Send button (wired to the handoff gate; live send is a
+            follow-up thread). Right-aligned, in line with the Touch/channel badges. */}
+        {isEmail ? (
+          <SendGate ctaLabel="Send" tourId={sendTourTarget ? "send-lead" : undefined} />
+        ) : null}
       </div>
       {touch.channel === "call" ? (
         <textarea
@@ -136,7 +157,15 @@ function TouchEditor({ touch }: { touch: RenderedBrief["voice"]["sequence"]["tou
  * "View evidence" leads (a chip beside the pill) because clicking it is what PROVES the
  * confidence; the confidence score trails on the right as quiet text (Lilly, 2026-07-08).
  */
-function SignalDetail({ signal, nowMs }: { signal: FiredSignal; nowMs: number }) {
+function SignalDetail({
+  signal,
+  nowMs,
+  spotlight = false,
+}: {
+  signal: FiredSignal;
+  nowMs: number;
+  spotlight?: boolean;
+}) {
   const pillKind = toSignalKind(signal.kind);
   const windowDays = windowDaysFor(signal.kind);
   return (
@@ -145,8 +174,10 @@ function SignalDetail({ signal, nowMs }: { signal: FiredSignal; nowMs: number })
         <div className="flex flex-wrap items-center gap-2">
           {pillKind ? <SignalPill kind={pillKind} size="md" /> : null}
           {/* A compact outlined chip — deliberately a step smaller than the pill, so
-              the signal reads as the subject and "view evidence" as its affordance. */}
+              the signal reads as the subject and "view evidence" as its affordance.
+              The first one is the tour's "See the proof" target. */}
           <a
+            data-tour={spotlight ? "see-proof" : undefined}
             href={signal.href}
             target="_blank"
             rel="noreferrer"
@@ -173,7 +204,10 @@ function SignalDetail({ signal, nowMs }: { signal: FiredSignal; nowMs: number })
 function OutreachMode({ brief }: { brief: RenderedBrief }) {
   const { factual, voice } = brief;
   const contact = factual.contact;
+  // The first email touch carries the tour's "hit send" target.
+  const firstEmailIdx = voice.sequence.touches.findIndex((t) => t.channel !== "call");
   return (
+    <div className="flex flex-col gap-6">
     <div className="grid gap-6 lg:grid-cols-5">
       {/* Who to contact */}
       <Card variant="elevated" padding="lg" className="lg:col-span-2">
@@ -247,13 +281,9 @@ function OutreachMode({ brief }: { brief: RenderedBrief }) {
         <div className="flex flex-col gap-5">
           <SectionHeader
             title="Recommended action"
+            description={`Ends with your call to action: ${voice.sequence.namedCta}`}
             size="h3"
             as="h2"
-            action={
-              <ButtonLink variant="primary" size="sm" href="#send">
-                {voice.sequence.namedCta}
-              </ButtonLink>
-            }
           />
 
           <div className="flex flex-col gap-2">
@@ -270,13 +300,22 @@ function OutreachMode({ brief }: { brief: RenderedBrief }) {
               3-touch sequence · editable
             </span>
             <div className="flex flex-col gap-3">
-              {voice.sequence.touches.map((touch) => (
-                <TouchEditor key={touch.touchNumber} touch={touch} />
+              {voice.sequence.touches.map((touch, i) => (
+                <TouchEditor
+                  key={touch.touchNumber}
+                  touch={touch}
+                  spotlight={i === 0}
+                  sendTourTarget={i === firstEmailIdx}
+                />
               ))}
             </div>
           </div>
         </div>
       </Card>
+    </div>
+
+      {/* One-tap lead-quality vote — teaches the tool (tour step 6). */}
+      <LeadFeedback />
     </div>
   );
 }
@@ -291,8 +330,13 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
         <div className="flex flex-col gap-5">
           <SectionHeader title="The buying moment" size="h3" as="h3" />
           <div className="flex flex-col gap-4">
-            {live.firedSignals.map((signal) => (
-              <SignalDetail key={signal.evidenceId} signal={signal} nowMs={nowMs} />
+            {live.firedSignals.map((signal, i) => (
+              <SignalDetail
+                key={signal.evidenceId}
+                signal={signal}
+                nowMs={nowMs}
+                spotlight={i === 0}
+              />
             ))}
           </div>
         </div>
@@ -312,7 +356,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
 
       {/* Incumbent tooling */}
       <Card variant="elevated" padding="lg">
-        <div className="flex flex-col gap-5">
+        <div data-tour="incumbent-tooling" className="flex flex-col gap-5">
           <SectionHeader title="Incumbent tooling" size="h3" as="h3" />
           <div className="flex flex-col gap-4">
             {factual.incumbentTooling.map((c) => (
@@ -322,11 +366,13 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
         </div>
       </Card>
 
-      {/* EliseAI fit + proof + ROI */}
+      {/* EliseAI fit + proof + ROI — the tour's call-prep finale spotlights the header. */}
       <Card variant="elevated" padding="lg" className="lg:col-span-2">
         <div className="flex flex-col gap-6">
-          <SectionHeader title="Why EliseAI fits" size="h3" as="h3" />
-          <p className="max-w-3xl font-sans text-base text-ink-body">{factual.painFit}</p>
+          <div data-tour="why-fits" className="flex flex-col gap-6">
+            <SectionHeader title="Why EliseAI fits" size="h3" as="h3" />
+            <p className="max-w-3xl font-sans text-base text-ink-body">{factual.painFit}</p>
+          </div>
 
           <div className="grid gap-6 md:grid-cols-2">
             {/* Proof point */}
@@ -389,7 +435,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
 
       {/* Discovery questions */}
       <Card variant="elevated" padding="lg">
-        <div className="flex flex-col gap-5">
+        <div data-tour="discovery" className="flex flex-col gap-5">
           <SectionHeader title="Discovery questions" size="h3" as="h3" />
           <ol className="flex flex-col gap-4">
             {voice.discoveryQuestions.map((q, i) => (
@@ -429,6 +475,18 @@ export function BriefView({ brief, nowMs }: { brief: RenderedBrief; nowMs: numbe
   const { factual } = brief;
   const location = [factual.city, factual.state].filter(Boolean).join(", ");
 
+  // The guided tour flips the brief to the tier that holds the step it's coaching
+  // (proof underlines live in call-prep; the editable email lives in outreach).
+  // A one-way event keeps the tour decoupled from this component's internals.
+  useEffect(() => {
+    function onMode(e: Event) {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail === "outreach" || detail === "prep") setMode(detail);
+    }
+    window.addEventListener("bme:brief-mode", onMode);
+    return () => window.removeEventListener("bme:brief-mode", onMode);
+  }, []);
+
   return (
     // The health-blue hero paints the whole page — same surface as the feed.
     <div
@@ -442,7 +500,7 @@ export function BriefView({ brief, nowMs }: { brief: RenderedBrief; nowMs: numbe
           blue rather than raw text floating on it (Lilly, 2026-07-08). */}
       <PageContainer className="pb-2 pt-10">
         <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
-          <div className="flex flex-col gap-3">
+          <div data-tour="why-now" className="flex flex-col gap-3">
             <span className="font-sans text-base font-medium uppercase tracking-eyebrow text-white">
               {factual.practiceName}
               {location ? ` · ${location}` : ""}
@@ -452,13 +510,15 @@ export function BriefView({ brief, nowMs }: { brief: RenderedBrief; nowMs: numbe
             </h1>
           </div>
 
-          <SegmentedControl<BriefMode>
-            label="Choose what to work on this brief"
-            options={MODE_OPTIONS}
-            value={mode}
-            onValueChange={setMode}
-            accent="brand"
-          />
+          <div data-tour="prep-toggle" className="w-fit">
+            <SegmentedControl<BriefMode>
+              label="Choose what to work on this brief"
+              options={MODE_OPTIONS}
+              value={mode}
+              onValueChange={setMode}
+              accent="brand"
+            />
+          </div>
         </div>
       </PageContainer>
 

@@ -198,6 +198,14 @@ export const gradients = {
   brandSoft: "linear-gradient(75deg, #c1b8ff 30%, #649dfb 73%)", // VERIFIED-CSS
   wash: "linear-gradient(146deg, #f2f1ff99, #e8f2ff99)", // VERIFIED-CSS (hero wash)
   healthHero: "linear-gradient(180deg, #4a86e8 0%, #6f9fee 55%, #c9d8f5 100%)", // INFERRED
+  // The onboarding step-card orb (U17). DERIVED — the reference card
+  // (`onboarding-flow-steps-ui-design.png`) shows a soft purple→blue sphere lit
+  // from the top-left. Built ONLY from verified brand tokens: a lavender highlight
+  // (brand-400 #ad88fc) melts through brand-purple (#7638fa, the action colour)
+  // into health-blue (#146ef4, the healthcare surface) — the exact purple→blue
+  // travel the design direction calls for, with real lightness change so it reads
+  // as a lit orb rather than a flat disc.
+  orb: "radial-gradient(circle at 32% 28%, #ad88fc, #7638fa 46%, #146ef4 100%)",
 } as const;
 
 /**

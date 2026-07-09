@@ -64,5 +64,13 @@ export default async function IntegrationsPage({
 
   const hubspot = await loadHubSpotStatus();
 
-  return <IntegrationsView hubspot={hubspot} banner={banner} />;
+  // The two BYOK engine keys (spec § Stack). In the demo these run on Lilly's own
+  // keys ("full value before a single key"), so they read Connected while HubSpot
+  // — which needs EliseAI's own OAuth — stays the one gate left to turn on.
+  const engineKeys = {
+    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+    pdl: Boolean(process.env.PDL_API_KEY),
+  };
+
+  return <IntegrationsView hubspot={hubspot} engineKeys={engineKeys} banner={banner} />;
 }
