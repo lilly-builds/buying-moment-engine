@@ -1,5 +1,3 @@
-import { inngest } from "./inngest";
-import { getDb } from "@/db/client";
 import { ingestRawSignal, type IngestResult } from "@/db/ingest";
 import {
   candidateToRawSignals,
@@ -147,8 +145,9 @@ export async function runDetectors(
 }
 
 /**
- * Detector registry — the three built signals (U4). The scheduled cron runs each
- * one, error-isolated. Live per-metro source config (Adzuna keys + queries,
+ * Detector registry — the three built signals (U4). The scheduled engine run
+ * (`jobs/run-engine.ts`) fires each one, error-isolated, with the shared cost
+ * meter threaded in (R19). Live per-metro source config (Adzuna keys + queries,
  * Google Places place_ids, GDELT queries) is wired in U15's seeding run; until
  * then a detector with no live config simply emits nothing (honest — the run
  * summary reports "nothing found", never a crash or invented signal).
@@ -158,14 +157,3 @@ export const detectorRegistry: Detector[] = [
   phoneComplaintsDetector,
   growthEventsDetector,
 ];
-
-/**
- * Scheduled run (Inngest cron). Builds production deps lazily inside the handler
- * so import + `next build` stay keyless; only a live cron reads DATABASE_URL.
- */
-export const runDetectorsJob = inngest.createFunction(
-  { id: "run-detectors", triggers: [{ cron: "0 */6 * * *" }] },
-  async () => {
-    return runDetectors({ db: getDb(), detectors: detectorRegistry });
-  },
-);
