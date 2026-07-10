@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Badge,
@@ -42,6 +43,22 @@ function HubSpotMark({ className }: { className?: string }) {
     >
       <path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z" />
     </svg>
+  );
+}
+
+/** The engine-key logo tile — the provider's real logo, sized + rounded like the
+ *  HubSpot mark so all three integration tiles read as one system. Each logo is a
+ *  colored app-icon (coral for Claude, purple for PDL), so it IS the tile; the
+ *  shared `rounded-2xl` clips both to the same corner, so PDL matches Claude. */
+function ProviderLogo({ src, name }: { src: string; name: string }) {
+  return (
+    <Image
+      src={src}
+      alt={`${name} logo`}
+      width={80}
+      height={80}
+      className="size-20 shrink-0 rounded-2xl object-cover"
+    />
   );
 }
 
@@ -308,10 +325,12 @@ interface EngineKeyMeta {
   name: string;
   /** What this key powers, in one plain line. */
   blurb: string;
-  /** Where to get the key — the inline RevOps step (matches the setup guide). */
-  where: string;
-  /** A real, clickable link to the provider's key page. */
+  /** The provider's real logo (in /public/logos). */
+  logoSrc: string;
+  /** The verified, direct page where the key lives. */
   href: string;
+  /** Short label for that link. */
+  linkLabel: string;
   /** Placeholder that hints the real key shape without leaking one. */
   placeholder: string;
 }
@@ -321,16 +340,18 @@ const ENGINE_KEYS: EngineKeyMeta[] = [
     id: "anthropic",
     name: "Anthropic (Claude)",
     blurb: "Researches each practice and writes the brief.",
-    where: "Anthropic Console → API keys → Create key.",
-    href: "https://console.anthropic.com/settings/keys",
+    logoSrc: "/logos/claude.png",
+    href: "https://platform.claude.com/settings/keys",
+    linkLabel: "Claude Console",
     placeholder: "sk-ant-…",
   },
   {
     id: "pdl",
     name: "People Data Labs",
     blurb: "Finds the decision-maker's verified email + LinkedIn.",
-    where: "People Data Labs dashboard → API Keys.",
-    href: "https://dashboard.peopledatalabs.com/api-keys",
+    logoSrc: "/logos/peopledatalabs.jpg",
+    href: "https://dashboard.peopledatalabs.com",
+    linkLabel: "PDL dashboard",
     placeholder: "Paste your PDL key",
   },
 ];
@@ -416,31 +437,46 @@ function EngineKeyCard({
   return (
     <Card variant="outlined" padding="lg">
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-3">
-            <h3 className="font-display text-h5 font-book text-ink">{meta.name}</h3>
-            <Badge tone={set ? "success" : "neutral"} size="sm">
-              {set ? "Set" : "Not yet"}
-            </Badge>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <ProviderLogo src={meta.logoSrc} name={meta.name} />
+            <div className="flex flex-col gap-1.5">
+              <h3 className="font-display text-h5 font-book text-ink">{meta.name}</h3>
+              <p className="max-w-md font-sans text-base text-ink-body">{meta.blurb}</p>
+            </div>
           </div>
-          <p className="max-w-md font-sans text-base text-ink-body">{meta.blurb}</p>
+          {/* Status pill (top-right, over Save key) — same shape/brand font as the
+              "find your key" pill: brand color, not gray, matched padding. */}
+          <span
+            className={`inline-flex items-center rounded-pill px-4 py-1.5 font-sans text-xs font-semibold uppercase tracking-eyebrow ${
+              set ? "bg-success text-success-ink" : "bg-brand-50 text-brand"
+            }`}
+          >
+            {set ? "Set" : "Add key"}
+          </span>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor={inputId} className="font-sans text-sm font-medium text-ink-strong">
-            {set ? "Replace key" : "Paste key"}{" "}
-            <span className="font-normal text-ink-faint">
-              ·{" "}
-              <a
-                href={meta.href}
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-ink-muted"
-              >
-                {meta.where}
-              </a>
-            </span>
-          </label>
+        <div className="flex flex-col gap-3">
+          {/* The paste label + the "find your key" pill sit together on one row. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <label
+              htmlFor={inputId}
+              className="font-sans text-lg font-semibold uppercase tracking-eyebrow text-ink-strong"
+            >
+              {set ? "Replace key" : "Paste key here"}
+            </label>
+            <a
+              href={meta.href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-pill bg-brand-50 px-4 py-1.5 text-brand transition-colors hover:bg-brand-100"
+            >
+              <span className="font-sans text-xs font-semibold uppercase tracking-eyebrow">
+                Find your key:
+              </span>
+              <span className="font-sans text-sm font-medium">{meta.linkLabel} ↗</span>
+            </a>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <Input
               id={inputId}
@@ -653,8 +689,7 @@ export function IntegrationsView({
               Engine keys
             </h2>
             <p className="max-w-2xl font-sans text-base text-white/80">
-              These run the tool on your own account. Paste each one once. HubSpot above is the
-              only OAuth connect. Keys are encrypted and never shown again.
+              These run the tool on your own account. Keys are encrypted and never shown again.
             </p>
             {ENGINE_KEYS.map((k) => (
               <EngineKeyCard key={k.id} meta={k} initiallySet={engineKeys[k.id]} />
