@@ -6,7 +6,7 @@ import {
   deriveGoLive,
   firstBriefHref,
 } from "@/src/connect/connections";
-import { SEQUENCE_SETUP } from "@/src/connect/setup-prompts";
+import { KEY_SETUPS, SEQUENCE_SETUP } from "@/src/connect/setup-prompts";
 import { HUBSPOT_SEQUENCE_PROMPT } from "@/src/connect/sequence-setup-prompt";
 
 /** Every icon the checklist uses must be a real StepIcon glyph (guards typos). */
@@ -167,5 +167,19 @@ describe("SEQUENCE_SETUP prompt (U5)", () => {
     expect(p).toContain('the badge flips to "Set"');
     // D9: the agent must stop before any send.
     expect(p).toContain("STOP before anything that would send");
+  });
+});
+
+describe("KEY_SETUPS verified key URLs (U4)", () => {
+  // The engine-key field links (ENGINE_KEYS.href) are sourced from these, so a
+  // stale URL here is the drift the field fix was about. Verified 2026-07-10.
+  it("anthropic points at the current console keys page (not the redirect)", () => {
+    expect(KEY_SETUPS.anthropic.keyUrl).toBe(
+      "https://platform.claude.com/settings/keys",
+    );
+  });
+
+  it("pdl points at the dashboard home (not the 401 api-keys endpoint)", () => {
+    expect(KEY_SETUPS.pdl.keyUrl).toBe("https://dashboard.peopledatalabs.com");
   });
 });
