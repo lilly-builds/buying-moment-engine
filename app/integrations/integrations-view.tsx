@@ -124,57 +124,32 @@ function ConnectResultBanner({ banner }: { banner: ConnectBanner }) {
   );
 }
 
-// ── The HubSpot connect card ───────────────────────────────────────────────────
+// ── The HubSpot connect action (step 1 inside the HubSpot ConnectionRow) ──────
 
-function HubSpotCard({ status }: { status: HubSpotStatus }) {
+/** Flat connect content — no Card of its own, since the ConnectionRow is the card. */
+function HubSpotConnectAction({ status }: { status: HubSpotStatus }) {
   const connected = status.state === "connected";
   return (
-    <Card variant="elevated" padding="lg">
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <span className="flex size-20 shrink-0 items-center justify-center rounded-panel bg-surface-subtle">
-            <HubSpotMark className="size-12" />
-          </span>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-3">
-              <h3 className="font-display text-h5 font-book text-ink">HubSpot</h3>
-              {connected ? (
-                <Badge tone="success" size="sm">
-                  Connected
-                </Badge>
-              ) : null}
-            </div>
-
-            <p className="max-w-md font-sans text-base text-ink-body">
-              Track prospects that GTM Maestro finds in your HubSpot. Send
-              AI-customized outreach emails.
-            </p>
-          </div>
-        </div>
-
-        <div className="shrink-0 sm:pl-4">
-          {connected ? (
-            <ButtonLink
-              href="/api/hubspot/oauth/start"
-              variant="secondary"
-              className="w-full sm:w-auto"
-            >
-              Reconnect
-            </ButtonLink>
-          ) : (
-            // A real top-level navigation (not fetch) — OAuth must leave the app.
-            <ButtonLink
-              href="/api/hubspot/oauth/start"
-              variant="primary"
-              className="w-full sm:w-auto"
-            >
-              Connect HubSpot
-            </ButtonLink>
-          )}
-        </div>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <span className="font-sans text-sm font-medium uppercase tracking-eyebrow text-ink-faint">
+          Step 1
+        </span>
+        <h4 className="font-display text-lg font-book text-ink">Connect your HubSpot</h4>
       </div>
-    </Card>
+      <div className="flex flex-wrap items-center gap-4">
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-panel bg-surface-subtle">
+          <HubSpotMark className="size-7" />
+        </span>
+        {/* A real top-level navigation (not fetch) — OAuth must leave the app. */}
+        <ButtonLink
+          href="/api/hubspot/oauth/start"
+          variant={connected ? "secondary" : "primary"}
+        >
+          {connected ? "Reconnect" : "Connect HubSpot"}
+        </ButtonLink>
+      </div>
+    </div>
   );
 }
 
@@ -527,15 +502,26 @@ function ConnectionsChecklist({
       <ConnectionRow
         icon={hub.icon}
         line={hub.line}
+        detail={hub.detail}
         chip={hub.chip}
         status={deriveConnectionStatus("hubspot", ctx)}
         required={hub.required}
       >
-        <HubSpotCard status={hubspot} />
+        <HubSpotConnectAction status={hubspot} />
         {hubspot.state === "connected" ? (
           <>
             <SequenceSetupHelp />
-            <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <span className="font-sans text-sm font-medium uppercase tracking-eyebrow text-ink-faint">
+                  Step 3
+                </span>
+                <h4 className="font-display text-lg font-book text-ink">
+                  Add your sequence ID
+                </h4>
+              </div>
+              <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
+            </div>
           </>
         ) : null}
       </ConnectionRow>
@@ -550,6 +536,7 @@ function ConnectionsChecklist({
             key={id}
             icon={meta.icon}
             line={meta.line}
+            detail={meta.detail}
             chip={meta.chip}
             status={deriveConnectionStatus(id, ctx)}
           >

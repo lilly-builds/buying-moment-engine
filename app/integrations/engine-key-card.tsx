@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Button, Card, Input } from "@/design/components";
+import { Button, Input } from "@/design/components";
 import { KEY_SETUPS } from "@/src/connect/setup-prompts";
 import { KeySetupHelp } from "./key-setup-help";
 
@@ -128,69 +128,60 @@ export function EngineKeyCard({
   }
 
   const inputId = `key-${meta.id}`;
+  // No Card wrapper or heading here — the ConnectionRow that hosts this IS the
+  // card and carries the name (its bold line), the blurb (its detail), and the
+  // Set/Not-yet pill. This renders only the action: the masked field + help.
   return (
-    <Card variant="outlined" padding="lg">
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-3">
-            <h3 className="font-display text-h5 font-book text-ink">{meta.name}</h3>
-            <Badge tone={set ? "success" : "neutral"} size="sm">
-              {set ? "Set" : "Not yet"}
-            </Badge>
-          </div>
-          <p className="max-w-md font-sans text-base text-ink-body">{meta.blurb}</p>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <label htmlFor={inputId} className="font-sans text-sm font-medium text-ink-strong">
-            {set ? "Replace key" : "Paste key"}{" "}
-            <span className="font-normal text-ink-faint">
-              ·{" "}
-              <a
-                href={meta.href}
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-ink-muted"
-              >
-                {meta.where}
-              </a>
-            </span>
-          </label>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Input
-              id={inputId}
-              name={inputId}
-              type="password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder={meta.placeholder}
-              autoComplete="off"
-              spellCheck={false}
-              maxLength={512}
-            />
-            <Button
-              type="submit"
-              variant={set ? "secondary" : "primary"}
-              disabled={status.kind === "saving"}
-              className="shrink-0"
+    <div className="flex flex-col gap-4">
+      <form onSubmit={onSubmit} className="flex flex-col gap-2">
+        <label htmlFor={inputId} className="font-sans text-sm font-medium text-ink-strong">
+          {set ? "Replace key" : "Paste key"}{" "}
+          <span className="font-normal text-ink-faint">
+            ·{" "}
+            <a
+              href={meta.href}
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-ink-muted"
             >
-              {status.kind === "saving" ? "Saving…" : set ? "Replace" : "Save key"}
-            </Button>
-          </div>
-          {status.kind === "saved" ? (
-            <p role="status" className="font-sans text-sm text-success-ink">
-              Saved. {meta.name} is set.
-            </p>
-          ) : null}
-          {status.kind === "error" ? (
-            <p role="alert" className="font-sans text-sm text-danger">
-              {status.message}
-            </p>
-          ) : null}
+              {meta.where}
+            </a>
+          </span>
+        </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Input
+            id={inputId}
+            name={inputId}
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={meta.placeholder}
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={512}
+          />
+          <Button
+            type="submit"
+            variant={set ? "secondary" : "primary"}
+            disabled={status.kind === "saving"}
+            className="shrink-0"
+          >
+            {status.kind === "saving" ? "Saving…" : set ? "Replace" : "Save key"}
+          </Button>
         </div>
-
-        <KeySetupHelp provider={meta.id} />
+        {status.kind === "saved" ? (
+          <p role="status" className="font-sans text-sm text-success-ink">
+            Saved. {meta.name} is set.
+          </p>
+        ) : null}
+        {status.kind === "error" ? (
+          <p role="alert" className="font-sans text-sm text-danger">
+            {status.message}
+          </p>
+        ) : null}
       </form>
-    </Card>
+
+      <KeySetupHelp provider={meta.id} />
+    </div>
   );
 }

@@ -76,6 +76,8 @@ export interface ConnectionMeta {
   icon: StepIconKey;
   /** The one-instruction line, two weights — the bold segment is the key word. */
   line: { text: string; bold?: boolean }[];
+  /** The supporting sentence under the instruction (like StepCard's detail). */
+  detail: string;
   /** The ✦ context chip. */
   chip: string;
   /** Required green for a first go-live. Only HubSpot flips the Send gate live. */
@@ -94,8 +96,10 @@ export const CONNECTIONS: ConnectionMeta[] = [
     line: [
       { text: "Connect " },
       { text: "HubSpot", bold: true },
-      { text: " to turn on send + CRM tracking." },
+      { text: " to go live." },
     ],
+    detail:
+      "One connection turns on sending — through your team's own inbox — and tracks every lead in your CRM.",
     chip: "Go live",
     required: true,
   },
@@ -107,6 +111,7 @@ export const CONNECTIONS: ConnectionMeta[] = [
       { text: "Anthropic", bold: true },
       { text: " key." },
     ],
+    detail: "Researches each practice and writes the brief.",
     chip: "Research + writing",
     required: false,
   },
@@ -118,6 +123,7 @@ export const CONNECTIONS: ConnectionMeta[] = [
       { text: "People Data Labs", bold: true },
       { text: " key." },
     ],
+    detail: "Finds the decision-maker's verified email + LinkedIn.",
     chip: "Contact details",
     required: false,
   },
