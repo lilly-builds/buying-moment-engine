@@ -6,7 +6,7 @@ selling. They do not start researching.
 
 **Live demo:** LIVE DEMO URL: `<pending - confirm deploy>`
 
-<!-- TODO: Lilly drops this shot - hero-tour.gif (the guided tour playing, or a citation clicked open). A short animated GIF here beats any static image. See docs/screenshots/SHOT-LIST.md. -->
+![GTM Maestro: the guided tour playing over the live feed](docs/screenshots/onboarding-tour.gif)
 
 ---
 
@@ -112,9 +112,8 @@ benchmarks, sharpened into measured as real volume grows). We never dress a proj
 measurement. When there is no data yet, a metric shows a dash, never a fabricated figure. The full
 calculation for every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md).
 
-![The ROI scoreboard with measured and modeled tags](docs/screenshots/scoreboard.png)
+![The ROI scoreboard, scrolling from the headline numbers through per-signal, per-specialty, feedback, and the big test](docs/screenshots/scoreboard.gif)
 *The scoreboard. Every number carries a measured or modeled tag; empty metrics degrade to a dash, never a fake.*
-<!-- TODO: Lilly drops this shot - docs/screenshots/scoreboard.png (see SHOT-LIST.md) -->
 
 ---
 
@@ -128,9 +127,8 @@ A first-time AE gets a guided **"work your first lead"** tour, rendered as brand
 gradient orb with the step icon, a one-bold-word instruction, and a context chip). It coaches them
 over the real feed and a real brief, and it is fully skippable.
 
-![The guided onboarding tour step card](docs/screenshots/onboarding-tour.png)
+![The guided onboarding tour step card](docs/screenshots/onboarding-tour.gif)
 *The guided tour: a brand step card (gradient orb, one-bold-word instruction, context chip) over the real feed.*
-<!-- TODO: Lilly drops this shot - docs/screenshots/onboarding-tour.png (see SHOT-LIST.md) -->
 
 ### Connecting the stack
 
