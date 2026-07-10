@@ -1,5 +1,5 @@
-import { pgTable, text, uuid } from "drizzle-orm/pg-core";
-import { createdAt } from "./columns";
+import { pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { createdAt, updatedAt } from "./columns";
 
 /**
  * integration_requests (U17) — the "request an integration" capture on the
@@ -25,3 +25,36 @@ export const integrationRequests = pgTable("integration_requests", {
   requestedBy: text("requested_by"),
   createdAt: createdAt(),
 }).enableRLS();
+
+/**
+ * provider_credentials (U17 · spec § Stack) — the two BYOK engine keys the tool
+ * runs on: Anthropic (research + brief voice) and PDL (contact enrichment). The
+ * Admin/RevOps archetype pastes each key ONCE on the Connections surface; it is
+ * encrypted at rest here and read back only server-side to make the paid calls.
+ *
+ * Encryption is the SAME pattern as `crm_connections` (AES-256-GCM via
+ * `src/crm/token-crypto.ts`, keyed by `TOKEN_ENCRYPTION_KEY`): only the
+ * ciphertext (`secret_enc`) ever touches a column — the plaintext key is never
+ * stored, never logged, and never returned to the client (D9). The table is
+ * RLS-locked with no public policy, so the key is reachable only through the
+ * server's owner connection, never the browser/anon client.
+ *
+ * Single row per `provider` — re-pasting a key UPDATES in place (idempotent),
+ * never duplicates. No tenant column: this is EliseAI's own single-instance
+ * internal tool, and RLS (not a tenant id) is the isolation boundary.
+ */
+export const providerCredentials = pgTable(
+  "provider_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Which engine credential: "anthropic" | "pdl". The route validates the value
+    // against the known set before a row is ever written.
+    provider: text("provider").notNull(),
+    // AES-256-GCM ciphertext of the BYOK API key — NEVER plaintext, NEVER logged (D9).
+    secretEnc: text("secret_enc").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // One connection per provider — re-pasting UPDATES, never dupes.
+  (t) => [unique("provider_credentials_provider_uq").on(t.provider)],
+).enableRLS();

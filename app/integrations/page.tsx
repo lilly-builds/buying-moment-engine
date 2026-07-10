@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { getActiveConnection } from "@/db/crm";
+import { hasProviderCredential } from "@/db/integrations";
 import {
   IntegrationsView,
   type ConnectBanner,
+  type EngineKeyStatus,
   type HubSpotStatus,
 } from "./integrations-view";
 
@@ -29,6 +31,28 @@ async function loadHubSpotStatus(): Promise<HubSpotStatus> {
     // No DATABASE_URL / DB unreachable -> the designed disconnected state.
     return { state: "disconnected" };
   }
+}
+
+/**
+ * A key reads "present" when EITHER a real key is stored (pasted by RevOps) OR the
+ * env fallback is set (the keyless demo runs on Lilly's env keys — "full value
+ * before a single key," D14). The stored check degrades to false on any DB failure
+ * so the page always renders; the env fallback is unaffected.
+ */
+async function loadEngineKeys(): Promise<EngineKeyStatus> {
+  async function present(provider: "anthropic" | "pdl", envVar: string): Promise<boolean> {
+    if (process.env[envVar]) return true;
+    try {
+      return await hasProviderCredential(getDb(), provider);
+    } catch {
+      return false;
+    }
+  }
+  const [anthropic, pdl] = await Promise.all([
+    present("anthropic", "ANTHROPIC_API_KEY"),
+    present("pdl", "PDL_API_KEY"),
+  ]);
+  return { anthropic, pdl };
 }
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -64,13 +88,11 @@ export default async function IntegrationsPage({
 
   const hubspot = await loadHubSpotStatus();
 
-  // The two BYOK engine keys (spec § Stack). In the demo these run on Lilly's own
-  // keys ("full value before a single key"), so they read Connected while HubSpot
-  // — which needs EliseAI's own OAuth — stays the one gate left to turn on.
-  const engineKeys = {
-    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
-    pdl: Boolean(process.env.PDL_API_KEY),
-  };
+  // The two BYOK engine keys (spec § Stack): present when a real key is stored OR
+  // the env fallback is set. In the demo these run on Lilly's own keys ("full
+  // value before a single key"), so they read set while HubSpot — which needs
+  // EliseAI's own OAuth — stays the one gate left to turn on.
+  const engineKeys = await loadEngineKeys();
 
   return <IntegrationsView hubspot={hubspot} engineKeys={engineKeys} banner={banner} />;
 }

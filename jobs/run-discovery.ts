@@ -46,6 +46,7 @@ import {
 } from "@/src/discovery/config";
 import type { TenantProfile } from "@/src/discovery/tenants";
 import type { PackVertical } from "@/src/packs";
+import { resolveProviderKey } from "@/src/keys/provider-keys";
 
 /**
  * Discovery orchestration core (U5) — the one place enumerate -> funnel -> cache ->
@@ -383,7 +384,13 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
  * Build the LIVE production deps: real fetchers, the real classify client, and a
  * meter bound to the DB-backed cost recorder so every paid call persists a
  * `cost_events` row (R19). Reused by the scheduled job (U6) and the live probe
- * (U7). `ANTHROPIC_API_KEY` is read here, at call time, so import stays keyless.
+ * (U7).
+ *
+ * The Anthropic key is resolved by the CALLER and passed in (`anthropicApiKey`),
+ * so the BYOK "stored key first, env fallback" resolution (U17) lives in one
+ * place — the async job handler — and this builder stays a pure, synchronous
+ * assembly. Omitting it falls back to `process.env.ANTHROPIC_API_KEY` read here
+ * at call time, so import stays keyless and existing callers keep working.
  */
 export function buildLiveDiscoveryDeps(params: {
   db: Database;
@@ -394,8 +401,10 @@ export function buildLiveDiscoveryDeps(params: {
   confidenceFloor?: number;
   meter?: Meter;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
+  /** Pre-resolved Anthropic key (stored BYOK key or env). Falls back to env when omitted. */
+  anthropicApiKey?: string;
 }): RunDiscoveryDeps {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = params.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error(
       "ANTHROPIC_API_KEY not configured — live discovery requires credentials",
@@ -436,6 +445,13 @@ export const runDiscoveryJob = inngest.createFunction(
     const now = new Date();
     const tenant = getTenantProfile(DEFAULT_DISCOVERY_TENANT_ID);
     const metro = selectMetro(tenant, now);
-    return runDiscovery(buildLiveDiscoveryDeps({ db, now, tenant, metro }));
+    // BYOK (U17): prefer EliseAI's stored Anthropic key, fall back to the env key
+    // for the keyless demo. `?? undefined` lets buildLiveDiscoveryDeps re-read env
+    // and throw its own "not configured" error when neither source has a key.
+    const anthropicApiKey =
+      (await resolveProviderKey(db, "anthropic")) ?? undefined;
+    return runDiscovery(
+      buildLiveDiscoveryDeps({ db, now, tenant, metro, anthropicApiKey }),
+    );
   },
 );
