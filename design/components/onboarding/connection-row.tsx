@@ -62,6 +62,8 @@ export interface ConnectionRowProps {
   status: ConnectionStatus;
   /** Shows the "Required to go live" marker (HubSpot). */
   required?: boolean;
+  /** `data-tour` hook so the RevOps coach-through can spotlight this whole row. */
+  dataTour?: string;
   children: ReactNode;
 }
 
@@ -72,11 +74,15 @@ export function ConnectionRow({
   chip,
   status,
   required = false,
+  dataTour,
   children,
 }: ConnectionRowProps) {
   return (
     // Same treatment as the AE StepCard: white surface, media radius, soft shadow.
-    <div className="flex w-full flex-col gap-5 rounded-media bg-surface px-8 py-7 shadow-card">
+    <div
+      data-tour={dataTour}
+      className="flex w-full flex-col gap-5 rounded-media bg-surface px-8 py-7 shadow-card"
+    >
       <div className="flex items-start justify-between gap-4">
         <span
           className="flex size-14 shrink-0 items-center justify-center rounded-pill text-white shadow-soft"

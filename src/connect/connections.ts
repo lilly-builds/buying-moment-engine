@@ -99,7 +99,7 @@ export const CONNECTIONS: ConnectionMeta[] = [
       { text: " to go live." },
     ],
     detail:
-      "One connection turns on sending — through your team's own inbox — and tracks every lead in your CRM.",
+      "One connection turns on sending, through your team's own inbox, and tracks every lead in your CRM.",
     chip: "Go live",
     required: true,
   },
@@ -111,7 +111,7 @@ export const CONNECTIONS: ConnectionMeta[] = [
       { text: "Anthropic", bold: true },
       { text: " key." },
     ],
-    detail: "Researches each practice and writes the brief.",
+    detail: "Researches each prospect and writes the brief.",
     chip: "Research + writing",
     required: false,
   },

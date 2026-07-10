@@ -57,10 +57,12 @@ export default async function IntegrationsPreviewPage({
         : null;
 
   // Opener fixtures: `?leads=0` previews the honest degraded copy (no number),
-  // otherwise a representative real count + a sample first-brief link.
+  // otherwise a representative real count + a sample first-brief link. The link
+  // points at the PUBLIC brief preview so this design-review page is fully
+  // walkable without auth (the live /integrations uses a real practice id).
   const noLeads = firstParam(params.leads) === "0";
   const leadCount = noLeads ? 0 : 12;
-  const firstBriefHref = noLeads ? null : "/practice/demo";
+  const firstBriefHref = noLeads ? null : "/styleguide/brief";
   const owner = resolveTarget(process.env).revOpsOwner;
 
   return (

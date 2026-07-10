@@ -70,7 +70,7 @@ export type ConnectBanner =
 
 const ERROR_COPY: Record<string, string> = {
   not_configured:
-    "HubSpot isn't set up on this environment yet — the connection keys are still to come.",
+    "HubSpot isn't set up on this environment yet. The connection keys are still to come.",
   connect_failed:
     "That HubSpot connection didn't go through. Please try connecting again.",
 };
@@ -434,10 +434,10 @@ function GoLiveSummary({
 }) {
   const go = deriveGoLive(hubspot);
   const message = go.live
-    ? "You're live — sending and CRM tracking are on."
+    ? "You're live. Sending and CRM tracking are on."
     : go.sequencePending
-      ? "Almost there — finish setting up your sequence to go live."
-      : `One step left — ${owner.firstName} connects HubSpot to go live.`;
+      ? "Almost there. Finish setting up your sequence to go live."
+      : `One step left: ${owner.firstName} connects HubSpot to go live.`;
   return (
     <div
       className={
@@ -506,6 +506,7 @@ function ConnectionsChecklist({
         chip={hub.chip}
         status={deriveConnectionStatus("hubspot", ctx)}
         required={hub.required}
+        dataTour="connect-hubspot"
       >
         <HubSpotConnectAction status={hubspot} />
         {hubspot.state === "connected" ? (
@@ -539,6 +540,7 @@ function ConnectionsChecklist({
             detail={meta.detail}
             chip={meta.chip}
             status={deriveConnectionStatus(id, ctx)}
+            dataTour={`key-${id}`}
           >
             <EngineKeyCard meta={keyMeta} initiallySet={engineKeys[id]} />
           </ConnectionRow>

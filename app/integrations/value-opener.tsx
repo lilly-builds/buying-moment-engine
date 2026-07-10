@@ -48,11 +48,11 @@ export function ValueOpener({
                 <>
                   Your reps already have{" "}
                   <span className="text-brand">{value.phrase}</span> with full
-                  call prep — researched, written, ready.
+                  call prep, researched, written, ready.
                 </>
               ) : (
                 <>
-                  Your reps&apos; live feed is ready — real practices at a buying
+                  Your reps&apos; live feed is ready: real prospects at a buying
                   moment, researched and written up.
                 </>
               )}
@@ -70,7 +70,7 @@ export function ValueOpener({
             {ctaLabel}
           </ButtonLink>
           <p className="font-sans text-sm text-ink-muted">
-            Everything works right now. Your keys unlock the last inch — firing a
+            Everything works right now. Your keys unlock the last inch: firing a
             real send into your systems.
           </p>
         </div>

@@ -45,7 +45,7 @@ export const ANTHROPIC_SETUP: KeySetup = {
     "Go to platform.claude.com/settings/keys (sign in if it asks).",
     'Click "Create key" (top-right).',
     'Name it gtm-maestro, leave Workspace on "Default", then click "Add".',
-    "Copy the key that appears — it starts with sk-ant- and is shown only once.",
+    "Copy the key that appears. It starts with sk-ant- and is shown only once.",
     "Paste it into the Anthropic field above.",
   ],
 };
@@ -101,7 +101,7 @@ export interface SequenceSetup {
 
 export const SEQUENCE_SETUP: SequenceSetup = {
   summary:
-    "Build your send sequence once — Claude can do it for you, then fill the ID in here.",
+    "Build your send sequence once. Claude can do it for you, then fill the ID in here.",
   hubspotUrl: "https://app.hubspot.com/sequences",
   // Verbatim from the handoff doc (see `sequence-setup-prompt.ts` — never retyped).
   chromePrompt: HUBSPOT_SEQUENCE_PROMPT,

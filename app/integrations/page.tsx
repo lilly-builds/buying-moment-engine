@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Integrations · GTM Maestro",
   description:
-    "Connect HubSpot and the rest of your stack — surfaced leads push, tag, and track where your team already works.",
+    "Connect HubSpot and the rest of your stack: surfaced leads push, tag, and track where your team already works.",
 };
 
 /** Resolve the live HubSpot connection, degrading to disconnected on any failure.

@@ -34,7 +34,7 @@ export const ENGINE_KEYS: EngineKeyMeta[] = [
   {
     id: "anthropic",
     name: "Anthropic (Claude)",
-    blurb: "Researches each practice and writes the brief.",
+    blurb: "Researches each prospect and writes the brief.",
     where: "Claude Console → Create key.",
     href: KEY_SETUPS.anthropic.keyUrl,
     placeholder: "sk-ant-…",

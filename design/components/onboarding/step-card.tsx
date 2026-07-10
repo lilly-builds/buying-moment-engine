@@ -1,7 +1,19 @@
 import { gradients } from "@/design/tokens";
 import { cn } from "@/design/lib/cn";
-import type { OnboardingStep } from "@/src/onboarding/steps";
+import type { StepIconKey } from "@/src/onboarding/steps";
 import { StepIcon } from "./step-icon";
+
+/**
+ * The presentational content the card draws — the orb icon, the one-instruction
+ * line (two weights), an optional supporting sentence, and the ✦ chip. Both the AE
+ * `OnboardingStep` and the RevOps tour step satisfy this, so one card renders both.
+ */
+export interface StepCardContent {
+  icon: StepIconKey;
+  line: { text: string; bold?: boolean }[];
+  detail?: { text: string; em?: boolean; bold?: boolean }[];
+  chip: string;
+}
 
 /**
  * StepCard — the guided-step card (U17).
@@ -54,7 +66,7 @@ function ProgressDots({ current, total }: { current: number; total: number }) {
 }
 
 export interface StepCardProps {
-  step: OnboardingStep;
+  step: StepCardContent;
   /** 1-based position of this step. */
   current: number;
   /** Total steps in the mini-mission. */
