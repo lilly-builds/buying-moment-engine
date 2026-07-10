@@ -161,6 +161,17 @@ export interface SignalAttachment {
   detectedAt: Date;
   expiresAt?: Date | null;
   signalSource?: string | null;
+  /**
+   * Recurring-source freshness (opt-in). When a signal for this exact
+   * (practice, kind, sourceUrl) already exists and `refresh` is set, bump its
+   * `detectedAt`/`expiresAt`/`confidence` in place instead of returning it frozen.
+   * A RECURRING detector (discovery re-pulls a place whose reviews STILL show the
+   * pain) is re-confirming a live buying moment, so the moment is fresh again;
+   * without this the re-confirmed signal ages out of the feed and never returns
+   * while the re-pull keeps paying to confirm it. Off by default so a one-shot
+   * citation (the on-demand pull path) keeps its stable first-seen timestamp.
+   */
+  refresh?: boolean;
 }
 
 /**
@@ -197,7 +208,20 @@ export async function attachSignal(db: Database, args: SignalAttachment) {
         ),
       )
       .limit(1);
-    if (existing) return existing.signals;
+    if (existing) {
+      if (!args.refresh) return existing.signals;
+      // Re-confirmed by a recurring source: the buying moment is fresh AGAIN.
+      const [refreshed] = await tx
+        .update(signals)
+        .set({
+          detectedAt: args.detectedAt,
+          expiresAt: args.expiresAt ?? null,
+          confidence,
+        })
+        .where(eq(signals.id, existing.signals.id))
+        .returning();
+      return refreshed;
+    }
 
     const [ev] = await tx
       .insert(evidence)

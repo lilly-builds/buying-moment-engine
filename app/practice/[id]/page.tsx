@@ -1,5 +1,7 @@
 import { getDb } from "@/db/client";
 import { getBrief } from "@/db/brief";
+import { getActiveConnection } from "@/db/crm";
+import { isSendConfigured } from "@/src/send/config";
 import { practiceSignalRows } from "@/db/queries";
 import { renderBrief } from "@/src/brief/render";
 import type { SignalRow } from "@/src/brief/inputs";
@@ -78,8 +80,32 @@ export default async function PracticeBriefPage({
     signalRows = [];
   }
 
+  // Can this brief actually send? Decides the Send affordance (Lilly, final 2026-07-09):
+  // ready → the live send fires; not ready → the named RevOps handoff gate. "Ready" is
+  // BOTH a stored HubSpot connection (an OAuth token to enroll with) AND a fully
+  // configured send env — the same three readers `/api/send` checks before it will
+  // send (see isSendConfigured). Gating on the connection alone would show a live Send
+  // button that 503s "Send is not configured" whenever the sequence/sender env is still
+  // absent (a connection can exist without it — see docs/hubspot-send-setup.md). The
+  // gate is the honest default; it also means the live button lights up on its own the
+  // moment the RevOps owner finishes setup and sets the env. Degrades to the gate on any
+  // failure — never imply a send that can't happen.
+  let sendConnected = false;
+  try {
+    sendConnected = (await getActiveConnection(getDb())).ok && isSendConfigured();
+  } catch {
+    sendConnected = false;
+  }
+
   const rendered = renderBrief(result.brief, signalRows, now);
-  return <BriefView brief={rendered} nowMs={now.getTime()} />;
+  return (
+    <BriefView
+      brief={rendered}
+      nowMs={now.getTime()}
+      practiceId={id}
+      sendConnected={sendConnected}
+    />
+  );
 }
 
 /**
