@@ -475,7 +475,13 @@ export async function practicesNeedingBriefs(
       b.freshest.getTime() - a.freshest.getTime(),
   );
   const limited = opts.limit !== undefined ? sorted.slice(0, opts.limit) : sorted;
-  return limited.map(
-    ({ freshest: _f, kinds: _k, ...rest }): PracticeNeedingBrief => rest,
-  );
+  return limited.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    city: entry.city,
+    state: entry.state,
+    geoKey: entry.geoKey,
+    websiteUrl: entry.websiteUrl,
+    freshSignalCount: entry.freshSignalCount,
+  }));
 }
