@@ -6,7 +6,7 @@ selling. They do not start researching.
 
 **Live demo:** LIVE DEMO URL: `<pending - confirm deploy>`
 
-![GTM Maestro: the guided tour playing over the live feed](docs/screenshots/onboarding-tour.gif)
+![GTM Maestro: the signal sources merging, then dissolving into the live feed of practices at a buying moment](docs/screenshots/hero-tour.gif)
 
 ---
 

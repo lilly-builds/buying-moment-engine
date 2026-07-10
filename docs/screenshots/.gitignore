@@ -1,0 +1,3 @@
+# Source recordings stay local; only the exported GIFs are committed.
+*.mov
+*.mp4
