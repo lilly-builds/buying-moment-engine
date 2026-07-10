@@ -167,56 +167,186 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
 
 // ── Engine keys (BYOK) ─────────────────────────────────────────────────────────
 
-/** The two paste-a-key engine credentials (spec § Stack). Draft-1 scaffold: the
- *  pill reflects whether the key is present in the environment; the actual paste
- *  form is the productionization follow-up. */
+/** The two paste-a-key engine credentials (spec § Stack). A key reads "set" when
+ *  a real key is stored OR the env fallback is present (the keyless demo). */
 export interface EngineKeyStatus {
   anthropic: boolean;
   pdl: boolean;
 }
 
-const ENGINE_KEYS = [
+type KeyProviderId = "anthropic" | "pdl";
+
+interface EngineKeyMeta {
+  id: KeyProviderId;
+  name: string;
+  /** What this key powers, in one plain line. */
+  blurb: string;
+  /** Where to get the key — the inline RevOps step (matches the setup guide). */
+  where: string;
+  /** A real, clickable link to the provider's key page. */
+  href: string;
+  /** Placeholder that hints the real key shape without leaking one. */
+  placeholder: string;
+}
+
+const ENGINE_KEYS: EngineKeyMeta[] = [
   {
-    id: "anthropic" as const,
+    id: "anthropic",
     name: "Anthropic (Claude)",
     blurb: "Researches each practice and writes the brief.",
-    how: "Paste your Anthropic key in settings.",
+    where: "Anthropic Console → API keys → Create key.",
+    href: "https://console.anthropic.com/settings/keys",
+    placeholder: "sk-ant-…",
   },
   {
-    id: "pdl" as const,
+    id: "pdl",
     name: "People Data Labs",
     blurb: "Finds the decision-maker's verified email + LinkedIn.",
-    how: "Paste your People Data Labs key in settings.",
+    where: "People Data Labs dashboard → API Keys.",
+    href: "https://dashboard.peopledatalabs.com/api-keys",
+    placeholder: "Paste your PDL key",
   },
 ];
 
-function KeyRow({
-  name,
-  blurb,
-  how,
-  connected,
+type KeySubmitState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved" }
+  | { kind: "error"; message: string };
+
+/**
+ * One engine-key row: a masked paste field that saves the key to the encrypted,
+ * server-only store (`POST /api/provider-keys`). The key is `type="password"` so
+ * it's never shoulder-surfable, and the field CLEARS on save — the browser never
+ * holds or re-displays the secret. The pill reflects whether a key is set (stored
+ * or env); a fresh save flips it to "Set" without a reload.
+ */
+function EngineKeyCard({
+  meta,
+  initiallySet,
 }: {
-  name: string;
-  blurb: string;
-  how: string;
-  connected: boolean;
+  meta: EngineKeyMeta;
+  initiallySet: boolean;
 }) {
+  const [key, setKey] = useState("");
+  const [set, setSet] = useState(initiallySet);
+  const [status, setStatus] = useState<KeySubmitState>({ kind: "idle" });
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = key.trim();
+    if (trimmed.length === 0) {
+      setStatus({ kind: "error", message: "Paste a key first." });
+      return;
+    }
+    setStatus({ kind: "saving" });
+    try {
+      const res = await fetch("/api/provider-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: meta.id, key: trimmed }),
+        // Don't FOLLOW the session gate's redirect to /login — a followed 307
+        // lands on a 200 HTML page that would masquerade as a saved key. `manual`
+        // surfaces the redirect as an opaque response instead.
+        redirect: "manual",
+      });
+
+      if (res.type === "opaqueredirect" || res.status === 0) {
+        setStatus({
+          kind: "error",
+          message: "Your session expired. Please refresh the page and try again.",
+        });
+        return;
+      }
+
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        present?: boolean;
+        error?: string;
+      } | null;
+
+      // Success requires a real `{ ok: true }` — never just a 200.
+      if (!res.ok || body?.ok !== true) {
+        setStatus({
+          kind: "error",
+          message: body?.error ?? "Couldn't save your key. Please try again.",
+        });
+        return;
+      }
+
+      setSet(true);
+      setKey(""); // never keep the secret in the field
+      setStatus({ kind: "saved" });
+    } catch {
+      setStatus({
+        kind: "error",
+        message: "Couldn't reach the server. Please try again.",
+      });
+    }
+  }
+
+  const inputId = `key-${meta.id}`;
   return (
     <Card variant="outlined" padding="lg">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-3">
-            <h3 className="font-display text-h5 font-book text-ink">{name}</h3>
-            <Badge tone={connected ? "success" : "neutral"} size="sm">
-              {connected ? "Connected" : "Not yet"}
+            <h3 className="font-display text-h5 font-book text-ink">{meta.name}</h3>
+            <Badge tone={set ? "success" : "neutral"} size="sm">
+              {set ? "Set" : "Not yet"}
             </Badge>
           </div>
-          <p className="max-w-md font-sans text-base text-ink-body">{blurb}</p>
+          <p className="max-w-md font-sans text-base text-ink-body">{meta.blurb}</p>
         </div>
-        {connected ? null : (
-          <p className="shrink-0 font-sans text-sm text-ink-muted sm:pl-4">{how}</p>
-        )}
-      </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor={inputId} className="font-sans text-sm font-medium text-ink-strong">
+            {set ? "Replace key" : "Paste key"}{" "}
+            <span className="font-normal text-ink-faint">
+              ·{" "}
+              <a
+                href={meta.href}
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-ink-muted"
+              >
+                {meta.where}
+              </a>
+            </span>
+          </label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              id={inputId}
+              name={inputId}
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder={meta.placeholder}
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={512}
+            />
+            <Button
+              type="submit"
+              variant={set ? "secondary" : "primary"}
+              disabled={status.kind === "saving"}
+              className="shrink-0"
+            >
+              {status.kind === "saving" ? "Saving…" : set ? "Replace" : "Save key"}
+            </Button>
+          </div>
+          {status.kind === "saved" ? (
+            <p role="status" className="font-sans text-sm text-success-ink">
+              Saved. {meta.name} is set.
+            </p>
+          ) : null}
+          {status.kind === "error" ? (
+            <p role="alert" className="font-sans text-sm text-danger">
+              {status.message}
+            </p>
+          ) : null}
+        </div>
+      </form>
     </Card>
   );
 }
@@ -394,10 +524,10 @@ export function IntegrationsView({
             </h2>
             <p className="max-w-2xl font-sans text-base text-white/80">
               These run the tool on your own account. Paste each one once. HubSpot above is the
-              only OAuth connect.
+              only OAuth connect. Keys are encrypted and never shown again.
             </p>
             {ENGINE_KEYS.map((k) => (
-              <KeyRow key={k.id} name={k.name} blurb={k.blurb} how={k.how} connected={engineKeys[k.id]} />
+              <EngineKeyCard key={k.id} meta={k} initiallySet={engineKeys[k.id]} />
             ))}
           </section>
 
