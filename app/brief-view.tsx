@@ -11,6 +11,7 @@ import {
   SegmentedControl,
   SignalPill,
   SourceLink,
+  Tag,
   TopNav,
 } from "@/design/components";
 import { LeadFeedback } from "@/design/components/brief/lead-feedback";
@@ -32,7 +33,7 @@ import { toSignalKind } from "@/src/ui/signal-display";
  * it. (An owner call over rules.ts's "repeated items are flat" — these are a handful
  * of large panels, not a 20-row list.)
  *
- * A client island because the mode toggles and the 3-touch sequence is directly
+ * A client island because the mode toggles and the email sequence is directly
  * editable (D7). Time-sensitive fields — fired-signal list, freshness, per-signal age
  * — come from `brief.live`, computed fresh at request time; nothing trusts a stored
  * badge. `nowMs` is passed from the server so "N days ago" is stable across hydrate.
@@ -51,12 +52,6 @@ function agoLabel(date: Date, nowMs: number): string {
   if (days === 1) return "1 day ago";
   return `${days} days ago`;
 }
-
-const CHANNEL_LABEL: Record<string, string> = {
-  email: "Email",
-  call: "Call",
-  linkedin: "LinkedIn",
-};
 
 type BriefMode = "outreach" | "prep";
 
@@ -111,89 +106,89 @@ type EditableTouch = {
 type SendStatus = "idle" | "sending" | "sent" | "error";
 
 function launchLabelFor(status: SendStatus): string {
-  if (status === "sending") return "Launching…";
-  if (status === "sent") return "Launched ✓";
-  return "Launch outreach";
+  if (status === "sending") return "Sending…";
+  if (status === "sent") return "Sent ✓";
+  return "Send sequence";
 }
 
 /**
- * One editable touch in the 3-touch sequence — controlled, so its edits reach the
- * send. Every EMAIL touch's copy ships together via the ONE "Launch outreach" action
- * below the list (a contact enrolls once; the Sequence drips each email), so the
- * editor itself carries no per-touch send button. `spotlight` marks the first touch
- * as the tour's "edit-email" target. A call touch shows a notes textarea (the AE's
- * own call prep) — those notes are NEVER emailed; the launch skips non-email touches.
+ * The email sequence's cadence, keyed by touch number (= the HubSpot Sequence email
+ * step). These words MUST match the delays set on the live HubSpot Sequence — per
+ * `onboarding/hubspot-setup-handoff.md`: email 1 on enroll · email 2 +1 business day ·
+ * email 3 +3 business days. Shown to the AE so the app never claims a cadence HubSpot
+ * won't actually send (Lilly, 2026-07-10). Keep this in sync with that sequence setup.
+ * (The app-owned `src/send/cadence.ts` offsets govern a DIFFERENT, non-live path and
+ * do not describe this HubSpot send.)
+ */
+const SEQUENCE_STEP: Record<number, { role: string; timing: string }> = {
+  1: { role: "First email", timing: "sends now" },
+  2: { role: "Follow-up 1", timing: "1 business day later" },
+  3: { role: "Follow-up 2", timing: "3 business days later" },
+};
+
+/**
+ * One editable email in the sequence — controlled, so its edits reach the send. Every
+ * email's copy ships together via the ONE "Launch outreach" action below the list (a
+ * contact enrolls once; the Sequence drips each email), so the editor carries no
+ * per-email send button. `spotlight` marks the first email as the tour's "edit-email"
+ * target. The sequence is EMAIL ONLY (Lilly, 2026-07-10): a phone call belongs in
+ * Prep-for-call, so OutreachMode filters any non-email touch out before this renders.
  */
 function TouchEditor({
   touch,
   onChange,
+  step,
   spotlight = false,
 }: {
   touch: EditableTouch;
   onChange: (patch: Partial<EditableTouch>) => void;
+  /** This email's role + when it sends, so the card reads as one step of a sequence. */
+  step: { role: string; timing: string };
   spotlight?: boolean;
 }) {
   const rows = Math.max(4, touch.body.split("\n").length + 3);
-  // Unique per touch so each visible <label> binds to its own field (htmlFor/id).
+  // Unique per email so each visible <label> binds to its own field (htmlFor/id).
   const subjectId = `touch-${touch.touchNumber}-subject`;
   const bodyId = `touch-${touch.touchNumber}-body`;
   return (
     <div
       data-tour={spotlight ? "edit-email" : undefined}
-      className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4"
+      className="flex flex-col gap-3 rounded-panel p-6"
+      style={{ backgroundImage: gradients.brand }}
     >
-      <div className="flex items-center gap-2">
-        <Badge tone="neutral" size="sm">
-          Touch {touch.touchNumber}
-        </Badge>
-        <Badge tone="neutral" size="sm">
-          {CHANNEL_LABEL[touch.channel] ?? touch.channel}
-        </Badge>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="font-display text-h5 font-book text-ink-black">{step.role}</span>
+        {step.timing ? (
+          <Tag tone="brand" className="px-3 py-1 text-xs">
+            {step.timing}
+          </Tag>
+        ) : null}
       </div>
-      {touch.channel === "call" ? (
-        // A call touch is the AE's own prep — its notes are NEVER emailed, so the
-        // label says so plainly (no subject field: a call has no subject line).
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={bodyId} className="font-sans text-sm text-ink-muted">
-            Call notes — just for you, never sent
-          </label>
-          <textarea
-            id={bodyId}
-            value={touch.body}
-            onChange={(e) => onChange({ body: e.target.value })}
-            rows={rows}
-            className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
-          />
-        </div>
-      ) : (
-        // Each field carries a VISIBLE label bound with htmlFor/id — so an AE never
-        // has to guess which box is the subject line and which is the email body.
-        <>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={subjectId} className="font-sans text-sm text-ink-muted">
-              Subject line
-            </label>
-            <input
-              id={subjectId}
-              value={touch.subject}
-              onChange={(e) => onChange({ subject: e.target.value })}
-              className="w-full rounded-panel border-0 bg-surface px-3 py-2 font-sans text-sm font-book text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={bodyId} className="font-sans text-sm text-ink-muted">
-              Message
-            </label>
-            <textarea
-              id={bodyId}
-              value={touch.body}
-              onChange={(e) => onChange({ body: e.target.value })}
-              rows={rows}
-              className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            />
-          </div>
-        </>
-      )}
+      {/* Each field carries a VISIBLE label bound with htmlFor/id — so an AE never has
+          to guess which box is the subject line and which is the email body. */}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={subjectId} className="font-sans text-sm font-medium text-ink-black">
+          Subject line
+        </label>
+        <input
+          id={subjectId}
+          value={touch.subject}
+          onChange={(e) => onChange({ subject: e.target.value })}
+          className="w-full rounded-panel border-0 bg-surface px-3 py-2 font-sans text-sm font-book text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={bodyId} className="font-sans text-sm font-medium text-ink-black">
+          Message
+        </label>
+        <textarea
+          id={bodyId}
+          value={touch.body}
+          onChange={(e) => onChange({ body: e.target.value })}
+          rows={rows}
+          className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        />
+      </div>
     </div>
   );
 }
@@ -236,7 +231,85 @@ function SignalDetail({ signal, nowMs }: { signal: FiredSignal; nowMs: number })
   );
 }
 
-/** ⚡ Outreach mode — who to reach, and the message that goes out. */
+/**
+ * Who to contact — the decision-maker, shown in the hero glass panel (Lilly, 2026-07-10).
+ * The title sits on the glass; each element is its OWN elevated white sub-card (name+role,
+ * email, mutual-connections) so it reads as distinct boxes rather than loose text on blue.
+ * "Best channel" was dropped as purposeless.
+ */
+function WhoToContact({
+  contact,
+}: {
+  contact: RenderedBrief["factual"]["contact"];
+}) {
+  return (
+    <Card variant="flat" padding="lg">
+      <div className="flex flex-col gap-4">
+        <SectionHeader title="Who to contact" size="h3" as="h2" />
+        {contact ? (
+          // Connections sized to its content (no empty space after Facebook); the freed
+          // width goes to name + email so the name isn't squished (Lilly, 2026-07-10).
+          <div className="grid gap-3 md:grid-cols-[1fr_1.2fr_auto]">
+            <Card variant="elevated" padding="md">
+              <div className="flex flex-col gap-0.5">
+                <p className="font-display text-h5 text-ink">
+                  {contact.name ?? "Decision-maker (name not public)"}
+                </p>
+                <p className="font-sans text-base text-ink-body">{contact.role}</p>
+              </div>
+            </Card>
+
+            {contact.email ? (
+              <Card variant="elevated" padding="md">
+                <div className="flex flex-col items-start gap-1.5">
+                  <Tag tone="brand" className="px-3 py-1 text-xs">
+                    Email{contact.emailProvider === "pdl" ? " · verified" : ""}
+                  </Tag>
+                  <p className="font-sans text-base break-all text-ink">{contact.email}</p>
+                </div>
+              </Card>
+            ) : null}
+
+            <Card variant="elevated" padding="md">
+              <div className="flex h-full flex-wrap items-center gap-3">
+                <Tag tone="brand" className="px-3 py-1 text-xs">
+                  Check for mutual connections:
+                </Tag>
+                <ButtonLink
+                  variant="primary"
+                  size="sm"
+                  href={contact.linkedinHref}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  LinkedIn
+                </ButtonLink>
+                <ButtonLink
+                  variant="primary"
+                  size="sm"
+                  href={contact.facebookHref}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Facebook
+                </ButtonLink>
+              </div>
+            </Card>
+          </div>
+        ) : (
+          <Card variant="elevated" padding="md">
+            <p className="font-sans text-base text-ink-body">
+              No public decision-maker surfaced yet. Reach the practice on its main line
+              and ask for the practice manager.
+            </p>
+          </Card>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/** ⚡ Outreach mode — the message that goes out, full width. */
 function OutreachMode({
   brief,
   practiceId,
@@ -249,15 +322,20 @@ function OutreachMode({
   const { factual, voice } = brief;
   const contact = factual.contact;
 
-  // The 3-touch sequence is directly editable (D7); lift it into state so the Launch
-  // action ships the AE's exact edited subject + body, not the stored draft.
+  // The editable email sequence (D7), lifted into state so Launch ships the AE's exact
+  // edited subject + body, not the stored draft. EMAIL ONLY (Lilly, 2026-07-10): a phone
+  // call belongs in Prep-for-call, and every sent step maps 1:1 to a HubSpot email step —
+  // so a non-email touch is filtered out here (new briefs are email-only by construction;
+  // this also keeps any older stored brief's call step out of the send).
   const [touches, setTouches] = useState<EditableTouch[]>(() =>
-    voice.sequence.touches.map((t) => ({
-      touchNumber: t.touchNumber,
-      channel: t.channel,
-      subject: t.subject,
-      body: t.body,
-    })),
+    voice.sequence.touches
+      .filter((t) => t.channel === "email")
+      .map((t) => ({
+        touchNumber: t.touchNumber,
+        channel: t.channel,
+        subject: t.subject,
+        body: t.body,
+      })),
   );
   // ONE launch state for the whole sequence — a contact enrolls once, so there is a
   // single button + status, never one per touch (a 2nd enroll 400s ALREADY_ENROLLED).
@@ -287,12 +365,12 @@ function OutreachMode({
     if (blank) {
       setLaunch({
         status: "error",
-        message: `Touch ${blank.touchNumber} needs a subject and a body before you can launch.`,
+        message: `Email ${blank.touchNumber} needs a subject and a message before you can send.`,
       });
       return;
     }
     if (emailTouches.length === 0) {
-      setLaunch({ status: "error", message: "No email touches to launch." });
+      setLaunch({ status: "error", message: "No emails to send." });
       return;
     }
 
@@ -317,119 +395,60 @@ function OutreachMode({
         setLaunch({
           status: "sent",
           message:
-            "Enrolled — your outreach sequence is sending through your connected inbox.",
+            "Sent. The first email is on its way, and the follow-ups will send automatically through your connected inbox.",
         });
       } else {
         setLaunch({ status: "error", message: data.error ?? "Launch failed." });
       }
     } catch {
-      setLaunch({ status: "error", message: "Launch failed — couldn't reach the server." });
+      setLaunch({ status: "error", message: "Launch failed. Couldn't reach the server." });
     }
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-6 lg:grid-cols-5">
-        {/* Who to contact */}
-        <Card variant="elevated" padding="lg" className="lg:col-span-2">
-          <div className="flex h-full flex-col gap-5">
-            <SectionHeader title="Who to contact" size="h3" as="h2" />
-            {contact ? (
-              <>
-                <div className="flex flex-col gap-1">
-                  <p className="font-display text-h5 text-ink">
-                    {contact.name ?? "Decision-maker (name not public)"}
-                  </p>
-                  <p className="font-sans text-base text-ink-body">{contact.role}</p>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  {contact.email ? (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-sans text-sm text-ink-muted">
-                        Email{contact.emailProvider === "pdl" ? " · verified" : ""}
-                      </span>
-                      <p className="font-sans text-base text-ink">{contact.email}</p>
-                    </div>
-                  ) : null}
-                  {contact.bestChannel ? (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-sans text-sm text-ink-muted">
-                        Best channel
-                      </span>
-                      <p className="font-sans text-base text-ink">{contact.bestChannel}</p>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-auto flex flex-col gap-3">
-                  <p className="font-sans text-sm text-ink-muted">
-                    Check for mutual connections before you reach out:
-                  </p>
-                  <div className="flex flex-wrap gap-3">
-                    <ButtonLink
-                      variant="secondary"
-                      size="sm"
-                      href={contact.linkedinHref}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      LinkedIn
-                    </ButtonLink>
-                    <ButtonLink
-                      variant="secondary"
-                      size="sm"
-                      href={contact.facebookHref}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Facebook
-                    </ButtonLink>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="font-sans text-base text-ink-body">
-                No public decision-maker surfaced yet — reach the practice on its main
-                line and ask for the practice manager.
-              </p>
-            )}
-          </div>
-        </Card>
-
-        {/* Recommended action */}
-        <Card variant="elevated" padding="lg" className="lg:col-span-3">
-          <div className="flex flex-col gap-5">
-            <SectionHeader
-              title="Recommended action"
-              description={`Ends with your call to action: ${voice.sequence.namedCta}`}
-              size="h3"
-              as="h2"
-            />
-
+        {/* The email sequence runs FULL width — who-to-contact moved to the header (Lilly). */}
+        <Card variant="elevated" padding="lg">
+          <div className="flex flex-col gap-6">
+            {/* Title + description grouped TIGHT; a larger gap sits before the cards so the
+                description reads with the header, not the first card (Lilly, 2026-07-10). */}
             <div className="flex flex-col gap-2">
-              <span className="font-sans text-sm text-ink-muted">
-                Call opener
-              </span>
-              <p className="rounded-panel bg-brand-50 p-4 font-sans text-base text-ink">
-                {voice.callOpener}
+              <SectionHeader
+                title="Send email outreach sequence"
+                size="h3"
+                as="h2"
+              />
+              <p className="font-sans text-sm text-ink-body">
+                {touches.length > 1 ? (
+                  <>
+                    One <span className="font-book text-ink">Send</span> ships all{" "}
+                    {touches.length} emails as a sequence. The first goes out now, and the
+                    follow-ups send automatically on the schedule shown on each. Edit every
+                    email the way you want it before you send.
+                  </>
+                ) : (
+                  <>
+                    Edit your email, then hit{" "}
+                    <span className="font-book text-ink">Send</span>.
+                  </>
+                )}
               </p>
             </div>
-
-            <div className="flex flex-col gap-2">
-              <span className="font-sans text-sm text-ink-muted">
-                3-touch sequence · editable
-              </span>
-              <div className="flex flex-col gap-3">
-                {touches.map((touch, i) => (
-                  <TouchEditor
-                    key={touch.touchNumber}
-                    touch={touch}
-                    onChange={(patch) => updateTouch(touch.touchNumber, patch)}
-                    spotlight={i === 0}
-                  />
-                ))}
-              </div>
+            <div className="flex flex-col gap-3">
+              {touches.map((touch, i) => (
+                <TouchEditor
+                  key={touch.touchNumber}
+                  touch={touch}
+                  step={
+                    SEQUENCE_STEP[touch.touchNumber] ?? {
+                      role: `Email ${touch.touchNumber}`,
+                      timing: "",
+                    }
+                  }
+                  onChange={(patch) => updateTouch(touch.touchNumber, patch)}
+                  spotlight={i === 0}
+                />
+              ))}
             </div>
 
             {/* ONE launch for the whole cadence — connected → the live enroll that
@@ -462,16 +481,15 @@ function OutreachMode({
                   ) : null}
                 </div>
               ) : (
-                <SendGate ctaLabel="Launch outreach" />
+                <SendGate ctaLabel="Send sequence" />
               )
             ) : (
               <p className="font-sans text-sm text-ink-muted">
-                No contact email on this brief yet — nothing to send.
+                No contact email on this brief yet, so there is nothing to send.
               </p>
             )}
           </div>
         </Card>
-      </div>
 
       {/* One-tap lead-quality vote — teaches the tool (tour step 5, `rate-lead`). */}
       <LeadFeedback />
@@ -484,6 +502,22 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
   const { factual, voice, live } = brief;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      {/* Call opener — moved here from the Send-email tab (Lilly, 2026-07-10): call
+          content belongs with call prep, not the email sequence. */}
+      <Card variant="elevated" padding="lg" className="lg:col-span-2">
+        <div className="flex flex-col gap-3">
+          <SectionHeader
+            title="Call opener"
+            description="What to say in the first ten seconds. Their world first."
+            size="h3"
+            as="h3"
+          />
+          <p className="rounded-panel bg-brand-50 p-4 font-sans text-base text-ink">
+            {voice.callOpener}
+          </p>
+        </div>
+      </Card>
+
       {/* The buying moment */}
       <Card variant="elevated" padding="lg" className="lg:col-span-2">
         <div className="flex flex-col gap-5">
@@ -557,7 +591,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
                 </>
               ) : (
                 <p className="font-sans text-sm text-ink-muted">
-                  Proof pending — no customer-success metric found for this vertical yet.
+                  Proof pending. No customer-success metric found for this vertical yet.
                 </p>
               )}
             </div>
@@ -663,31 +697,37 @@ export function BriefView({
           Held in an outlined glass panel so it reads as a contained surface on the
           blue rather than raw text floating on it (Lilly, 2026-07-08). */}
       <PageContainer className="pb-2 pt-10">
+        {/* Clean headline hero — the buying-moment headline OWNS the header (D1 spine);
+            who-to-contact runs as a full-width strip below it (Lilly, 2026-07-10). */}
         <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
           <div data-tour="why-now" className="flex flex-col gap-3">
-            <span className="font-sans text-base font-medium uppercase tracking-eyebrow text-white">
-              {factual.practiceName}
-              {location ? ` · ${location}` : ""}
-            </span>
+            {/* Practice name (left) and the mode toggle (right) share the top row. */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <span className="font-sans text-base font-medium uppercase tracking-eyebrow text-white">
+                {factual.practiceName}
+                {location ? ` · ${location}` : ""}
+              </span>
+              <div data-tour="prep-toggle" className="w-fit shrink-0">
+                <SegmentedControl<BriefMode>
+                  label="Choose what to work on this brief"
+                  options={MODE_OPTIONS}
+                  value={mode}
+                  onValueChange={setMode}
+                  accent="brand"
+                />
+              </div>
+            </div>
             <h1 className="max-w-3xl font-display text-h2 font-book tracking-brand text-balance text-white">
               {brief.headline}
             </h1>
-          </div>
-
-          <div data-tour="prep-toggle" className="w-fit">
-            <SegmentedControl<BriefMode>
-              label="Choose what to work on this brief"
-              options={MODE_OPTIONS}
-              value={mode}
-              onValueChange={setMode}
-              accent="brand"
-            />
           </div>
         </div>
       </PageContainer>
 
       <main className="flex flex-1 flex-col">
-        <PageContainer className="pb-12 pt-6">
+        <PageContainer className="flex flex-col gap-6 pb-12 pt-6">
+          {/* Who to contact — full-width strip below the hero, shown in both modes. */}
+          <WhoToContact contact={factual.contact} />
           {mode === "outreach" ? (
             <OutreachMode brief={brief} practiceId={practiceId} sendConnected={sendConnected} />
           ) : (

@@ -1,7 +1,7 @@
 /**
  * Design-review fixtures (U8 / U9 / U12).
  *
- * These are LAYOUT FIXTURES for the styleguide's full-page previews — never a claim
+ * These are LAYOUT FIXTURES for the styleguide's full-page previews, never a claim
  * about a real practice. The live app reads from Postgres (R1/R7, D9); nothing here
  * does. The practice + contact names are invented placeholders; the proof point, EHR,
  * and ROI benchmark citations are the REAL, verified ones from the dermatology pack
@@ -9,7 +9,7 @@
  * in production. Swap the placeholders for real practices only through the database.
  *
  * `now` is passed in so freshness reads relative to render time and the clocks stay
- * honest across days — the same reason `app/page.tsx` computes age against a single
+ * honest across days, the same reason `app/page.tsx` computes age against a single
  * `now`.
  */
 
@@ -46,7 +46,7 @@ const SRC = {
 } as const;
 
 /**
- * ⚡ The hero brief — Cedarline Dermatology Group, three fresh signals firing.
+ * ⚡ The hero brief, Cedarline Dermatology Group, three fresh signals firing.
  * The same practice the feed opens into, so the feed → brief story is coherent.
  */
 export function demoBrief(now: Date): RenderedBrief {
@@ -129,7 +129,7 @@ export function demoBrief(now: Date): RenderedBrief {
       },
     ],
     painFit:
-      "High call volume split across cosmetic and medical lines, spiking at skin-check season — and every missed call is a new patient who books with the practice down the street. The front desk can't staff its way out; EliseAI answers every line, every time, and turns missed calls into booked appointments.",
+      "High call volume split across cosmetic and medical lines, spiking at skin-check season, and every missed call is a new patient who books with the practice down the street. The front desk can't staff its way out; EliseAI answers every line, every time, and turns missed calls into booked appointments.",
     proofPoint: {
       tag: "real",
       caseStudy: "Texas Dermatology",
@@ -189,42 +189,42 @@ export function demoBrief(now: Date): RenderedBrief {
     headline: "Front desk underwater right as a 5th location opens",
     headlineEvidenceIds: [EV.staffing, EV.growth],
     // Kept within VOICE_LIMITS.callOpener (320) so this fixture is a brief a real
-    // generation could actually produce — and so it survives `getBrief`'s re-validation
+    // generation could actually produce, and so it survives `getBrief`'s re-validation
     // when seeded into the DB (the styleguide renders it un-validated; the real route does not).
     callOpener:
-      "Hi Dana — most derm groups your size are losing the phone battle at screening season, and the ones winning aren't adding front-desk headcount, they're making sure zero new-patient calls ring out. With the 5th location opening, I'd love to show you how practices like Texas Dermatology capture 250+ new patients a month.",
+      "Hi Dana, most derm groups your size are losing the phone battle at screening season, and the ones winning aren't adding front-desk headcount, they're making sure zero new-patient calls ring out. With the 5th location opening, I'd love to show you how practices like Texas Dermatology capture 250+ new patients a month.",
     callOpenerEvidenceIds: [EV.staffing, EV.growth, EV.reviews],
     personalizationSnippet:
-      "You're hiring three front-desk coordinators this week and just announced a fifth clinic — the phones are about to get louder, not quieter.",
+      "You're hiring three front-desk coordinators this week and just announced a fifth clinic, the phones are about to get louder, not quieter.",
     personalizationEvidenceIds: [EV.staffing, EV.growth],
     sequence: {
       touches: [
         {
           touchNumber: 1,
           channel: "email",
-          subject: "3 new front-desk reqs — before you hire",
-          body: "Hi Dana,\n\nSaw Cedarline is opening a fifth location and hiring three patient coordinators. Before you add headcount to cover the phones, worth a look: Texas Dermatology handles 2,000 calls a month with EliseAI and books 250+ new patients — no missed calls, no hold times.\n\nWorth 15 minutes to see if it fits Cedarline?\n\nDana",
+          subject: "3 new front-desk reqs, before you hire",
+          body: "Hi Dana,\n\nSaw Cedarline is opening a fifth location and hiring three patient coordinators. Before you add headcount to cover the phones, worth a look: Texas Dermatology handles 2,000 calls a month with EliseAI and books 250+ new patients, no missed calls, no hold times.\n\nWorth 15 minutes to see if it fits Cedarline?\n\nDana",
           evidenceIds: [EV.staffing, EV.growth],
         },
         {
           touchNumber: 2,
           channel: "email",
           subject: "the reviews mention hold times",
-          body: "Hi Dana — quick follow-up. A few recent reviews mention long holds and dropped calls. That's exactly the moment a new patient calls the practice down the street. EliseAI answers every line, every time. Happy to share the Texas Dermatology numbers on a short call.",
+          body: "Hi Dana, quick follow-up. A few recent reviews mention long holds and dropped calls. That's exactly the moment a new patient calls the practice down the street. EliseAI answers every line, every time. Happy to share the Texas Dermatology numbers on a short call.",
           evidenceIds: [EV.reviews],
         },
         {
           touchNumber: 3,
-          channel: "call",
-          subject: "quick call re: the Q4 opening",
-          body: "Call Dana before 10am. Lead with the fifth-location opening and the new-patient capture angle — derm is a volume + acquisition game, so frame it as revenue, not cost savings.",
+          channel: "email",
+          subject: "closing the loop on Cedarline's phones",
+          body: "Hi Dana, I'll leave this here so it's not sitting in your inbox. If the phones are keeping up as the fifth location opens, no need to reply. If new-patient calls are still slipping through at the busy stretches, I'm around whenever you want to compare notes on how Texas Dermatology runs it. Either way, I'll get out of your inbox.",
           evidenceIds: [EV.growth],
         },
       ],
       namedCta: "Book a 15-minute Cedarline fit call",
     },
     discoveryQuestions: [
-      "How are you covering the phones across all four locations today — and what changes when the fifth opens?",
+      "How are you covering the phones across all four locations today, and what changes when the fifth opens?",
       "Roughly how many new-patient calls do you think go unanswered on a busy day?",
       "Is capturing more new patients or reducing front-desk workload the bigger priority right now?",
     ],
@@ -232,17 +232,17 @@ export function demoBrief(now: Date): RenderedBrief {
       {
         objection: "We just hired more front-desk staff.",
         rebuttal:
-          "Makes sense — and EliseAI isn't a replacement for them, it's the layer that catches every call they can't get to, especially after hours and during skin-check season. Your team handles the complex conversations; Elise makes sure nothing rings out.",
+          "Makes sense, and EliseAI isn't a replacement for them, it's the layer that catches every call they can't get to, especially after hours and during skin-check season. Your team handles the complex conversations; Elise makes sure nothing rings out.",
       },
       {
         objection: "Our patients want to talk to a real person.",
         rebuttal:
-          "They still can — Elise routes anything clinical or complex straight to your team. What it removes is the hold music and the voicemail. Texas Dermatology's patients book 250+ appointments a month this way.",
+          "They still can. Elise routes anything clinical or complex straight to your team. What it removes is the hold music and the voicemail. Texas Dermatology's patients book 250+ appointments a month this way.",
       },
       {
         objection: "We're already on ModMed for scheduling.",
         rebuttal:
-          "Perfect — EliseAI writes straight into ModMed, so it books into the schedule you already run. Kansas City Skin & Cancer Center went live on ModMed in 24 hours. It's additive, not a rip-and-replace.",
+          "Perfect. EliseAI writes straight into ModMed, so it books into the schedule you already run. Kansas City Skin & Cancer Center went live on ModMed in 24 hours. It's additive, not a rip-and-replace.",
       },
     ],
   };
@@ -298,7 +298,7 @@ export function demoBrief(now: Date): RenderedBrief {
 }
 
 /**
- * ⚡ The feed — a ranked flow of prospects at a buying moment (D8: signal count first).
+ * ⚡ The feed, a ranked flow of prospects at a buying moment (D8: signal count first).
  * Mirrors the FeedItem shape `app/page.tsx` hands to `<Feed>`.
  */
 export function demoFeedItems(now: Date): FeedItem[] {
@@ -361,7 +361,7 @@ export function demoFeedItems(now: Date): FeedItem[] {
 }
 
 /**
- * 📈 The ROI scoreboard (U12). Illustrative numbers — in production these are
+ * 📈 The ROI scoreboard (U12). Illustrative numbers, in production these are
  * computed from `roi_events` / `cost_events` (D10). The honesty tags below are the
  * demo's honest self-report: pipeline-outcome numbers are MODELED until real deals
  * flow; the tool's own activity counts (meetings, hours, touches) are MEASURED.
