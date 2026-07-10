@@ -77,7 +77,12 @@ async function main(): Promise<void> {
   }
   const db = getDb();
 
-  const pull = await practicesNeedingBriefs(db, { limit: args.limit });
+  // --force: pull already-briefed practices too, and the conductor rewrites them
+  // (a briefed practice is otherwise excluded from the pull AND skipped by the conductor).
+  const pull = await practicesNeedingBriefs(db, {
+    limit: args.limit,
+    includeBriefed: args.force,
+  });
   console.log(
     `practices at a buying moment with no brief: ${pull.length}${args.limit ? ` (limit ${args.limit})` : ""}`,
   );

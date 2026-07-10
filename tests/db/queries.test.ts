@@ -192,6 +192,18 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
     expect(result[1].websiteUrl).toBeNull();
   });
 
+  it("includeBriefed (--force) pulls already-briefed practices too", async () => {
+    const a = await upsertPractice(t.db, { name: "Alpha Derm", geoKey: "austin-tx", vertical: "dermatology" });
+    await fresh(a.id, "staffing_spike", FRESH, "https://a1");
+    await t.db.insert(briefs).values({ practiceId: a.id });
+
+    // default: excluded (has a brief)
+    expect(await practicesNeedingBriefs(t.db, { now: NOW })).toHaveLength(0);
+    // includeBriefed: pulled for deliberate regeneration
+    const forced = await practicesNeedingBriefs(t.db, { now: NOW, includeBriefed: true });
+    expect(forced.map((r) => r.id)).toEqual([a.id]);
+  });
+
   it("limit caps the result to the hottest N", async () => {
     const a = await upsertPractice(t.db, { name: "Alpha Derm", geoKey: "austin-tx", vertical: "dermatology" });
     await fresh(a.id, "staffing_spike", FRESH, "https://a1");

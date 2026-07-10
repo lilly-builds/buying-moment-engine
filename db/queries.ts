@@ -413,12 +413,21 @@ export interface PracticeNeedingBrief {
  * small `limit` briefs the most-briefable, highest-signal practices first (cost discipline).
  * Grouped + limited in code because freshness is a code predicate; at demo scale (dozens
  * of practices) this is well within budget.
+ *
+ * `includeBriefed` (the seeding script's `--force`) drops the no-brief filter so already-
+ * briefed practices are pulled too — a DELIBERATE regeneration path. The conductor still
+ * needs `force: true` to actually rewrite them (otherwise it skips a found brief); the two
+ * travel together in the CLI.
  */
 export async function practicesNeedingBriefs(
   db: Database,
-  opts: { now?: Date; limit?: number } = {},
+  opts: { now?: Date; limit?: number; includeBriefed?: boolean } = {},
 ): Promise<PracticeNeedingBrief[]> {
   const now = opts.now ?? new Date();
+  const notUnclassified = ne(practices.vertical, "unclassified");
+  const where = opts.includeBriefed
+    ? notUnclassified
+    : and(notUnclassified, isNull(briefs.id));
   const rows = await db
     .select({
       id: practices.id,
@@ -434,7 +443,7 @@ export async function practicesNeedingBriefs(
     .from(practices)
     .innerJoin(signals, eq(signals.practiceId, practices.id))
     .leftJoin(briefs, eq(briefs.practiceId, practices.id))
-    .where(and(ne(practices.vertical, "unclassified"), isNull(briefs.id)))
+    .where(where)
     .orderBy(asc(practices.id), asc(signals.kind), asc(signals.detectedAt));
 
   interface Acc extends PracticeNeedingBrief {

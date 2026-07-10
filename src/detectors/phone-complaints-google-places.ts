@@ -35,7 +35,14 @@ export const googlePlaceDetailsResponseSchema = z.object({
       // The practice's OWN homepage (distinct from `url`, the Google Maps link).
       // A public listing fact Google permits using — ToS bars review TEXT, not the
       // website. Seeds enrichment's scrape (R-W1) at zero marginal cost.
-      website: z.url().optional(),
+      //
+      // `.catch(undefined)`: `website` is MERCHANT-entered (unlike the Google-generated
+      // `url`), so it can arrive malformed ("drsmith.com", no scheme). Without the catch
+      // a bad website would fail the whole `result` parse → the whole response → and the
+      // detector would emit ZERO candidates, silently dropping a real phone-complaint
+      // signal. It is only a scrape seed, re-validated downstream, so a junk value must
+      // degrade to "no website", never cost us the buying moment.
+      website: z.url().optional().catch(undefined),
       reviews: z.array(googlePlaceReviewSchema).optional(),
     })
     .optional(),

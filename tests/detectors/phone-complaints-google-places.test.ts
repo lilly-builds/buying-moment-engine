@@ -88,6 +88,28 @@ describe("normalizePlaceReviewsToCandidate", () => {
     expect(candidate?.website).toBeUndefined();
   });
 
+  it("a MALFORMED website never nukes the signal — it degrades to no website", () => {
+    // Google Business Profile `website` is merchant-entered; "drsmith.com" has no scheme.
+    const parsed = googlePlaceDetailsResponseSchema.parse({
+      status: "OK",
+      result: {
+        place_id: QUERY.placeId,
+        website: "drsmith.com", // invalid URL
+        reviews: [
+          { text: "Impossible to reach — I can't get through on the phone, ever." },
+          { text: "Left on hold for 20 minutes then cut off." },
+          { text: "Nice office." },
+        ],
+      },
+    });
+    const candidate = normalizePlaceReviewsToCandidate(parsed, QUERY, NOW);
+    // The buying moment survives (this is the regression Finding #1 guards against)...
+    expect(candidate).not.toBeNull();
+    expect(candidate?.kind).toBe("phone_complaints");
+    // ...and the junk website is simply dropped, not stored.
+    expect(candidate?.website).toBeUndefined();
+  });
+
   it("returns null when the place lookup status is not OK", () => {
     const response: GooglePlaceDetailsResponse = { status: "NOT_FOUND" };
     const candidate = normalizePlaceReviewsToCandidate(response, QUERY, NOW);
