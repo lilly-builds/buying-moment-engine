@@ -13,7 +13,7 @@ these paths). Then delete the matching `<!-- TODO: Lilly drops this shot -->` li
 | `brief-citation.png` | An open two-tier brief with a source citation clicked open | The timing thesis + "every fact is verifiable" | The brief card with a citation expanded / the source link showing under an underlined claim |
 | `scoreboard.png` | The ROI scoreboard with its measured / modeled tags | The ROI beat | Real numbers (meetings, cost per meeting, conversion) each carrying a measured or modeled tag |
 | `onboarding-tour.png` | The guided onboarding tour step card | Rollout and training | The step card: gradient orb (purple to health-blue), the one-bold-word instruction, the context chip |
-| `send-handoff.png` | The Send handoff gate (optional but strong) | Rollout and training / the named RevOps handoff | The named, routed handoff (Send it to the RevOps owner / I have access), showing the gated state |
+| `integrations.png` | The Connections page (`/integrations`) | Connecting the stack | The three rows: HubSpot (OAuth connect) + Anthropic + People Data Labs (key fields), with their status pills |
 
 ## The one "alive" win, if you can grab it
 

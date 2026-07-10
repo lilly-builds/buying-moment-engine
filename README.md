@@ -132,18 +132,27 @@ over the real feed and a real brief, and it is fully skippable.
 *The guided tour: a brand step card (gradient orb, one-bold-word instruction, context chip) over the real feed.*
 <!-- TODO: Lilly drops this shot - docs/screenshots/onboarding-tour.png (see SHOT-LIST.md) -->
 
-The one place setup happens is the **Send handoff**, and it is designed as a *named, routed
-handoff*, not a dead end. Sending an email and tracking leads in the CRM are the only two actions
-that write to the org's own systems, so they need the org's own connection. The Send button routes
-to the account's RevOps owner (defined in config, defaulting to the named RevOps lead), with options
-to send them the request or to self-serve if the rep has access, and each rep's tap adds to a
-visible demand count. The admin's one-time setup is three rows on the `/integrations` page: one OAuth
-click for HubSpot and two pasted keys for the engine. The step-by-step is in
-[`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
+### Connecting the stack
 
-![The Send handoff gate routed to the RevOps owner](docs/screenshots/send-handoff.png)
-*The Send handoff: a named, routed handoff to the RevOps owner, gated until the org connects HubSpot.*
-<!-- TODO: Lilly drops this shot (optional but strong) - docs/screenshots/send-handoff.png (see SHOT-LIST.md) -->
+The only setup anyone does lives on the **Connections page** (`/integrations`), and this is where the
+JD's "integrate with the tools in their stack" work is real. It is three rows:
+
+- **HubSpot** — one OAuth click. That single grant turns on **three things at once**: pushing and
+  tagging tool-sourced leads in the CRM, sending the approved outreach through the rep's own inbox,
+  and the native open/click/reply analytics that ride the send. One connection, one pipeline of data
+  for the scoreboard, instead of stitching three tools together.
+- **Anthropic** and **People Data Labs** — paste-your-own-key, each encrypted at rest. These power the
+  research, the brief voice, and the verified contact data.
+
+Until an org connects, the whole tool runs on the builder's demo keys, so an evaluator sees full value
+first. Connecting flips two things: the AI spend now bills to the org's own account (so it shows up as
+**real, measured cost** in the scoreboard's CAC), and send plus CRM writes reach the org's systems. The
+Send button on a brief is the demand-driven nudge that routes a rep's request to the RevOps owner who
+does this one-time setup. Full step-by-step: [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
+
+![The Connections page: HubSpot OAuth plus Anthropic and PDL key setup](docs/screenshots/integrations.png)
+*The Connections page (`/integrations`): one OAuth click for HubSpot, two pasted keys for the engine. The only setup anyone does.*
+<!-- TODO: Lilly drops this shot - docs/screenshots/integrations.png (see SHOT-LIST.md) -->
 
 ---
 
