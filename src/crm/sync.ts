@@ -16,6 +16,7 @@ import type {
 } from "./adapter";
 import { createHubSpotAdapter } from "./hubspot";
 import { ensureLeadProperties } from "./hubspot-properties";
+import { ensureSendProperties } from "../send/hubspot-send";
 import {
   INITIAL_DEAL_STAGE_ID,
   stageMilestone,
@@ -63,11 +64,13 @@ export interface ConnectResult {
 /**
  * Complete the OAuth connect: exchange the `?code`, look up the portal id, store
  * the tokens ENCRYPTED (keyed per-tenant by provider + portal_id), and provision
- * the four tag properties so the very first `pushLead` can land.
+ * BOTH the four tag properties (so the first `pushLead` lands) AND the per-touch
+ * send properties (so the first `sendSequence` lands).
  *
- * Property provisioning is part of CONNECT, not of push: HubSpot 400s a write to
- * a property that does not exist, so a connect that skipped this would hand the
- * AE a CRM integration that fails on its first real lead.
+ * Property provisioning is part of CONNECT, not of push/send: HubSpot 400s a write
+ * to a property that does not exist, so a connect that skipped this would hand the
+ * AE a CRM integration that fails on its first real lead — or a Send that fails on
+ * its first launch. One "Connect HubSpot" grant readies CRM push AND send.
  *
  * ORDER MATTERS. Provisioning runs BEFORE the connection is stored, so a connect
  * that fails leaves NO connection behind. Storing first meant a 403/timeout during
@@ -90,12 +93,15 @@ export async function completeHubSpotConnect(
 
   // Idempotent: an already-provisioned portal answers 409 and we move on. The
   // freshly-exchanged access token is valid for ~30 min, so no refresh needed.
-  // Throws on anything else — and nothing has been persisted yet.
-  await ensureLeadProperties({
+  // Throws on anything else — and nothing has been persisted yet, so a failed
+  // provision leaves NO connection behind (see the ORDER note above).
+  const provisionDeps = {
     fetch: deps.fetch,
     getAccessToken: async () => tokens.accessToken,
     baseUrl: deps.baseUrl,
-  });
+  };
+  await ensureLeadProperties(provisionDeps);
+  await ensureSendProperties(provisionDeps);
 
   await storeConnection(db, {
     provider,

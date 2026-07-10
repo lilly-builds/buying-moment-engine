@@ -22,6 +22,7 @@ import {
   syncPracticeLead,
 } from "@/src/crm/sync";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
+import { SEND_PROPERTY_NAMES } from "@/src/send/hubspot-send";
 import type { CrmAdapter, LeadInput } from "@/src/crm/adapter";
 import {
   hubspotApiMock,
@@ -116,6 +117,43 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
         propertyCalls.some((c) => c.path === `/crm/v3/properties/${objectType}/groups`),
       ).toBe(true);
     }
+  });
+
+  it("provisions the per-touch SEND properties on the contact object (one Connect readies send)", async () => {
+    // Without this, the first sendSequence 400s on the _2 / _3 tokens that don't
+    // exist yet. Connect must ready CRM push AND send in one grant.
+    const mock = hubspotConnectMock();
+    await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), {
+      code: "the-code",
+      encryptionKey: KEY,
+    });
+
+    const created = mock.calls
+      .filter((c) => c.method === "POST" && c.path === "/crm/v3/properties/contacts")
+      .map((c) => String((c.body as { name: unknown }).name));
+
+    // All six send properties (subject + body × 3 touches) provisioned on contacts.
+    expect(SEND_PROPERTY_NAMES).toHaveLength(6);
+    for (const name of SEND_PROPERTY_NAMES) expect(created).toContain(name);
+    // Their group is created before the properties reference it.
+    expect(
+      mock.calls.some(
+        (c) => c.method === "POST" && c.path === "/crm/v3/properties/contacts/groups",
+      ),
+    ).toBe(true);
+  });
+
+  it("a send-property provisioning failure leaves NO connection (same invariant as tags)", async () => {
+    // Every /crm/v3/properties/* call 403s — a portal missing crm.schemas.contacts.write
+    // must fail the connect loudly, not leave a usable-looking-but-broken connection.
+    const forbidden = hubspotConnectMock({ propertiesForbidden: true });
+    await expect(
+      completeHubSpotConnect(t.db, oauthDeps(forbidden.fetch), {
+        code: "the-code",
+        encryptionKey: KEY,
+      }),
+    ).rejects.toThrow(/403/);
+    expect((await getActiveConnection(t.db)).ok).toBe(false);
   });
 
   it("a re-connect to an already-provisioned portal tolerates 409 and still succeeds", async () => {

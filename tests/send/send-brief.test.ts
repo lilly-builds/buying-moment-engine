@@ -10,6 +10,7 @@ import type { HubSpotSendConfig } from "@/src/send/config";
 import {
   CUSTOM_BODY_PROPERTY,
   CUSTOM_SUBJECT_PROPERTY,
+  touchPropertyPair,
 } from "@/src/send/hubspot-send";
 import { createTestDb, type TestDb } from "../setup";
 import { mockFetch, type MockFetch } from "../crm/mock-fetch";
@@ -113,32 +114,68 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
     tdb = await createTestDb();
   });
 
-  it("enrolls a sandbox lead and writes the edited subject + body", async () => {
+  it("launches a 3-touch sequence — all 6 property values in ONE PATCH, ONE enroll", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED);
+    const { fetch: f, calls } = sendMock();
+
+    const touches = [
+      { touchNumber: 1, subject: "3 new front-desk reqs", body: "Hi Lilly — worth 15 minutes?" },
+      { touchNumber: 2, subject: "One more thought", body: "The proof point I mentioned." },
+      { touchNumber: 3, subject: "Closing the loop", body: "No worries if now's not the time." },
+    ];
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches,
+      encryptionKey: KEY,
+      sendConfig: SEND_CONFIG,
+    });
+
+    expect(out).toMatchObject({ ok: true, enrolled: true, touchNumber: 1, touchesSent: 3 });
+
+    // Exactly ONE PATCH — all touches ship together (a contact enrolls once).
+    const patches = calls.filter(
+      (c) => c.method === "PATCH" && c.path.startsWith("/crm/v3/objects/contacts/"),
+    );
+    expect(patches).toHaveLength(1);
+    const props = (patches[0].body as { properties?: Record<string, string> }).properties ?? {};
+    // Each touch's EXACT copy landed in ITS property pair (touch 1 unsuffixed).
+    for (const t of touches) {
+      const pair = touchPropertyPair(t.touchNumber);
+      expect(props[pair.subject]).toBe(t.subject);
+      expect(props[pair.body]).toBe(t.body);
+    }
+    expect(props[CUSTOM_SUBJECT_PROPERTY]).toBe(touches[0].subject);
+    expect(props[CUSTOM_BODY_PROPERTY]).toBe(touches[0].body);
+
+    // Exactly ONE enrollment, with the configured sequence + sender.
+    const enrolls = calls.filter((c) => c.path.endsWith("/enrollments"));
+    expect(enrolls).toHaveLength(1);
+    expect(enrolls[0].query.get("userId")).toBe("95142122");
+    expect(enrolls[0].body).toMatchObject({ sequenceId: "712515259", senderEmail: SANDBOX_EMAIL });
+  });
+
+  it("a single-touch launch still works (back-compat) — one pair, one enroll", async () => {
     const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
     await seedConnection(tdb, GRANTED);
     const { fetch: f, calls } = sendMock();
 
     const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
       practiceId,
-      subject: "3 new front-desk reqs",
-      body: "Hi Lilly — worth 15 minutes?",
+      touches: [{ touchNumber: 1, subject: "Just touch 1", body: "Hi Lilly." }],
       encryptionKey: KEY,
       sendConfig: SEND_CONFIG,
     });
 
-    expect(out).toMatchObject({ ok: true, enrolled: true });
-
-    // The custom-property PATCH carried the AE's EXACT edited subject + body.
+    expect(out).toMatchObject({ ok: true, enrolled: true, touchesSent: 1 });
     const patch = calls.find((c) => c.method === "PATCH" && c.path.startsWith("/crm/v3/objects/contacts/"));
     const props = (patch?.body as { properties?: Record<string, string> })?.properties ?? {};
-    expect(props[CUSTOM_SUBJECT_PROPERTY]).toBe("3 new front-desk reqs");
-    expect(props[CUSTOM_BODY_PROPERTY]).toBe("Hi Lilly — worth 15 minutes?");
-
-    // The enrollment fired, with the configured sequence + sender.
-    const enroll = calls.find((c) => c.path.endsWith("/enrollments"));
-    expect(enroll).toBeTruthy();
-    expect(enroll?.query.get("userId")).toBe("95142122");
-    expect(enroll?.body).toMatchObject({ sequenceId: "712515259", senderEmail: SANDBOX_EMAIL });
+    expect(props[CUSTOM_SUBJECT_PROPERTY]).toBe("Just touch 1");
+    expect(props[CUSTOM_BODY_PROPERTY]).toBe("Hi Lilly.");
+    // Only touch 1's pair is written — nothing for _2 / _3.
+    expect(props[touchPropertyPair(2).subject]).toBeUndefined();
+    expect(props[touchPropertyPair(3).body]).toBeUndefined();
+    expect(calls.filter((c) => c.path.endsWith("/enrollments"))).toHaveLength(1);
   });
 
   it("BLOCKS a real practice before ANY network I/O (D9)", async () => {
@@ -150,8 +187,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
 
     const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
       practiceId,
-      subject: "s",
-      body: "b",
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sendConfig: SEND_CONFIG,
     });
@@ -167,8 +203,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
 
     const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
       practiceId,
-      subject: "s",
-      body: "b",
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sendConfig: SEND_CONFIG,
     });
@@ -184,8 +219,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
 
     const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
       practiceId,
-      subject: "s",
-      body: "b",
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sendConfig: SEND_CONFIG,
     });
@@ -198,8 +232,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
 
     const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
       practiceId,
-      subject: "s",
-      body: "b",
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sendConfig: SEND_CONFIG,
     });
@@ -213,8 +246,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
 
     const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
       practiceId,
-      subject: "s",
-      body: "b",
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sendConfig: SEND_CONFIG,
     });

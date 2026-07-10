@@ -55,6 +55,28 @@ export interface SendResult {
 }
 
 /**
+ * One approved touch in a whole-sequence launch. The shared recipient lives on
+ * `SendSequenceInput`, so each touch carries only its own copy + its position.
+ */
+export interface SequenceTouchInput {
+  /** Which touch in the cadence (1..3) — decides which property pair it lands in. */
+  touchNumber: number;
+  /** The exact edited subject line the AE approved (shipped verbatim). */
+  subject: string;
+  /** The exact edited plain-text body the AE approved (shipped verbatim). */
+  body: string;
+  /** The named next-step CTA carried on the sequence (R4). */
+  cta?: string | null;
+}
+
+/** A whole-sequence launch: every touch's copy shipped in ONE enroll. */
+export interface SendSequenceInput {
+  recipient: Recipient;
+  /** The approved touches to ship — each written into its own property pair. */
+  touches: SequenceTouchInput[];
+}
+
+/**
  * The one verb the cadence calls. A binding sends ONE touch: it makes the
  * recipient's approved body deliverable through the rep's own inbox and dispatches
  * it. The cadence (`cadence.ts`) owns WHEN each touch fires and reply-detection;
@@ -63,4 +85,16 @@ export interface SendResult {
 export interface SendAdapter {
   readonly provider: SendProvider;
   sendTouch(input: SendTouchInput): Promise<SendResult>;
+}
+
+/**
+ * A send binding that can also launch a whole multi-touch sequence in ONE enroll
+ * — the HubSpot path, where all touches' copy is written into per-touch property
+ * pairs and the contact is enrolled once (its multi-step Sequence then drips each
+ * email, rendering its own touch's copy). Kept as an EXTENSION of `SendAdapter`
+ * rather than folded into it so the optional Outreach binding — which sends one
+ * touch at a time — is not forced to implement a batch verb it has no shape for.
+ */
+export interface SequenceSendAdapter extends SendAdapter {
+  sendSequence(input: SendSequenceInput): Promise<SendResult>;
 }

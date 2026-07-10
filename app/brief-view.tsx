@@ -110,38 +110,27 @@ type EditableTouch = {
 
 type SendStatus = "idle" | "sending" | "sent" | "error";
 
-/** The send affordance handed to an email touch — the button + its live status. */
-type TouchSend = {
-  status: SendStatus;
-  message: string | null;
-  canSend: boolean;
-  onSend: () => void;
-};
-
-function sendLabelFor(status: SendStatus): string {
-  if (status === "sending") return "Sending…";
-  if (status === "sent") return "Sent ✓";
-  return "Send email";
+function launchLabelFor(status: SendStatus): string {
+  if (status === "sending") return "Launching…";
+  if (status === "sent") return "Launched ✓";
+  return "Launch outreach";
 }
 
 /**
  * One editable touch in the 3-touch sequence — controlled, so its edits reach the
- * send. Email touches carry a Send affordance in the header row (right-aligned):
- * when HubSpot is connected it's the live purple Send button that enrolls the contact
- * with THIS touch's exact subject + body; when it isn't, it's the named SendGate
- * handoff. `spotlight` marks the first touch as the tour's "edit-email" target.
+ * send. Every EMAIL touch's copy ships together via the ONE "Launch outreach" action
+ * below the list (a contact enrolls once; the Sequence drips each email), so the
+ * editor itself carries no per-touch send button. `spotlight` marks the first touch
+ * as the tour's "edit-email" target. A call touch shows a notes textarea (the AE's
+ * own call prep) — those notes are NEVER emailed; the launch skips non-email touches.
  */
 function TouchEditor({
   touch,
   onChange,
-  send,
-  sendConnected,
   spotlight = false,
 }: {
   touch: EditableTouch;
   onChange: (patch: Partial<EditableTouch>) => void;
-  send?: TouchSend;
-  sendConnected: boolean;
   spotlight?: boolean;
 }) {
   const rows = Math.max(4, touch.body.split("\n").length + 3);
@@ -150,33 +139,13 @@ function TouchEditor({
       data-tour={spotlight ? "edit-email" : undefined}
       className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Badge tone="neutral" size="sm">
-            Touch {touch.touchNumber}
-          </Badge>
-          <Badge tone="neutral" size="sm">
-            {CHANNEL_LABEL[touch.channel] ?? touch.channel}
-          </Badge>
-        </div>
-        {/* `send` is defined only for email touches. Connected → live send (U11);
-            not connected → the named handoff gate. Never both. */}
-        {send ? (
-          sendConnected ? (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={send.onSend}
-              // Disable while sending AND after a success — one enrollment per click,
-              // never a duplicate email. An error re-enables it for a retry.
-              disabled={!send.canSend || send.status === "sending" || send.status === "sent"}
-            >
-              {sendLabelFor(send.status)}
-            </Button>
-          ) : (
-            <SendGate ctaLabel="Send" />
-          )
-        ) : null}
+      <div className="flex items-center gap-2">
+        <Badge tone="neutral" size="sm">
+          Touch {touch.touchNumber}
+        </Badge>
+        <Badge tone="neutral" size="sm">
+          {CHANNEL_LABEL[touch.channel] ?? touch.channel}
+        </Badge>
       </div>
       {touch.channel === "call" ? (
         <textarea
@@ -203,19 +172,6 @@ function TouchEditor({
           />
         </>
       )}
-      {/* Send status — the honest outcome of the enrollment, D9-safe (no address).
-          Only the live send path ever populates this; the gate opens its own modal. */}
-      {send?.message ? (
-        <p
-          role="status"
-          aria-live="polite"
-          className={`font-sans text-sm ${
-            send.status === "error" ? "text-danger" : "text-ink-body"
-          }`}
-        >
-          {send.message}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -271,8 +227,8 @@ function OutreachMode({
   const { factual, voice } = brief;
   const contact = factual.contact;
 
-  // The 3-touch sequence is directly editable (D7); lift it into state so the Send
-  // button ships the AE's exact edited subject + body, not the stored draft.
+  // The 3-touch sequence is directly editable (D7); lift it into state so the Launch
+  // action ships the AE's exact edited subject + body, not the stored draft.
   const [touches, setTouches] = useState<EditableTouch[]>(() =>
     voice.sequence.touches.map((t) => ({
       touchNumber: t.touchNumber,
@@ -281,11 +237,12 @@ function OutreachMode({
       body: t.body,
     })),
   );
-  // Per-touch send state, keyed by touch number — each email touch owns its own
-  // button + status, so sending touch 1 never mislabels touch 2.
-  const [sendState, setSendState] = useState<
-    Record<number, { status: SendStatus; message: string | null }>
-  >({});
+  // ONE launch state for the whole sequence — a contact enrolls once, so there is a
+  // single button + status, never one per touch (a 2nd enroll 400s ALREADY_ENROLLED).
+  const [launch, setLaunch] = useState<{ status: SendStatus; message: string | null }>({
+    status: "idle",
+    message: null,
+  });
 
   function updateTouch(touchNumber: number, patch: Partial<EditableTouch>) {
     setTouches((prev) =>
@@ -295,54 +252,57 @@ function OutreachMode({
 
   const hasEmail = Boolean(contact?.email);
 
-  async function handleSend(touchNumber: number) {
-    const touch = touches.find((t) => t.touchNumber === touchNumber);
-    if (!touch) return;
-    setSendState((prev) => ({ ...prev, [touchNumber]: { status: "sending", message: null } }));
+  async function handleLaunch() {
+    // Only EMAIL touches are emailed — a "call" touch's body is the AE's own call
+    // prep, never customer copy, so it must never ship as an email. Each email touch
+    // maps to its Sequence email step by touchNumber; call steps are rep tasks.
+    const emailTouches = touches.filter((t) => t.channel === "email");
+    // Guard client-side so a blanked field dead-ends here with a NAMED touch, not as
+    // an opaque server 400 on the whole launch.
+    const blank = emailTouches.find(
+      (t) => t.subject.trim().length === 0 || t.body.trim().length === 0,
+    );
+    if (blank) {
+      setLaunch({
+        status: "error",
+        message: `Touch ${blank.touchNumber} needs a subject and a body before you can launch.`,
+      });
+      return;
+    }
+    if (emailTouches.length === 0) {
+      setLaunch({ status: "error", message: "No email touches to launch." });
+      return;
+    }
+
+    setLaunch({ status: "sending", message: null });
     try {
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Every email touch ships together — each maps to its Sequence step by touchNumber.
         body: JSON.stringify({
           practiceId,
-          subject: touch.subject,
-          body: touch.body,
+          touches: emailTouches.map((t) => ({
+            touchNumber: t.touchNumber,
+            subject: t.subject,
+            body: t.body,
+          })),
           cta: voice.sequence.namedCta,
         }),
       });
       const data: { error?: string } = await res.json().catch(() => ({}));
       if (res.ok) {
-        setSendState((prev) => ({
-          ...prev,
-          [touchNumber]: {
-            status: "sent",
-            message: "Enrolled — the email is sending through your connected inbox.",
-          },
-        }));
+        setLaunch({
+          status: "sent",
+          message:
+            "Enrolled — your outreach sequence is sending through your connected inbox.",
+        });
       } else {
-        setSendState((prev) => ({
-          ...prev,
-          [touchNumber]: { status: "error", message: data.error ?? "Send failed." },
-        }));
+        setLaunch({ status: "error", message: data.error ?? "Launch failed." });
       }
     } catch {
-      setSendState((prev) => ({
-        ...prev,
-        [touchNumber]: { status: "error", message: "Send failed — couldn't reach the server." },
-      }));
+      setLaunch({ status: "error", message: "Launch failed — couldn't reach the server." });
     }
-  }
-
-  function sendFor(touch: EditableTouch): TouchSend | undefined {
-    if (touch.channel !== "email") return undefined; // only email touches send
-    const s = sendState[touch.touchNumber] ?? { status: "idle" as const, message: null };
-    return {
-      status: s.status,
-      message: s.message,
-      // No contact address → nothing to send to (the route would 422 anyway).
-      canSend: hasEmail,
-      onSend: () => handleSend(touch.touchNumber),
-    };
   }
 
   return (
@@ -444,19 +404,49 @@ function OutreachMode({
                     key={touch.touchNumber}
                     touch={touch}
                     onChange={(patch) => updateTouch(touch.touchNumber, patch)}
-                    send={sendFor(touch)}
-                    sendConnected={sendConnected}
                     spotlight={i === 0}
                   />
                 ))}
               </div>
             </div>
 
-            {!hasEmail ? (
+            {/* ONE launch for the whole cadence — connected → the live enroll that
+                ships every touch's edited copy; not connected → the named RevOps
+                handoff. Never both. */}
+            {hasEmail ? (
+              sendConnected ? (
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={handleLaunch}
+                    // Disable while launching AND after success — one enrollment per
+                    // click, never a duplicate. An error re-enables it for a retry.
+                    disabled={launch.status === "sending" || launch.status === "sent"}
+                  >
+                    {launchLabelFor(launch.status)}
+                  </Button>
+                  {/* Launch status — the honest outcome, D9-safe (no address). */}
+                  {launch.message ? (
+                    <p
+                      role="status"
+                      aria-live="polite"
+                      className={`font-sans text-sm ${
+                        launch.status === "error" ? "text-danger" : "text-ink-body"
+                      }`}
+                    >
+                      {launch.message}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <SendGate ctaLabel="Launch outreach" />
+              )
+            ) : (
               <p className="font-sans text-sm text-ink-muted">
                 No contact email on this brief yet — nothing to send.
               </p>
-            ) : null}
+            )}
           </div>
         </Card>
       </div>
