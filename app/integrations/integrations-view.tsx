@@ -165,6 +165,62 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
   );
 }
 
+// ── Engine keys (BYOK) ─────────────────────────────────────────────────────────
+
+/** The two paste-a-key engine credentials (spec § Stack). Draft-1 scaffold: the
+ *  pill reflects whether the key is present in the environment; the actual paste
+ *  form is the productionization follow-up. */
+export interface EngineKeyStatus {
+  anthropic: boolean;
+  pdl: boolean;
+}
+
+const ENGINE_KEYS = [
+  {
+    id: "anthropic" as const,
+    name: "Anthropic (Claude)",
+    blurb: "Researches each practice and writes the brief.",
+    how: "Paste your Anthropic key in settings.",
+  },
+  {
+    id: "pdl" as const,
+    name: "People Data Labs",
+    blurb: "Finds the decision-maker's verified email + LinkedIn.",
+    how: "Paste your People Data Labs key in settings.",
+  },
+];
+
+function KeyRow({
+  name,
+  blurb,
+  how,
+  connected,
+}: {
+  name: string;
+  blurb: string;
+  how: string;
+  connected: boolean;
+}) {
+  return (
+    <Card variant="outlined" padding="lg">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-3">
+            <h3 className="font-display text-h5 font-book text-ink">{name}</h3>
+            <Badge tone={connected ? "success" : "neutral"} size="sm">
+              {connected ? "Connected" : "Not yet"}
+            </Badge>
+          </div>
+          <p className="max-w-md font-sans text-base text-ink-body">{blurb}</p>
+        </div>
+        {connected ? null : (
+          <p className="shrink-0 font-sans text-sm text-ink-muted sm:pl-4">{how}</p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 // ── Request-an-integration form ────────────────────────────────────────────────
 
 type SubmitState =
@@ -239,7 +295,7 @@ function RequestIntegrationCard() {
             Request an integration
           </h3>
           <p className="max-w-lg font-sans text-base text-ink-body">
-            Salesforce, Outreach, Clay, a marketing tool — tell me what your team
+            Salesforce, Outreach, Clay, a marketing tool. Tell me what your team
             runs and I&apos;ll wire it in next. Every request is logged.
           </p>
         </div>
@@ -280,7 +336,7 @@ function RequestIntegrationCard() {
           </Button>
           {status.kind === "ok" ? (
             <p role="status" className="font-sans text-base text-success-ink">
-              Thanks — I&apos;ve logged your request for{" "}
+              Thanks. I&apos;ve logged your request for{" "}
               <span className="font-medium">{status.tool}</span>.
             </p>
           ) : null}
@@ -299,10 +355,16 @@ function RequestIntegrationCard() {
 
 export interface IntegrationsViewProps {
   hubspot: HubSpotStatus;
+  /** Which engine keys are present. Defaults to none so the styleguide preview renders. */
+  engineKeys?: EngineKeyStatus;
   banner?: ConnectBanner | null;
 }
 
-export function IntegrationsView({ hubspot, banner }: IntegrationsViewProps) {
+export function IntegrationsView({
+  hubspot,
+  engineKeys = { anthropic: false, pdl: false },
+  banner,
+}: IntegrationsViewProps) {
   return (
     <div
       className="flex flex-1 flex-col"
@@ -324,6 +386,19 @@ export function IntegrationsView({ hubspot, banner }: IntegrationsViewProps) {
               CRM
             </h2>
             <HubSpotCard status={hubspot} />
+          </section>
+
+          <section className="flex flex-col gap-4">
+            <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
+              Engine keys
+            </h2>
+            <p className="max-w-2xl font-sans text-base text-white/80">
+              These run the tool on your own account. Paste each one once. HubSpot above is the
+              only OAuth connect.
+            </p>
+            {ENGINE_KEYS.map((k) => (
+              <KeyRow key={k.id} name={k.name} blurb={k.blurb} how={k.how} connected={engineKeys[k.id]} />
+            ))}
           </section>
 
           <section className="flex flex-col gap-4">

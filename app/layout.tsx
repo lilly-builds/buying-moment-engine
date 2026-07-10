@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Inter_Tight, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { OnboardingTour } from "./onboarding/onboarding-tour";
 
 /**
  * EliseAI's three real families (U2 / R15). `document.fonts` on eliseai.com
@@ -47,7 +48,12 @@ export default function RootLayout({
       lang="en"
       className={`${interTight.variable} ${inter.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        {/* The guided "work your first lead" coach-through (U17). Mounted here so it
+            survives the feed → brief navigation; renders nothing unless it's active. */}
+        <OnboardingTour />
+      </body>
     </html>
   );
 }

@@ -163,11 +163,35 @@
   }
 }
 
-/* Respect reduced-motion: no glide, no travelling pulse. */
+/* The onboarding finale (U17): celebration emojis sprout from the "You got this"
+   card and arc outward. Each particle sets --tx/--ty/--rot inline. */
+@keyframes confetti-burst {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3) rotate(0deg);
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(var(--tx) - 50%), calc(var(--ty) - 50%)) scale(1)
+      rotate(var(--rot));
+    opacity: 0;
+  }
+}
+
+/* Respect reduced-motion: no glide, no travelling pulse, no confetti flight. */
 @media (prefers-reduced-motion: reduce) {
   .animate-signal-flow,
   .animate-card-glide-in {
     animation: none;
+  }
+  .confetti-piece {
+    animation: none !important;
+    opacity: 0;
   }
 }
 

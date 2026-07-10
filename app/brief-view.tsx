@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Badge,
   Button,
@@ -13,6 +13,8 @@ import {
   SourceLink,
   TopNav,
 } from "@/design/components";
+import { LeadFeedback } from "@/design/components/brief/lead-feedback";
+import { SendGate } from "@/design/components/brief/send-gate";
 import { gradients } from "@/design/tokens";
 import type { RenderedBrief, FiredSignal } from "@/src/brief/render";
 import { windowDaysFor } from "@/src/brief/render";
@@ -34,6 +36,11 @@ import { toSignalKind } from "@/src/ui/signal-display";
  * editable (D7). Time-sensitive fields — fired-signal list, freshness, per-signal age
  * — come from `brief.live`, computed fresh at request time; nothing trusts a stored
  * badge. `nowMs` is passed from the server so "N days ago" is stable across hydrate.
+ *
+ * The email Send button is CONDITIONAL on `sendConnected` (Lilly, final 2026-07-09):
+ * HubSpot connected → the live send (U11) fires the real enrollment; not connected →
+ * the named SendGate handoff routes the AE to the RevOps owner who turns sending on.
+ * The two never coexist — one Send affordance, chosen by connection state.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -119,21 +126,30 @@ function sendLabelFor(status: SendStatus): string {
 
 /**
  * One editable touch in the 3-touch sequence — controlled, so its edits reach the
- * send. Email touches carry a purple Send button in the header row (right-aligned)
- * that enrolls the contact and ships THIS touch's exact subject + body.
+ * send. Email touches carry a Send affordance in the header row (right-aligned):
+ * when HubSpot is connected it's the live purple Send button that enrolls the contact
+ * with THIS touch's exact subject + body; when it isn't, it's the named SendGate
+ * handoff. `spotlight` marks the first touch as the tour's "edit-email" target.
  */
 function TouchEditor({
   touch,
   onChange,
   send,
+  sendConnected,
+  spotlight = false,
 }: {
   touch: EditableTouch;
   onChange: (patch: Partial<EditableTouch>) => void;
   send?: TouchSend;
+  sendConnected: boolean;
+  spotlight?: boolean;
 }) {
   const rows = Math.max(4, touch.body.split("\n").length + 3);
   return (
-    <div className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4">
+    <div
+      data-tour={spotlight ? "edit-email" : undefined}
+      className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-4"
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Badge tone="neutral" size="sm">
@@ -143,17 +159,23 @@ function TouchEditor({
             {CHANNEL_LABEL[touch.channel] ?? touch.channel}
           </Badge>
         </div>
+        {/* `send` is defined only for email touches. Connected → live send (U11);
+            not connected → the named handoff gate. Never both. */}
         {send ? (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={send.onSend}
-            // Disable while sending AND after a success — one enrollment per click,
-            // never a duplicate email. An error re-enables it for a retry.
-            disabled={!send.canSend || send.status === "sending" || send.status === "sent"}
-          >
-            {sendLabelFor(send.status)}
-          </Button>
+          sendConnected ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={send.onSend}
+              // Disable while sending AND after a success — one enrollment per click,
+              // never a duplicate email. An error re-enables it for a retry.
+              disabled={!send.canSend || send.status === "sending" || send.status === "sent"}
+            >
+              {sendLabelFor(send.status)}
+            </Button>
+          ) : (
+            <SendGate ctaLabel="Send" />
+          )
         ) : null}
       </div>
       {touch.channel === "call" ? (
@@ -181,7 +203,8 @@ function TouchEditor({
           />
         </>
       )}
-      {/* Send status — the honest outcome of the enrollment, D9-safe (no address). */}
+      {/* Send status — the honest outcome of the enrollment, D9-safe (no address).
+          Only the live send path ever populates this; the gate opens its own modal. */}
       {send?.message ? (
         <p
           role="status"
@@ -236,7 +259,15 @@ function SignalDetail({ signal, nowMs }: { signal: FiredSignal; nowMs: number })
 }
 
 /** ⚡ Outreach mode — who to reach, and the message that goes out. */
-function OutreachMode({ brief, practiceId }: { brief: RenderedBrief; practiceId: string }) {
+function OutreachMode({
+  brief,
+  practiceId,
+  sendConnected,
+}: {
+  brief: RenderedBrief;
+  practiceId: string;
+  sendConnected: boolean;
+}) {
   const { factual, voice } = brief;
   const contact = factual.contact;
 
@@ -315,111 +346,123 @@ function OutreachMode({ brief, practiceId }: { brief: RenderedBrief; practiceId:
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-5">
-      {/* Who to contact */}
-      <Card variant="elevated" padding="lg" className="lg:col-span-2">
-        <div className="flex h-full flex-col gap-5">
-          <SectionHeader title="Who to contact" size="h3" as="h2" />
-          {contact ? (
-            <>
-              <div className="flex flex-col gap-1">
-                <p className="font-display text-h5 text-ink">
-                  {contact.name ?? "Decision-maker (name not public)"}
-                </p>
-                <p className="font-sans text-base text-ink-body">{contact.role}</p>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                {contact.email ? (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-sans text-sm text-ink-muted">
-                      Email{contact.emailProvider === "pdl" ? " · verified" : ""}
-                    </span>
-                    <p className="font-sans text-base text-ink">{contact.email}</p>
-                  </div>
-                ) : null}
-                {contact.bestChannel ? (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-sans text-sm text-ink-muted">
-                      Best channel
-                    </span>
-                    <p className="font-sans text-base text-ink">{contact.bestChannel}</p>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-auto flex flex-col gap-3">
-                <p className="font-sans text-sm text-ink-muted">
-                  Check for mutual connections before you reach out:
-                </p>
-                <div className="flex flex-wrap gap-3">
-                  <ButtonLink
-                    variant="secondary"
-                    size="sm"
-                    href={contact.linkedinHref}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    LinkedIn
-                  </ButtonLink>
-                  <ButtonLink
-                    variant="secondary"
-                    size="sm"
-                    href={contact.facebookHref}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Facebook
-                  </ButtonLink>
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-6 lg:grid-cols-5">
+        {/* Who to contact */}
+        <Card variant="elevated" padding="lg" className="lg:col-span-2">
+          <div className="flex h-full flex-col gap-5">
+            <SectionHeader title="Who to contact" size="h3" as="h2" />
+            {contact ? (
+              <>
+                <div className="flex flex-col gap-1">
+                  <p className="font-display text-h5 text-ink">
+                    {contact.name ?? "Decision-maker (name not public)"}
+                  </p>
+                  <p className="font-sans text-base text-ink-body">{contact.role}</p>
                 </div>
-              </div>
-            </>
-          ) : (
-            <p className="font-sans text-base text-ink-body">
-              No public decision-maker surfaced yet — reach the practice on its main
-              line and ask for the practice manager.
-            </p>
-          )}
-        </div>
-      </Card>
 
-      {/* Recommended action */}
-      <Card variant="elevated" padding="lg" className="lg:col-span-3">
-        <div className="flex flex-col gap-5">
-          <SectionHeader title="Recommended action" size="h3" as="h2" />
+                <div className="flex flex-col gap-3">
+                  {contact.email ? (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-sans text-sm text-ink-muted">
+                        Email{contact.emailProvider === "pdl" ? " · verified" : ""}
+                      </span>
+                      <p className="font-sans text-base text-ink">{contact.email}</p>
+                    </div>
+                  ) : null}
+                  {contact.bestChannel ? (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-sans text-sm text-ink-muted">
+                        Best channel
+                      </span>
+                      <p className="font-sans text-base text-ink">{contact.bestChannel}</p>
+                    </div>
+                  ) : null}
+                </div>
 
-          <div className="flex flex-col gap-2">
-            <span className="font-sans text-sm text-ink-muted">
-              Call opener
-            </span>
-            <p className="rounded-panel bg-brand-50 p-4 font-sans text-base text-ink">
-              {voice.callOpener}
-            </p>
+                <div className="mt-auto flex flex-col gap-3">
+                  <p className="font-sans text-sm text-ink-muted">
+                    Check for mutual connections before you reach out:
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <ButtonLink
+                      variant="secondary"
+                      size="sm"
+                      href={contact.linkedinHref}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      LinkedIn
+                    </ButtonLink>
+                    <ButtonLink
+                      variant="secondary"
+                      size="sm"
+                      href={contact.facebookHref}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Facebook
+                    </ButtonLink>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="font-sans text-base text-ink-body">
+                No public decision-maker surfaced yet — reach the practice on its main
+                line and ask for the practice manager.
+              </p>
+            )}
           </div>
+        </Card>
 
-          <div className="flex flex-col gap-2">
-            <span className="font-sans text-sm text-ink-muted">
-              3-touch sequence · editable
-            </span>
-            <div className="flex flex-col gap-3">
-              {touches.map((touch) => (
-                <TouchEditor
-                  key={touch.touchNumber}
-                  touch={touch}
-                  onChange={(patch) => updateTouch(touch.touchNumber, patch)}
-                  send={sendFor(touch)}
-                />
-              ))}
+        {/* Recommended action */}
+        <Card variant="elevated" padding="lg" className="lg:col-span-3">
+          <div className="flex flex-col gap-5">
+            <SectionHeader
+              title="Recommended action"
+              description={`Ends with your call to action: ${voice.sequence.namedCta}`}
+              size="h3"
+              as="h2"
+            />
+
+            <div className="flex flex-col gap-2">
+              <span className="font-sans text-sm text-ink-muted">
+                Call opener
+              </span>
+              <p className="rounded-panel bg-brand-50 p-4 font-sans text-base text-ink">
+                {voice.callOpener}
+              </p>
             </div>
-          </div>
 
-          {!hasEmail ? (
-            <p className="font-sans text-sm text-ink-muted">
-              No contact email on this brief yet — nothing to send.
-            </p>
-          ) : null}
-        </div>
-      </Card>
+            <div className="flex flex-col gap-2">
+              <span className="font-sans text-sm text-ink-muted">
+                3-touch sequence · editable
+              </span>
+              <div className="flex flex-col gap-3">
+                {touches.map((touch, i) => (
+                  <TouchEditor
+                    key={touch.touchNumber}
+                    touch={touch}
+                    onChange={(patch) => updateTouch(touch.touchNumber, patch)}
+                    send={sendFor(touch)}
+                    sendConnected={sendConnected}
+                    spotlight={i === 0}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {!hasEmail ? (
+              <p className="font-sans text-sm text-ink-muted">
+                No contact email on this brief yet — nothing to send.
+              </p>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+
+      {/* One-tap lead-quality vote — teaches the tool (tour step 5, `rate-lead`). */}
+      <LeadFeedback />
     </div>
   );
 }
@@ -455,7 +498,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
 
       {/* Incumbent tooling */}
       <Card variant="elevated" padding="lg">
-        <div className="flex flex-col gap-5">
+        <div data-tour="incumbent-tooling" className="flex flex-col gap-5">
           <SectionHeader title="Incumbent tooling" size="h3" as="h3" />
           <div className="flex flex-col gap-4">
             {factual.incumbentTooling.map((c) => (
@@ -465,11 +508,13 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
         </div>
       </Card>
 
-      {/* EliseAI fit + proof + ROI */}
+      {/* EliseAI fit + proof + ROI — the tour's `why-fits` spotlights the header + pain. */}
       <Card variant="elevated" padding="lg" className="lg:col-span-2">
         <div className="flex flex-col gap-6">
-          <SectionHeader title="Why EliseAI fits" size="h3" as="h3" />
-          <p className="max-w-3xl font-sans text-base text-ink-body">{factual.painFit}</p>
+          <div data-tour="why-fits" className="flex flex-col gap-6">
+            <SectionHeader title="Why EliseAI fits" size="h3" as="h3" />
+            <p className="max-w-3xl font-sans text-base text-ink-body">{factual.painFit}</p>
+          </div>
 
           <div className="grid gap-6 md:grid-cols-2">
             {/* Proof point */}
@@ -532,7 +577,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
 
       {/* Discovery questions */}
       <Card variant="elevated" padding="lg">
-        <div className="flex flex-col gap-5">
+        <div data-tour="discovery" className="flex flex-col gap-5">
           <SectionHeader title="Discovery questions" size="h3" as="h3" />
           <ol className="flex flex-col gap-4">
             {voice.discoveryQuestions.map((q, i) => (
@@ -571,14 +616,28 @@ export function BriefView({
   brief,
   nowMs,
   practiceId,
+  sendConnected,
 }: {
   brief: RenderedBrief;
   nowMs: number;
   practiceId: string;
+  sendConnected: boolean;
 }) {
   const [mode, setMode] = useState<BriefMode>("outreach");
   const { factual } = brief;
   const location = [factual.city, factual.state].filter(Boolean).join(", ");
+
+  // The guided tour flips the brief to the tier that holds the step it's coaching
+  // (the call-prep sections live in prep; the editable email + thumb live in outreach).
+  // A one-way event keeps the tour decoupled from this component's internals.
+  useEffect(() => {
+    function onMode(e: Event) {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail === "outreach" || detail === "prep") setMode(detail);
+    }
+    window.addEventListener("bme:brief-mode", onMode);
+    return () => window.removeEventListener("bme:brief-mode", onMode);
+  }, []);
 
   return (
     // The health-blue hero paints the whole page — same surface as the feed.
@@ -593,7 +652,7 @@ export function BriefView({
           blue rather than raw text floating on it (Lilly, 2026-07-08). */}
       <PageContainer className="pb-2 pt-10">
         <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
-          <div className="flex flex-col gap-3">
+          <div data-tour="why-now" className="flex flex-col gap-3">
             <span className="font-sans text-base font-medium uppercase tracking-eyebrow text-white">
               {factual.practiceName}
               {location ? ` · ${location}` : ""}
@@ -603,20 +662,22 @@ export function BriefView({
             </h1>
           </div>
 
-          <SegmentedControl<BriefMode>
-            label="Choose what to work on this brief"
-            options={MODE_OPTIONS}
-            value={mode}
-            onValueChange={setMode}
-            accent="brand"
-          />
+          <div data-tour="prep-toggle" className="w-fit">
+            <SegmentedControl<BriefMode>
+              label="Choose what to work on this brief"
+              options={MODE_OPTIONS}
+              value={mode}
+              onValueChange={setMode}
+              accent="brand"
+            />
+          </div>
         </div>
       </PageContainer>
 
       <main className="flex flex-1 flex-col">
         <PageContainer className="pb-12 pt-6">
           {mode === "outreach" ? (
-            <OutreachMode brief={brief} practiceId={practiceId} />
+            <OutreachMode brief={brief} practiceId={practiceId} sendConnected={sendConnected} />
           ) : (
             <PrepMode brief={brief} nowMs={nowMs} />
           )}

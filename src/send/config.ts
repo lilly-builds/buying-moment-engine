@@ -1,3 +1,4 @@
+import { readEncryptionKey, readOAuthDeps } from "@/src/crm/config";
 import type { SandboxConfig } from "./guard";
 
 /**
@@ -46,4 +47,26 @@ export function readHubSpotSendConfig(
       allowSubaddressTag: env.SEND_SANDBOX_ALLOW_SUBADDRESS === "true",
     },
   };
+}
+
+/**
+ * Is the send path fully configured — would `POST /api/send` get PAST its 503
+ * "Send is not configured" gate? Mirrors that route's readiness check exactly (the
+ * same three readers), so the brief's live Send button is offered ONLY when a click
+ * would actually enroll and send. Any missing piece — OAuth client env, the token
+ * encryption key, OR the sequence/sender env (HUBSPOT_SEQUENCE_ID / _SENDER_EMAIL /
+ * _SENDER_USER_ID) — returns false, and the brief falls back to the RevOps handoff
+ * gate instead of a button that errors. A HubSpot OAuth connection can exist while
+ * this send env is still absent (see docs/hubspot-send-setup.md), which is exactly
+ * why the connection row alone is NOT a sufficient signal.
+ */
+export function isSendConfigured(): boolean {
+  try {
+    readEncryptionKey();
+    readOAuthDeps();
+    readHubSpotSendConfig();
+    return true;
+  } catch {
+    return false;
+  }
 }

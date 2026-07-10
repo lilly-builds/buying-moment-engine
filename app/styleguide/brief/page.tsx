@@ -14,13 +14,15 @@ export const metadata: Metadata = {
  */
 export default function BriefPreviewPage() {
   const now = new Date();
-  // A styleguide preview reads no DB and never sends; a placeholder id keeps the
-  // Send button inert (a POST would 401/404 for this non-existent practice).
+  // A styleguide preview reads no DB, so it can't know a live connection — render the
+  // not-connected state (`sendConnected={false}`), which shows the named SendGate
+  // handoff rather than a live Send button that would 401/404 for this placeholder id.
   return (
     <BriefView
       brief={demoBrief(now)}
       nowMs={now.getTime()}
       practiceId="styleguide-preview"
+      sendConnected={false}
     />
   );
 }
