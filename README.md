@@ -125,7 +125,7 @@ A first-time AE gets a guided **"work your first lead"** tour, rendered as brand
 gradient orb with the step icon, a one-bold-word instruction, and a context chip). It coaches them
 over the real feed and a real brief, and it is fully skippable.
 
-![The guided onboarding tour step card](docs/screenshots/onboarding-tour.gif)
+![The guided onboarding tour step card](docs/screenshots/onboarding.png)
 *The guided tour: a brand step card (gradient orb, one-bold-word instruction, context chip) over the real feed.*
 
 ### Connecting the stack
