@@ -147,17 +147,20 @@ click for HubSpot and two pasted keys for the engine. The step-by-step is in
 
 ---
 
-## The data is real (and what "demo mode" means)
+## The full loop (and what "demo mode" means)
 
-Fake data proves nothing, so the engine runs on real inputs. It pulls **real practices** and
-**real public signals** (job posts, reviews, deal news), and the contacts are **real, named
-decision-makers** from public professional info. "Demo mode" refers to **actions, not data**:
-drafts and displays only. **Nothing sends to a real practice, and nothing writes to a live
-system.** The engine only ever touches public *business* data. There is zero patient data or PHI,
-ever.
+This is a full GTM engine, not a research assistant. It finds the buying moment, drafts the
+outreach, **sends it**, tracks it in the CRM, and scores the meetings booked and deals won that
+come back. Landing deals is the whole point, and the ROI scoreboard is where that shows up. The
+send path and the CRM push are built and tested end to end.
 
-This is enforced in code, not by convention: a fail-closed send firewall means a message can only
-go to an address registered as a sandbox test recipient. Empty allowlist, nothing sends.
+Two honest limits, and they apply to **this demo only**. First, the **data is real** while the
+**final send is simulated**: the engine pulls real practices, real public signals, and real named
+decision-makers, but in the demo it drafts and displays rather than firing live outreach. That is
+a deliberate safety gate so no real clinic is ever contacted while the tool is being evaluated, and
+it flips on the moment EliseAI connects their HubSpot. It is enforced in code, not by convention: a
+fail-closed send firewall only ever allows a sandbox test recipient. Second, the engine only ever
+touches public *business* data. There is zero patient data or PHI, ever.
 
 ---
 
@@ -207,7 +210,7 @@ and the docs say so rather than imply more than ships:
 | **Paste-your-own-key** | The `/integrations` key fields store an encrypted, per-tenant key | The manual pipeline reads the environment keys; a pasted key is wired only into the dormant scheduled cron (Anthropic), not the manual run |
 | **Phone-complaint detector** | The Google Places review reader is fully built and tested | Runs dark until a billed Google Places key and a place lookup list are supplied; it is a lookup, not a discoverer |
 | **Lead feedback** | The 👍/👎 mark renders; the data model and scoreboard support one-tap reasons and free-text | Live capture of the reasons/free-text and vote persistence is the next step; it is seeded for the demo today |
-| **Send** | The full send path is built and tested, gated behind a HubSpot connect and the send firewall | It never fires at a real practice, on purpose |
+| **Send** | The full send path is built and tested (the engine's job is to send outreach and land deals) | Off for this demo only, as a safety gate so no real clinic is contacted; flips on the moment EliseAI connects HubSpot |
 
 ---
 
