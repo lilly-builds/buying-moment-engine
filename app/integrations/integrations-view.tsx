@@ -14,6 +14,8 @@ import {
   TopNav,
 } from "@/design/components";
 import { gradients } from "@/design/tokens";
+import type { RevOpsOwner } from "@/src/target/config";
+import { ValueOpener } from "./value-opener";
 
 /**
  * Integrations / Connections (U17) — where the tool binds to the stack the JD
@@ -615,12 +617,21 @@ export interface IntegrationsViewProps {
   /** Which engine keys are present. Defaults to none so the styleguide preview renders. */
   engineKeys?: EngineKeyStatus;
   banner?: ConnectBanner | null;
+  /** The RevOps owner the Send handoff routes to — dynamic (D14), never hardcoded.
+   *  Defaults so the styleguide preview renders without wiring. */
+  owner?: RevOpsOwner;
+  /** Real hot-lead count for the value opener; 0 degrades the copy (no fake number). */
+  leadCount?: number;
+  /** The first live brief to open from the opener; null → link to the feed. */
+  firstBriefHref?: string | null;
 }
 
 export function IntegrationsView({
   hubspot,
   engineKeys = { anthropic: false, pdl: false },
   banner,
+  leadCount = 0,
+  firstBriefHref = null,
 }: IntegrationsViewProps) {
   return (
     <div
@@ -631,6 +642,8 @@ export function IntegrationsView({
       <main className="flex flex-1 flex-col">
         <PageContainer className="flex flex-col gap-8 py-8">
           {banner ? <ConnectResultBanner banner={banner} /> : null}
+
+          <ValueOpener leadCount={leadCount} firstBriefHref={firstBriefHref} />
 
           <SectionHeader
             tone="dark"
