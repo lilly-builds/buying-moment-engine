@@ -8,15 +8,27 @@ import { PDL_USD_PER_MATCHED_RECORD } from "@/src/enrich/config";
 import {
   normalizeCompanyResponse,
   normalizePersonResponse,
+  normalizePersonSearchResponse,
   pdlClient,
 } from "@/src/enrich/pdl-client";
-import { runPdlCompanyEnrich, runPdlPersonEnrich } from "@/src/enrich/pdl";
+import {
+  runPdlCompanyEnrich,
+  runPdlPersonDiscover,
+  runPdlPersonEnrich,
+} from "@/src/enrich/pdl";
 import { PdlRateLimitError } from "@/src/enrich/types";
 
 const PERSON = {
   fullName: "Dana Whitfield",
   companyName: "Sunshine Dermatology Associates",
   role: "Practice Administrator",
+};
+
+const DISCOVERY = {
+  companyName: "Harbor Vision Eye Care",
+  city: "Portland",
+  state: "OR",
+  targetRoles: ["practice administrator", "office manager"],
 };
 
 describe("PDL response normalization (published Person Enrichment schema)", () => {
@@ -75,8 +87,70 @@ describe("PDL response normalization (published Person Enrichment schema)", () =
   });
 
   it("EDGE CASE: an unrecognized body degrades to no-match, never a crash", () => {
-    expect(normalizePersonResponse({ unexpected: true }, 200).matched).toBe(false);
+    expect(normalizePersonResponse({ unexpected: true }, 200).matched).toBe(
+      false,
+    );
     expect(normalizeCompanyResponse(null, 404).matched).toBe(false);
+  });
+});
+
+describe("PDL Person Search discovery", () => {
+  it("accepts a confident business decision-maker and surfaces only work contact fields", async () => {
+    const searchBody = {
+      status: 200,
+      total: 1,
+      data: [
+        {
+          full_name: "Dana Whitfield",
+          job_title: "Office Manager",
+          job_company_name: "Harbor Vision Eye Care",
+          location_locality: "Portland",
+          location_region: "Oregon",
+          work_email: "dana@harborvision.example",
+          recommended_personal_email: "do-not-use@example.invalid",
+          linkedin_url: "linkedin.com/in/dana-whitfield-example",
+        },
+      ],
+    };
+
+    expect(normalizePersonSearchResponse(searchBody, DISCOVERY)).toMatchObject({
+      billedRecords: 1,
+      matched: true,
+      confidence: expect.any(Number),
+      fullName: "Dana Whitfield",
+      role: "Office Manager",
+      workEmail: "dana@harborvision.example",
+      linkedinUrl: "linkedin.com/in/dana-whitfield-example",
+    });
+  });
+
+  it("rejects weak candidates but still meters the returned search record", async () => {
+    const weak = {
+      billedRecords: 1,
+      matched: false,
+      unparseable: false,
+      parseError: null,
+      total: 1,
+      confidence: 0.3,
+      fullName: null,
+      role: null,
+      companyName: null,
+      workEmail: null,
+      linkedinUrl: null,
+    };
+    const client = FakePdlClient.withDiscovery(weak, personNotFound);
+    const { meter, rows } = recordingMeter();
+
+    await runPdlPersonDiscover({ client, meter }, DISCOVERY);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      provider: "pdl",
+      operation: "person.search",
+      units: 1,
+      costUsd: PDL_USD_PER_MATCHED_RECORD,
+    });
+    expect(rows[0].meta).toMatchObject({ matched: false, confidence: 0.3 });
   });
 });
 
@@ -121,7 +195,11 @@ describe("BILLED vs MATCHED — PDL charges on the HTTP 200, not on our judgemen
     expect(rows).toHaveLength(1);
     expect(rows[0].units).toBe(1);
     expect(rows[0].costUsd).toBeCloseTo(PDL_USD_PER_MATCHED_RECORD, 10);
-    expect(rows[0].meta).toMatchObject({ billed: true, matched: false, likelihood: 3 });
+    expect(rows[0].meta).toMatchObject({
+      billed: true,
+      matched: false,
+      likelihood: 3,
+    });
   });
 });
 

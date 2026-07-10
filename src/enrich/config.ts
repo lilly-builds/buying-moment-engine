@@ -108,13 +108,14 @@ export const ANTHROPIC_API_VERSION = "2023-06-01";
 // ─── PDL pricing ──────────────────────────────────────────────────────────────
 //
 // spec § Stack-validation, experiment #1: "Cost anchors on file: PDL ~$0.28/record
-// self-serve (-> cents at Enterprise)". PDL bills per MATCHED record only, so a
-// 404 no-match is metered at units = 0 (a cost_events row is still written — the
-// call happened, it just cost nothing).
+// self-serve (-> cents at Enterprise)". Enrichment bills on a 200 match; Person
+// Search bills per record returned in `data`, so the search client caps `size`.
 export const PDL_USD_PER_MATCHED_RECORD = 0.28;
 
 export const PDL_PERSON_ENRICH_URL =
   "https://api.peopledatalabs.com/v5/person/enrich";
+export const PDL_PERSON_SEARCH_URL =
+  "https://api.peopledatalabs.com/v5/person/search";
 export const PDL_COMPANY_ENRICH_URL =
   "https://api.peopledatalabs.com/v5/company/enrich";
 
@@ -125,6 +126,16 @@ export const PDL_COMPANY_ENRICH_URL =
  * role-only variant. https://docs.peopledatalabs.com/docs/reference-person-enrichment-api
  */
 export const PDL_MIN_LIKELIHOOD = 6;
+
+/**
+ * Person Search does not return PDL's 1-10 enrichment likelihood. We score the
+ * returned profile deterministically from exact-company, target-title, location, and
+ * business-contact evidence. Below this line, the contact stays role-only/none.
+ */
+export const PDL_MIN_DISCOVERY_CONFIDENCE = 0.7;
+
+/** Cap Person Search spend: PDL bills per record returned, so one profile is enough. */
+export const PDL_PERSON_DISCOVERY_SIZE = 1;
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
