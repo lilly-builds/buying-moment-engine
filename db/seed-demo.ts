@@ -82,33 +82,93 @@ interface PracticeSeed extends FunnelSpec {
 }
 
 /**
- * The funnel, authored so the aggregate numbers are honest and readable (the integration
- * test asserts the exact totals). Including the Cedarline hero: 18 leads → 10 meetings →
- * 4 deals; the three `cold` rows convert far worse than the buying-moment rows (the point
- * of the "big test").
+ * The five fresh-signal FEED practices (no brief yet, so they render the honest empty state).
+ * These are the named accounts an evaluator sees in the feed; the scoreboard's scale comes
+ * from the generated funnel below, not from these.
  */
-const PRACTICE_SEEDS: PracticeSeed[] = [
-  // ── Feed practices (fresh signals) — no brief yet, so they render the honest empty state ──
+const FEED_SEEDS: PracticeSeed[] = [
   { key: "harborlight", name: "Harborlight Women's Health", city: "Portland", state: "OR", vertical: "womens_health", signalKind: "staffing_spike", fresh: true, cohort: "buying_moment", meeting: true, deal: false, cycleDays: 44, hours: 9, feedback: { thumb: "up" }, costUsd: 4.6 },
   { key: "summit-ortho", name: "Summit Orthopedic Partners", city: "Denver", state: "CO", vertical: "orthopedics", signalKind: "phone_complaints", fresh: true, cohort: "buying_moment", meeting: true, deal: false, cycleDays: 51, hours: 8, feedback: { thumb: "up" }, costUsd: 4.4 },
   { key: "clearview-eye", name: "Clearview Eye Associates", city: "San Jose", state: "CA", vertical: "ophthalmology", signalKind: "staffing_spike", fresh: true, cohort: "buying_moment", meeting: false, deal: false, hours: 6, costUsd: 4.1 },
   { key: "riverside-womens", name: "Riverside Women's Care", city: "Sacramento", state: "CA", vertical: "womens_health", signalKind: "growth_events", fresh: true, cohort: "buying_moment", meeting: false, deal: false, hours: 5, feedback: { thumb: "down", reason: "already_customer" }, costUsd: 4.0 },
   { key: "meridian-eye", name: "Meridian Eye Care Associates", city: "Columbus", state: "OH", vertical: "ophthalmology", signalKind: "growth_events", fresh: true, cohort: "buying_moment", meeting: false, deal: false, hours: 5, feedback: { thumb: "down", reason: "bad_timing" }, costUsd: 3.9 },
-
-  // ── Funnel-only practices (expired signals) — populate the scoreboard, stay out of the feed ──
-  { key: "d1", name: "Fair Oaks Dermatology", city: "Austin", state: "TX", vertical: "dermatology", signalKind: "staffing_spike", fresh: false, cohort: "buying_moment", meeting: true, deal: true, cycleDays: 28, hours: 11, feedback: { thumb: "up" }, costUsd: 5.2 },
-  { key: "d2", name: "Stonebridge Skin Clinic", city: "Dallas", state: "TX", vertical: "dermatology", signalKind: "phone_complaints", fresh: false, cohort: "buying_moment", meeting: true, deal: false, cycleDays: 33, hours: 9, costUsd: 4.7 },
-  { key: "d3", name: "Highland Dermatology Group", city: "Nashville", state: "TN", vertical: "dermatology", signalKind: "growth_events", fresh: false, cohort: "buying_moment", meeting: false, deal: false, hours: 6, costUsd: 4.2 },
-  { key: "w1", name: "Cedar Ridge Women's Clinic", city: "Boise", state: "ID", vertical: "womens_health", signalKind: "staffing_spike", fresh: false, cohort: "buying_moment", meeting: true, deal: true, cycleDays: 41, hours: 10, feedback: { thumb: "up" }, costUsd: 5.0 },
-  { key: "w2", name: "Bayview OB-GYN", city: "Tampa", state: "FL", vertical: "womens_health", signalKind: "phone_complaints", fresh: false, cohort: "cold", meeting: true, deal: false, cycleDays: 47, hours: 7, costUsd: 4.5 },
-  { key: "w3", name: "Grandview Women's Health", city: "Kansas City", state: "MO", vertical: "womens_health", signalKind: "growth_events", fresh: false, cohort: "buying_moment", meeting: false, deal: false, hours: 5, feedback: { thumb: "down", reason: "too_small" }, costUsd: 4.0 },
-  { key: "o1", name: "Pinecrest Eye Center", city: "Charlotte", state: "NC", vertical: "ophthalmology", signalKind: "staffing_spike", fresh: false, cohort: "buying_moment", meeting: true, deal: false, cycleDays: 46, hours: 8, costUsd: 4.6 },
-  { key: "o2", name: "Ironwood Vision", city: "Phoenix", state: "AZ", vertical: "ophthalmology", signalKind: "phone_complaints", fresh: false, cohort: "cold", meeting: false, deal: false, hours: 4, feedback: { thumb: "down", reason: "wrong_specialty" }, costUsd: 3.8 },
-  { key: "o3", name: "Meadowbrook Eye Associates", city: "Cleveland", state: "OH", vertical: "ophthalmology", signalKind: "growth_events", fresh: false, cohort: "buying_moment", meeting: false, deal: false, hours: 4, costUsd: 3.8 },
-  { key: "r1", name: "Northgate Orthopedics", city: "Seattle", state: "WA", vertical: "orthopedics", signalKind: "staffing_spike", fresh: false, cohort: "buying_moment", meeting: true, deal: true, cycleDays: 52, hours: 10, feedback: { thumb: "up" }, costUsd: 5.1 },
-  { key: "r2", name: "Lakeshore Bone & Joint", city: "Chicago", state: "IL", vertical: "orthopedics", signalKind: "phone_complaints", fresh: false, cohort: "buying_moment", meeting: true, deal: false, cycleDays: 58, hours: 8, costUsd: 4.7 },
-  { key: "r3", name: "Old Mill Orthopedic Center", city: "Minneapolis", state: "MN", vertical: "orthopedics", signalKind: "growth_events", fresh: false, cohort: "cold", meeting: false, deal: false, hours: 5, costUsd: 4.1 },
 ];
+
+/**
+ * Enterprise-scale funnel recipes. Each row expands into `leads` funnel-only practices
+ * (expired signals → they populate the scoreboard but never the feed). Authored so the seed
+ * totals are large, internally consistent, and deterministic — with the Cedarline hero +
+ * the 5 feed practices they sum to 1,240 leads → 340 meetings → 92 deals. The buying-moment
+ * cohort out-converts the cold cohort ~4x (the "big test"). Nothing here is displayed by
+ * name; the scoreboard reads only the aggregate rows.
+ */
+interface FunnelRecipe {
+  vertical: PackVertical;
+  cohort: "buying_moment" | "cold";
+  leads: number;
+  meetings: number;
+  deals: number;
+  cycleDays: number;
+  hours: number;
+  costUsd: number;
+}
+
+const FUNNEL_RECIPES: FunnelRecipe[] = [
+  // Buying-moment cohort — the engine's own timing-sourced leads, converting well.
+  // Ophthalmology has real meetings but no closed deals yet (a vertical still warming up),
+  // so its per-vertical CAC honestly reads "—" rather than a divide-by-zero.
+  { vertical: "dermatology", cohort: "buying_moment", leads: 260, meetings: 98, deals: 36, cycleDays: 30, hours: 15, costUsd: 3.1 },
+  { vertical: "womens_health", cohort: "buying_moment", leads: 250, meetings: 82, deals: 28, cycleDays: 38, hours: 14, costUsd: 3.0 },
+  { vertical: "orthopedics", cohort: "buying_moment", leads: 244, meetings: 78, deals: 24, cycleDays: 45, hours: 13, costUsd: 3.0 },
+  { vertical: "ophthalmology", cohort: "buying_moment", leads: 240, meetings: 61, deals: 0, cycleDays: 43, hours: 12, costUsd: 2.9 },
+  // Cold cohort — a demographic list, converting ~4x worse (the big test's control arm).
+  { vertical: "dermatology", cohort: "cold", leads: 60, meetings: 6, deals: 1, cycleDays: 52, hours: 6, costUsd: 3.0 },
+  { vertical: "womens_health", cohort: "cold", leads: 60, meetings: 5, deals: 1, cycleDays: 55, hours: 6, costUsd: 3.0 },
+  { vertical: "orthopedics", cohort: "cold", leads: 60, meetings: 4, deals: 1, cycleDays: 60, hours: 5, costUsd: 3.0 },
+  { vertical: "ophthalmology", cohort: "cold", leads: 60, meetings: 3, deals: 0, cycleDays: 58, hours: 5, costUsd: 3.0 },
+];
+
+/** The three built signal kinds, cycled across generated practices for realistic spread. */
+const FUNNEL_SIGNAL_KINDS: DetectorKind[] = ["staffing_spike", "phone_complaints", "growth_events"];
+const FUNNEL_DOWN_REASONS = ["too_small", "wrong_specialty", "already_customer", "bad_timing"] as const;
+
+/** Expand the recipes into individual funnel-only practice seeds (deterministic). */
+function buildFunnelSeeds(): PracticeSeed[] {
+  const out: PracticeSeed[] = [];
+  let i = 0;
+  for (const r of FUNNEL_RECIPES) {
+    for (let k = 0; k < r.leads; k++) {
+      const isMeeting = k < r.meetings;
+      const isDeal = k < r.deals;
+      const key = `gen-${String(i).padStart(4, "0")}`;
+      // 👍 on every practice that booked a meeting (the AE liked that lead); a modest
+      // slice of the no-meeting practices get a 👎 with a rotating reason.
+      let feedback: PracticeSeed["feedback"];
+      if (isMeeting) feedback = { thumb: "up" };
+      else if (i % 13 === 0) feedback = { thumb: "down", reason: FUNNEL_DOWN_REASONS[i % FUNNEL_DOWN_REASONS.length] };
+      out.push({
+        key,
+        name: `Demo ${r.vertical} account ${key}`,
+        city: "Demo City",
+        state: "TX",
+        vertical: r.vertical,
+        signalKind: FUNNEL_SIGNAL_KINDS[i % FUNNEL_SIGNAL_KINDS.length],
+        fresh: false,
+        cohort: r.cohort,
+        meeting: isMeeting,
+        deal: isDeal,
+        cycleDays: isMeeting ? r.cycleDays : undefined,
+        hours: r.hours,
+        feedback,
+        costUsd: r.costUsd,
+      });
+      i++;
+    }
+  }
+  return out;
+}
+
+const PRACTICE_SEEDS: PracticeSeed[] = [...FEED_SEEDS, ...buildFunnelSeeds()];
 
 /** Idempotent evidence insert (explicit id → re-run is a no-op). */
 async function seedEvidence(

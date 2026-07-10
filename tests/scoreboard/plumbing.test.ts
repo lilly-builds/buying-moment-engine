@@ -78,39 +78,39 @@ describe("UI plumbing — seed → real routes", () => {
     );
 
     const all = data.scopes.all;
-    // 18 leads → 10 meetings → 4 deals.
-    expect(all.endGoals[0].value).toBe("4"); // deals won
+    // Enterprise-scale demo funnel: 1,240 leads → 340 meetings → 92 deals.
+    expect(all.endGoals[0].value).toBe("92"); // deals won
     expect(all.endGoals[0].honesty).toBe("modeled"); // a projected outcome
-    expect(all.leading[0].value).toBe("10"); // meetings the tool booked
+    expect(all.leading[0].value).toBe("340"); // meetings the tool booked
     expect(all.leading[0].honesty).toBe("measured"); // a real activity count
-    expect(all.overallConversion).toBeCloseTo(10 / 18, 5);
+    expect(all.overallConversion).toBeCloseTo(340 / 1240, 5);
 
     // CAC + cost/meeting are computed, not fabricated — real spend over real counts.
-    expect(all.endGoals[1].value).toBe("$20"); // $81.10 spend / 4 deals
-    expect(all.leading[1].value).toBe("$8"); // $81.10 spend / 10 meetings
+    expect(all.endGoals[1].value).toBe("$41"); // ≈ $3,731 spend / 92 deals
+    expect(all.leading[1].value).toBe("$11"); // ≈ $3,731 spend / 340 meetings
 
     // Hours saved (measured tool activity) and the 3-touch sequence.
-    expect(all.leading[3].value).toBe("134");
+    expect(all.leading[3].value).toBe("14819");
     expect(all.leading[2].value).toBe("3.0");
 
-    // AE feedback: 6 up / 4 down across the seed.
-    expect(all.feedback.total).toBe(10);
-    expect(all.feedback.thumbsUpRate).toBeCloseTo(0.6, 5);
+    // AE feedback: 👍 on every practice that booked, 👎 on a slice of the rest.
+    expect(all.feedback.total).toBe(411);
+    expect(all.feedback.thumbsUpRate).toBeCloseTo(0.827, 3);
 
-    // The big test: buying-moment cohort out-converts the cold cohort.
-    expect(data.bigTest.buyingMoment).toEqual({ meetings: 9, deals: 4 });
-    expect(data.bigTest.cold).toEqual({ meetings: 1, deals: 0 });
+    // The big test: buying-moment cohort out-converts the cold cohort ~4x.
+    expect(data.bigTest.buyingMoment).toEqual({ meetings: 322, deals: 89 });
+    expect(data.bigTest.cold).toEqual({ meetings: 18, deals: 3 });
 
     // Per-vertical rollup.
     expect(data.verticals).toHaveLength(4);
     const derm = data.verticals.find((v) => v.slug === "dermatology");
-    expect(derm?.winRate).toBeCloseTo(0.5, 5); // 2 deals / 4 leads
+    expect(derm?.winRate).toBeCloseTo(38 / 321, 5); // 38 deals / 321 leads
     expect(derm?.cycleDays).toBe("31d");
   });
 
-  it("degrades honestly: a scope with no meetings shows '—', not a divide-by-zero", async () => {
+  it("degrades honestly: a scope with no deals shows '—' for CAC, not a divide-by-zero", async () => {
     const data = await loadScoreboardData(t.db);
-    // Ophthalmology booked one meeting but won no deals → CAC has no denominator.
+    // Ophthalmology booked meetings but won no deals yet → CAC has no denominator.
     const ophth = data.scopes.ophthalmology;
     expect(ophth.endGoals[0].value).toBe("0"); // deals
     expect(ophth.endGoals[1].value).toBe("—"); // CAC: 0 deals → no number, not $Infinity
@@ -137,6 +137,6 @@ describe("UI plumbing — seed → real routes", () => {
 
     // And the aggregate numbers are unchanged.
     const data = buildScoreboardData(await loadScoreboardInputs(t.db));
-    expect(data.scopes.all.leading[0].value).toBe("10");
+    expect(data.scopes.all.leading[0].value).toBe("340");
   });
 });
