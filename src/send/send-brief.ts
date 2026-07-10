@@ -8,7 +8,8 @@ import { createHubSpotAdapter } from "@/src/crm/hubspot";
 import { hasSendScope, type OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
 import { createDbTokenProvider, pushPracticeLead } from "@/src/crm/sync";
 import type { Recipient, RecipientClassification } from "./adapter";
-import type { HubSpotSendConfig } from "./config";
+import { readConnectionSendConfig } from "./config";
+import type { SandboxConfig } from "./guard";
 import { assertSandboxTarget, RealPracticeSendBlockedError } from "./guard";
 import { createHubSpotSender } from "./hubspot-send";
 
@@ -63,7 +64,9 @@ export interface SendBriefEmailArgs {
   /** The named next-step CTA carried on the sequence (R4), if any. */
   cta?: string | null;
   encryptionKey: Buffer;
-  sendConfig: HubSpotSendConfig;
+  /** The D9 sandbox allowlist (env — the firewall). The sequence + sender identity
+   *  are NOT passed in; they're read from the resolved connection, server-side. */
+  sandbox: SandboxConfig;
   provider?: string;
 }
 
@@ -184,7 +187,7 @@ export async function sendBriefEmail(
   try {
     assertSandboxTarget(
       { email: resolved.email, classification: resolved.classification },
-      args.sendConfig.sandbox,
+      args.sandbox,
     );
   } catch (err) {
     if (err instanceof RealPracticeSendBlockedError) {
@@ -208,6 +211,18 @@ export async function sendBriefEmail(
     };
   }
 
+  // The sequence + sender identity come from THIS connection (per-tenant), not env.
+  // No sequence_id yet → sequence setup isn't finished: return the clean 503 the
+  // brief's gate already expects, and NEVER attempt a broken enroll.
+  const sendConfig = readConnectionSendConfig(active.connection);
+  if (!sendConfig) {
+    return {
+      ok: false,
+      status: 503,
+      error: "Send is not configured — finish HubSpot sequence setup",
+    };
+  }
+
   const getAccessToken = createDbTokenProvider(db, deps, {
     portalId: active.connection.portalId, // server-resolved, never client-supplied
     encryptionKey: args.encryptionKey,
@@ -228,10 +243,10 @@ export async function sendBriefEmail(
     fetch: deps.fetch,
     getAccessToken,
     baseUrl: deps.baseUrl,
-    sequenceId: args.sendConfig.sequenceId,
-    senderEmail: args.sendConfig.senderEmail,
-    userId: args.sendConfig.userId,
-    sandbox: args.sendConfig.sandbox,
+    sequenceId: sendConfig.sequenceId,
+    senderEmail: sendConfig.senderEmail,
+    userId: sendConfig.userId,
+    sandbox: args.sandbox,
     // The custom properties are provisioned at CONNECT (`completeHubSpotConnect` →
     // `ensureSendProperties`, now that `crm.schemas.contacts.write` is a required
     // scope), so the send path only writes + enrolls. The sender's default would

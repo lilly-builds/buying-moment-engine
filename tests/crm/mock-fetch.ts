@@ -101,6 +101,12 @@ export interface ConnectMockOptions {
   scopes?: string[];
   /** Fail every property-provisioning call with 403, as a portal missing schema scopes does. */
   propertiesForbidden?: boolean;
+  /** The authorizing user's email in the token-meta payload (the sending inbox). */
+  user?: string;
+  /** The authorizing user's HubSpot user id in the token-meta payload. */
+  userId?: number;
+  /** Simulate the rare token-info payload that omits user/user_id entirely. */
+  omitUser?: boolean;
 }
 
 /**
@@ -121,6 +127,9 @@ export function hubspotConnectMock(opts?: ConnectMockOptions): MockFetch {
         body: {
           hub_id: opts?.hubId ?? 424242,
           scopes: opts?.scopes ?? ["oauth", "crm.objects.deals.write"],
+          ...(opts?.omitUser
+            ? {}
+            : { user: opts?.user ?? "rep@portal.test", user_id: opts?.userId ?? 95142122 }),
         },
       };
     }

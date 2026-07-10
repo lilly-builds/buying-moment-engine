@@ -2,18 +2,23 @@ import { readEncryptionKey, readOAuthDeps } from "@/src/crm/config";
 import type { SandboxConfig } from "./guard";
 
 /**
- * Production env readers for the send path (R10, U11). Kept out of the pure
- * modules so those stay env-free/testable. Each throws a NON-secret error when a
- * value is missing, so a route can answer 503 "send not configured" without
- * leaking anything. Empty until the live wire-up (U15) — until then these throw
- * and the send-gate stays in its honest gated state.
+ * Send-path config readers (R10, U11). Two SOURCES, deliberately kept apart:
+ *
+ *  1. The D9 sandbox allowlist is INFRASTRUCTURE — the fail-closed firewall that
+ *     decides who a send may reach. It stays in env (`SEND_SANDBOX_*`): it is the
+ *     firewall, not per-tenant data, and a misconfigured deploy must block, not send.
+ *  2. The sequence + sender (which sequence, which inbox, which user) are PER-TENANT
+ *     — each connected HubSpot portal runs its own. They live on the connection row
+ *     (`db/schema/crm.ts`), read via `readConnectionSendConfig`, NOT from env.
+ *
+ * Kept out of the pure send modules so those stay env-free/testable.
  */
 
-export interface HubSpotSendConfig {
+/** The per-tenant send identity, resolved from a connection row (never env). */
+export interface ConnectionSendConfig {
   sequenceId: string;
   senderEmail: string;
   userId: string;
-  sandbox: SandboxConfig;
 }
 
 function splitList(raw: string | undefined): string[] {
@@ -24,47 +29,54 @@ function splitList(raw: string | undefined): string[] {
 }
 
 /**
- * Read the send config from env. The sandbox allowlist is REQUIRED (fail-closed,
- * D9): with no sandbox addresses configured, `guard.assertSandboxRecipient`
- * blocks every send, so a misconfigured deploy cannot fire at anyone.
+ * Read the D9 sandbox allowlist from env. REQUIRED / fail-closed (D9): with no
+ * sandbox addresses configured, `guard.assertSandboxTarget` blocks every send, so
+ * a misconfigured deploy cannot fire at anyone. Never throws — an empty allowlist
+ * is a valid (blocking) state, unlike the old bundled reader.
  */
-export function readHubSpotSendConfig(
+export function readSandboxConfig(
   env: Record<string, string | undefined> = process.env,
-): HubSpotSendConfig {
-  const sequenceId = env.HUBSPOT_SEQUENCE_ID;
-  const senderEmail = env.HUBSPOT_SENDER_EMAIL;
-  const userId = env.HUBSPOT_SENDER_USER_ID;
-  if (!sequenceId || !senderEmail || !userId) {
-    throw new Error("HubSpot send env is not fully configured");
-  }
+): SandboxConfig {
   return {
-    sequenceId,
-    senderEmail,
-    userId,
-    sandbox: {
-      allowedEmails: splitList(env.SEND_SANDBOX_EMAILS),
-      allowedDomains: splitList(env.SEND_SANDBOX_DOMAINS),
-      allowSubaddressTag: env.SEND_SANDBOX_ALLOW_SUBADDRESS === "true",
-    },
+    allowedEmails: splitList(env.SEND_SANDBOX_EMAILS),
+    allowedDomains: splitList(env.SEND_SANDBOX_DOMAINS),
+    allowSubaddressTag: env.SEND_SANDBOX_ALLOW_SUBADDRESS === "true",
   };
 }
 
 /**
- * Is the send path fully configured — would `POST /api/send` get PAST its 503
- * "Send is not configured" gate? Mirrors that route's readiness check exactly (the
- * same three readers), so the brief's live Send button is offered ONLY when a click
- * would actually enroll and send. Any missing piece — OAuth client env, the token
- * encryption key, OR the sequence/sender env (HUBSPOT_SEQUENCE_ID / _SENDER_EMAIL /
- * _SENDER_USER_ID) — returns false, and the brief falls back to the RevOps handoff
- * gate instead of a button that errors. A HubSpot OAuth connection can exist while
- * this send env is still absent (see docs/hubspot-send-setup.md), which is exactly
- * why the connection row alone is NOT a sufficient signal.
+ * Extract the per-connection send config from a resolved connection row. Returns
+ * null when the portal hasn't finished sequence setup — sequence_id is the piece
+ * that must be pasted (no HubSpot list-sequence API), and senderEmail/userId
+ * auto-capture at connect but a legacy row can predate that. A null result is the
+ * honest "not configured yet" signal: the send gate shows the RevOps handoff, and
+ * `/api/send` returns its 503 instead of a broken enroll.
  */
-export function isSendConfigured(): boolean {
+export function readConnectionSendConfig(conn: {
+  sequenceId: string | null;
+  senderEmail: string | null;
+  senderUserId: string | null;
+}): ConnectionSendConfig | null {
+  if (!conn.sequenceId || !conn.senderEmail || !conn.senderUserId) return null;
+  return {
+    sequenceId: conn.sequenceId,
+    senderEmail: conn.senderEmail,
+    userId: conn.senderUserId,
+  };
+}
+
+/**
+ * Is the send INFRASTRUCTURE configured — the env pieces `/api/send` needs before
+ * it can enroll at all: the token encryption key AND the OAuth client env. This is
+ * the env half of send-readiness; the per-tenant half (a connection that finished
+ * sequence setup) is `readConnectionSendConfig` against the resolved connection.
+ * The brief's live Send button lights up only when BOTH halves are satisfied
+ * (see `app/practice/[id]/page.tsx`); otherwise it falls back to the RevOps gate.
+ */
+export function isSendInfraConfigured(): boolean {
   try {
     readEncryptionKey();
     readOAuthDeps();
-    readHubSpotSendConfig();
     return true;
   } catch {
     return false;

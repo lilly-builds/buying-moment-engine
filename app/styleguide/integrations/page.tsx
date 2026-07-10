@@ -41,7 +41,9 @@ export default async function IntegrationsPreviewPage({
 
   const hubspot: HubSpotStatus =
     state === "connected"
-      ? { state: "connected" }
+      ? // `?state=connected` previews a portal that still needs its sequence id;
+        // `?state=connected&seq=1` previews one already set.
+        { state: "connected", sequenceId: firstParam(params.seq) ? "712515259" : null }
       : { state: "disconnected" };
 
   const banner: ConnectBanner | null =

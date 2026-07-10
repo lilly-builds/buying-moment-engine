@@ -87,6 +87,18 @@ export const crmConnections = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     // Space-delimited granted scopes (audit which capabilities this grant covers).
     scopes: text("scopes"),
+    // ── Per-connection SEND config (the sequence/inbox this portal sends through) ──
+    // Each connected portal runs its OWN dynamic sequence, its OWN connected inbox,
+    // and its OWN HubSpot user — so send config is per-tenant, NOT a global env var.
+    // sequenceId is captured by paste during onboarding (HubSpot has no create/list-
+    // sequence API — enrollment-only); senderEmail + senderUserId auto-capture from
+    // the OAuth token metadata at connect. All nullable until sequence setup finishes
+    // — a connection with no sequenceId can't send yet (the gate shows the RevOps
+    // handoff, never a Send that 503s). The D9 sandbox allowlist stays env (the
+    // firewall, not per-tenant data).
+    sequenceId: text("sequence_id"),
+    senderEmail: text("sender_email"),
+    senderUserId: text("sender_user_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

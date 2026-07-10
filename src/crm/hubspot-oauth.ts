@@ -100,6 +100,11 @@ export interface TokenMeta {
   /** HubSpot portal/hub id — the per-tenant key. */
   hubId: string;
   scopes: string[];
+  /** The authorizing user's email — the connected sending inbox for this portal.
+   *  Absent on the rare token-info payload that omits it. */
+  user?: string;
+  /** The authorizing user's HubSpot user id — the acting user for enrollment. */
+  userId?: string;
 }
 
 export interface OAuthConfig {
@@ -236,9 +241,16 @@ export async function fetchTokenMeta(
   if (!res.ok) {
     throw new Error(`HubSpot token-meta lookup failed with ${res.status}`);
   }
-  const json = (await res.json()) as { hub_id: number | string; scopes?: string[] };
+  const json = (await res.json()) as {
+    hub_id: number | string;
+    scopes?: string[];
+    user?: string;
+    user_id?: number | string;
+  };
   return {
     hubId: String(json.hub_id),
     scopes: json.scopes ?? [],
+    user: json.user,
+    userId: json.user_id === undefined ? undefined : String(json.user_id),
   };
 }

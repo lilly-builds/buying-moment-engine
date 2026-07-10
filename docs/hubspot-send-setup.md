@@ -91,13 +91,21 @@ by the app, and ONLY to sandbox/test addresses (D9).
 
 ## Wire it into the app
 
-Set these in `.env.local` (all live-only; empty by default):
+The sequence + sender are now **per-connection** (not env) — each connected portal
+runs its own. `sender_email` + `sender_user_id` **auto-capture from the OAuth token
+meta at connect**; `sequence_id` is pasted on the **Connections page** ("Your sending
+sequence"), because HubSpot has no create/list-sequence API. All three live on the
+`crm_connections` row.
+
+- **New portal:** connect HubSpot → finish the sequence setup above → paste the
+  sequence id on `/integrations`. Done.
+- **The existing dev connection** (predates these columns): `pnpm db:backfill:send-config`
+  fills it once (sequence `712515259`, inbox `hellolillyfield@gmail.com`, user `95142122`).
+
+Only the D9 firewall stays env — it's the firewall, not per-tenant data (fail-closed):
 
 ```bash
-HUBSPOT_SEQUENCE_ID=<the sequence id from step 4>
-HUBSPOT_SENDER_EMAIL=<the connected inbox address>
-HUBSPOT_SENDER_USER_ID=<the acting user's HubSpot user id>   # from the OAuth token meta
-# D9 firewall — the ONLY addresses the app may send to (fail-closed):
+# The ONLY addresses the app may send to. Empty => nothing sends.
 SEND_SANDBOX_EMAILS=<your test address, e.g. you+demo@gmail.com>
 ```
 
