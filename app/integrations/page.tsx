@@ -20,11 +20,15 @@ export const metadata: Metadata = {
     "Connect HubSpot and the rest of your stack — surfaced leads push, tag, and track where your team already works.",
 };
 
-/** Resolve the live HubSpot connection, degrading to disconnected on any failure. */
+/** Resolve the live HubSpot connection, degrading to disconnected on any failure.
+ *  When connected, carry the per-connection sequence id so the view can show the
+ *  "paste your sequence id" field as done or still-to-do. */
 async function loadHubSpotStatus(): Promise<HubSpotStatus> {
   try {
     const result = await getActiveConnection(getDb());
-    if (result.ok) return { state: "connected" };
+    if (result.ok) {
+      return { state: "connected", sequenceId: result.connection.sequenceId };
+    }
     // "none" or "ambiguous" — both render as Connect; ambiguous is an ops edge.
     return { state: "disconnected" };
   } catch {

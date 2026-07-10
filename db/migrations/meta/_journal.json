@@ -57,6 +57,13 @@
       "when": 1783700211019,
       "tag": "0007_loose_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783704741041,
+      "tag": "0008_common_colossus",
+      "breakpoints": true
     }
   ]
 }

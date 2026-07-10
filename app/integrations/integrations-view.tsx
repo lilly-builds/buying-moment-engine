@@ -46,7 +46,9 @@ function HubSpotMark({ className }: { className?: string }) {
 }
 
 export type HubSpotStatus =
-  | { state: "connected" }
+  // The per-connection sequence id (null until the user pastes it after sequence
+  // setup) drives the "finish setup" field below the connect card.
+  | { state: "connected"; sequenceId: string | null }
   // `ambiguous` (two portals on file) is folded in here: Connect/Reconnect still
   // works, and the ops fix is to disconnect one — an edge the demo never hits.
   | { state: "disconnected" };
@@ -161,6 +163,131 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
           )}
         </div>
       </div>
+    </Card>
+  );
+}
+
+// ── Sequence setup (per-connection send config) ───────────────────────────────
+
+/**
+ * The one manual step send needs after connecting: paste the HubSpot sequence id.
+ * HubSpot has no create/list-sequence API, so the number can't be auto-discovered
+ * (the sending inbox + user id DO auto-capture at connect). It's written onto the
+ * active connection — each portal sends through its OWN sequence. Shows only when
+ * HubSpot is connected; a saved id reads as done, so a returning user sees it's set.
+ */
+function SequenceSetupCard({ initialSequenceId }: { initialSequenceId: string | null }) {
+  const [saved, setSaved] = useState<string | null>(initialSequenceId);
+  const [value, setValue] = useState(initialSequenceId ?? "");
+  const [status, setStatus] = useState<SubmitState>({ kind: "idle" });
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = value.trim();
+    // Same rule the route enforces — catch it here for a friendlier message.
+    if (!/^\d{1,18}$/.test(trimmed)) {
+      setStatus({
+        kind: "error",
+        message: "Just the number in the URL after /sequence/ (digits only).",
+      });
+      return;
+    }
+    setStatus({ kind: "submitting" });
+    try {
+      const res = await fetch("/api/hubspot/send-config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sequenceId: trimmed }),
+        // Don't silently FOLLOW the session gate's redirect to /login — a followed
+        // 307 lands on a 200 HTML page that would masquerade as a saved config.
+        redirect: "manual",
+      });
+
+      if (res.type === "opaqueredirect" || res.status === 0) {
+        setStatus({
+          kind: "error",
+          message: "Your session expired. Please refresh the page and try again.",
+        });
+        return;
+      }
+
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+
+      // Success requires a real `{ ok: true }` from our route — never just a 200.
+      if (!res.ok || body?.ok !== true) {
+        setStatus({
+          kind: "error",
+          message: body?.error ?? "Couldn't save your sequence ID. Please try again.",
+        });
+        return;
+      }
+
+      setSaved(trimmed);
+      setStatus({ kind: "ok", tool: trimmed });
+    } catch {
+      setStatus({
+        kind: "error",
+        message: "Couldn't reach the server. Please try again.",
+      });
+    }
+  }
+
+  return (
+    <Card variant="outlined" padding="lg">
+      <form onSubmit={onSubmit} className="flex flex-col gap-5">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-3">
+            <h3 className="font-display text-h5 font-book text-ink">
+              Your sending sequence
+            </h3>
+            <Badge tone={saved ? "success" : "neutral"} size="sm">
+              {saved ? "Set" : "Needs setup"}
+            </Badge>
+          </div>
+          <p className="max-w-lg font-sans text-base text-ink-body">
+            After you set up your GTM Maestro sequence in HubSpot, paste its ID here.
+            It&apos;s the number in the sequence&apos;s URL right after{" "}
+            <span className="font-medium">/sequence/</span>. This is the one setting
+            we can&apos;t grab automatically.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor="sequenceId" className="font-sans text-sm font-medium text-ink-strong">
+            Sequence ID
+          </label>
+          <Input
+            id="sequenceId"
+            name="sequenceId"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="e.g. 712515259"
+            inputMode="numeric"
+            maxLength={18}
+            autoComplete="off"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4">
+          <Button type="submit" disabled={status.kind === "submitting"}>
+            {status.kind === "submitting" ? "Saving…" : saved ? "Update" : "Save sequence ID"}
+          </Button>
+          {status.kind === "ok" ? (
+            <p role="status" className="font-sans text-base text-success-ink">
+              Saved. Sends will enroll into sequence{" "}
+              <span className="font-medium">{status.tool}</span>.
+            </p>
+          ) : null}
+          {status.kind === "error" ? (
+            <p role="alert" className="font-sans text-base text-danger">
+              {status.message}
+            </p>
+          ) : null}
+        </div>
+      </form>
     </Card>
   );
 }
@@ -516,6 +643,9 @@ export function IntegrationsView({
               CRM
             </h2>
             <HubSpotCard status={hubspot} />
+            {hubspot.state === "connected" ? (
+              <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
+            ) : null}
           </section>
 
           <section className="flex flex-col gap-4">

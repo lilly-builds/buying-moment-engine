@@ -13,6 +13,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "npx tsx scripts/seed-demo.ts",
     "db:seed:sandbox": "npx tsx scripts/seed-sandbox.ts",
+    "db:backfill:send-config": "npx tsx scripts/backfill-send-config.ts",
     "pipeline": "npx tsx scripts/run-pipeline.ts"
   },
   "dependencies": {

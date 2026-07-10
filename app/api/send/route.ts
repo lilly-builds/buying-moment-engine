@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { guardMutation } from "@/src/lib/auth-guard";
 import { getDb } from "@/db/client";
 import { readEncryptionKey, readOAuthDeps } from "@/src/crm/config";
-import { readHubSpotSendConfig } from "@/src/send/config";
+import { readSandboxConfig } from "@/src/send/config";
 import { sendBriefEmail } from "@/src/send/send-brief";
 
 // node:crypto (token decryption for the access-token provider) — pin Node.
@@ -87,16 +87,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid send payload" }, { status: 400 });
   }
 
+  // Env INFRA only (encryption key + OAuth client). The per-tenant send config
+  // (sequence + sender) is resolved from the connection inside sendBriefEmail; a
+  // portal that hasn't finished sequence setup comes back as a clean 503 there.
   let encryptionKey: Buffer;
   let deps;
-  let sendConfig;
   try {
     encryptionKey = readEncryptionKey();
     deps = readOAuthDeps();
-    sendConfig = readHubSpotSendConfig();
   } catch {
     return NextResponse.json({ error: "Send is not configured" }, { status: 503 });
   }
+  // Never throws — an empty allowlist is a valid (fully-blocking) D9 state.
+  const sandbox = readSandboxConfig();
 
   try {
     const outcome = await sendBriefEmail(getDb(), deps, {
@@ -104,7 +107,7 @@ export async function POST(request: NextRequest) {
       touches: body.touches,
       cta: body.cta,
       encryptionKey,
-      sendConfig,
+      sandbox,
     });
     if (!outcome.ok) {
       return NextResponse.json({ error: outcome.error }, { status: outcome.status });

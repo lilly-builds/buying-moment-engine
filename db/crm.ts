@@ -22,9 +22,22 @@ export interface StoreConnectionArgs {
   refreshTokenEnc: string;
   expiresAt: Date;
   scopes?: string | null;
+  /** The connecting user's inbox (from OAuth token meta) — the address the send
+   *  goes through. Refreshed on every (re)connect; leave undefined to not touch. */
+  senderEmail?: string | null;
+  /** The connecting user's HubSpot user id (from OAuth token meta) — the acting
+   *  user for enrollment. Refreshed on every (re)connect; undefined = don't touch. */
+  senderUserId?: string | null;
 }
 
-/** Upsert a per-tenant connection on (provider, portal_id). */
+/**
+ * Upsert a per-tenant connection on (provider, portal_id). Tokens/scopes/expiry
+ * ALWAYS refresh (that's the point of a reconnect). The send-config columns are
+ * touched only when provided: senderEmail/senderUserId ride the OAuth token meta
+ * so they refresh on each connect, while sequence_id is set OUT OF BAND by the
+ * capture endpoint — so a reconnect must NOT null a sequence the user already
+ * pasted (mirrors `upsertCrmLink`'s "only overwrite what the caller provided").
+ */
 export async function storeConnection(
   db: Database,
   args: StoreConnectionArgs,
@@ -39,6 +52,8 @@ export async function storeConnection(
       refreshTokenEnc: args.refreshTokenEnc,
       expiresAt: args.expiresAt,
       scopes: args.scopes ?? null,
+      senderEmail: args.senderEmail ?? null,
+      senderUserId: args.senderUserId ?? null,
     })
     .onConflictDoUpdate({
       target: [crmConnections.provider, crmConnections.portalId],
@@ -47,9 +62,51 @@ export async function storeConnection(
         refreshTokenEnc: args.refreshTokenEnc,
         expiresAt: args.expiresAt,
         scopes: args.scopes ?? null,
+        ...(args.senderEmail !== undefined ? { senderEmail: args.senderEmail } : {}),
+        ...(args.senderUserId !== undefined
+          ? { senderUserId: args.senderUserId }
+          : {}),
         updatedAt: new Date(),
       },
     });
+}
+
+export interface SetConnectionSendConfigArgs {
+  portalId: string;
+  provider?: string;
+  sequenceId?: string;
+  senderEmail?: string;
+  senderUserId?: string;
+}
+
+/**
+ * Set the per-connection send config on an EXISTING connection (the capture
+ * endpoint: the user pastes their sequence id after finishing HubSpot sequence
+ * setup). A targeted UPDATE — it never mints a row and never touches tokens.
+ * Only the provided columns change. Returns whether a row matched, so the route
+ * can prove the write landed on a real connection rather than assert success.
+ */
+export async function setConnectionSendConfig(
+  db: Database,
+  args: SetConnectionSendConfigArgs,
+): Promise<{ updated: boolean }> {
+  const provider = args.provider ?? "hubspot";
+  const set: Partial<typeof crmConnections.$inferInsert> = { updatedAt: new Date() };
+  if (args.sequenceId !== undefined) set.sequenceId = args.sequenceId;
+  if (args.senderEmail !== undefined) set.senderEmail = args.senderEmail;
+  if (args.senderUserId !== undefined) set.senderUserId = args.senderUserId;
+
+  const rows = await db
+    .update(crmConnections)
+    .set(set)
+    .where(
+      and(
+        eq(crmConnections.provider, provider),
+        eq(crmConnections.portalId, args.portalId),
+      ),
+    )
+    .returning({ id: crmConnections.id });
+  return { updated: rows.length > 0 };
 }
 
 export type ConnectionRow = typeof crmConnections.$inferSelect;

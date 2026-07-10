@@ -110,6 +110,13 @@ export async function completeHubSpotConnect(
     refreshTokenEnc: encrypt(tokens.refreshToken, opts.encryptionKey),
     expiresAt: expiresAtFromExpiresIn(tokens.expiresIn, now),
     scopes,
+    // Auto-capture the send inbox + acting user from the token meta, so the ONLY
+    // manual step left is pasting the sequence id (HubSpot has no list-sequence
+    // API). Pass through undefined-when-absent: a sparse token payload then leaves
+    // an already-captured sender UNTOUCHED on reconnect (storeConnection only SETs
+    // provided fields), rather than nulling it — see db/crm.ts.
+    senderEmail: meta.user,
+    senderUserId: meta.userId,
   });
 
   return { portalId: meta.hubId, scopes, canSend: hasSendScope(meta.scopes) };

@@ -6,6 +6,7 @@ import {
   getActiveConnection,
   loadConnection,
   roiCycleTimeReadback,
+  setConnectionSendConfig,
   storeConnection,
   upsertCrmLink,
 } from "@/db/crm";
@@ -91,6 +92,45 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
     expect(row!.accessTokenEnc).not.toContain("at_live");
     // expiry = now + expires_in
     expect(row!.expiresAt.toISOString()).toBe("2026-07-07T00:30:00.000Z");
+    // The sending inbox + user auto-captured from the token meta (only the sequence
+    // id still needs a manual paste — HubSpot has no list-sequence API).
+    expect(row!.senderEmail).toBe("rep@portal.test");
+    expect(row!.senderUserId).toBe("95142122");
+    // sequence_id is NOT set at connect — it's pasted later on the Connections page.
+    expect(row!.sequenceId).toBeNull();
+  });
+
+  it("preserves a manually-set sequence id across a reconnect (no wipe)", async () => {
+    const mock = hubspotConnectMock();
+    const args = { code: "c", encryptionKey: KEY } as const;
+    await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), args);
+    // The user finishes sequence setup and pastes the id (the capture endpoint).
+    await setConnectionSendConfig(t.db, { portalId: "424242", sequenceId: "712515259" });
+    // A later reconnect (e.g. to grant an added scope) must NOT null the sequence.
+    await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), args);
+
+    const row = await loadConnection(t.db, "424242");
+    expect(row!.sequenceId).toBe("712515259");
+    expect(row!.senderEmail).toBe("rep@portal.test"); // sender still refreshes
+  });
+
+  it("does NOT wipe a captured sender when a reconnect's token payload omits user", async () => {
+    // First connect captures the sender from a normal payload.
+    await completeHubSpotConnect(t.db, oauthDeps(hubspotConnectMock().fetch), {
+      code: "c",
+      encryptionKey: KEY,
+    });
+    // A later reconnect whose token-info omits user/user_id must LEAVE the captured
+    // sender intact (undefined = don't touch), not null it — else the Send button
+    // would go dark with no UI to restore it.
+    await completeHubSpotConnect(t.db, oauthDeps(hubspotConnectMock({ omitUser: true }).fetch), {
+      code: "c",
+      encryptionKey: KEY,
+    });
+
+    const row = await loadConnection(t.db, "424242");
+    expect(row!.senderEmail).toBe("rep@portal.test");
+    expect(row!.senderUserId).toBe("95142122");
   });
 
   it("provisions the four tag properties on companies AND deals (idempotently)", async () => {

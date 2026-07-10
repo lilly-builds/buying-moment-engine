@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { contacts } from "@/db/schema";
 import { upsertPractice } from "@/db/ingest";
-import { storeConnection } from "@/db/crm";
+import { setConnectionSendConfig, storeConnection } from "@/db/crm";
 import { encrypt } from "@/src/crm/token-crypto";
 import { HUBSPOT_SEND_SCOPE } from "@/src/crm/hubspot-oauth";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
 import { sendBriefEmail } from "@/src/send/send-brief";
-import type { HubSpotSendConfig } from "@/src/send/config";
+import type { SandboxConfig } from "@/src/send/guard";
 import {
   CUSTOM_BODY_PROPERTY,
   CUSTOM_SUBJECT_PROPERTY,
@@ -26,12 +26,11 @@ const PORTAL = "portal_send_1";
 const BASE = "https://api.hubapi.test";
 
 const SANDBOX_EMAIL = "hellolillyfield@gmail.com";
-const SEND_CONFIG: HubSpotSendConfig = {
-  sequenceId: "712515259",
-  senderEmail: SANDBOX_EMAIL,
-  userId: "95142122",
-  sandbox: { allowedEmails: [SANDBOX_EMAIL] },
-};
+// The D9 firewall (env). The sequence + sender now live on the CONNECTION (below).
+const SANDBOX: SandboxConfig = { allowedEmails: [SANDBOX_EMAIL] };
+// The per-connection send identity the seeded connection carries.
+const SEQUENCE_ID = "712515259";
+const SENDER_USER_ID = "95142122";
 
 function oauthDeps(fetchImpl: typeof fetch): OAuthHttpDeps {
   return {
@@ -95,7 +94,17 @@ async function seedPractice(
   return practice.id;
 }
 
-async function seedConnection(tdb: TestDb, scopes: string): Promise<void> {
+async function seedConnection(
+  tdb: TestDb,
+  scopes: string,
+  // The connection carries the send identity; omit sequenceId to simulate a portal
+  // that connected but hasn't finished sequence setup yet.
+  sendConfig: { sequenceId?: string | null; senderEmail?: string | null; senderUserId?: string | null } = {
+    sequenceId: SEQUENCE_ID,
+    senderEmail: SANDBOX_EMAIL,
+    senderUserId: SENDER_USER_ID,
+  },
+): Promise<void> {
   await storeConnection(tdb.db, {
     provider: "hubspot",
     portalId: PORTAL,
@@ -103,7 +112,16 @@ async function seedConnection(tdb: TestDb, scopes: string): Promise<void> {
     refreshTokenEnc: encrypt("rt_1", KEY),
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     scopes,
+    senderEmail: sendConfig.senderEmail ?? null,
+    senderUserId: sendConfig.senderUserId ?? null,
   });
+  // sequence_id is set out-of-band (the capture endpoint), never at connect.
+  if (sendConfig.sequenceId) {
+    await setConnectionSendConfig(tdb.db, {
+      portalId: PORTAL,
+      sequenceId: sendConfig.sequenceId,
+    });
+  }
 }
 
 const GRANTED = `crm.objects.companies.write crm.objects.contacts.write crm.objects.deals.write ${HUBSPOT_SEND_SCOPE}`;
@@ -128,7 +146,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches,
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
 
     expect(out).toMatchObject({ ok: true, enrolled: true, touchNumber: 1, touchesSent: 3 });
@@ -164,7 +182,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches: [{ touchNumber: 1, subject: "Just touch 1", body: "Hi Lilly." }],
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
 
     expect(out).toMatchObject({ ok: true, enrolled: true, touchesSent: 1 });
@@ -189,7 +207,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
 
     expect(out).toMatchObject({ ok: false, status: 403 });
@@ -205,7 +223,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
 
     expect(out).toMatchObject({ ok: false, status: 403 });
@@ -221,7 +239,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
     expect(out).toMatchObject({ ok: false, status: 422 });
   });
@@ -234,7 +252,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
     expect(out).toMatchObject({ ok: false, status: 409 });
   });
@@ -248,9 +266,57 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       practiceId,
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
-      sendConfig: SEND_CONFIG,
+      sandbox: SANDBOX,
     });
     expect(out).toMatchObject({ ok: false, status: 403 });
     expect(calls).toHaveLength(0); // scope check is before any HubSpot call
+  });
+
+  it("503s when the connection has no sequence_id yet (setup unfinished)", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    // Connected + send scope granted + sender auto-captured, but the sequence id
+    // was never pasted — exactly the "connection exists, setup unfinished" state.
+    await seedConnection(tdb, GRANTED, {
+      sequenceId: null,
+      senderEmail: SANDBOX_EMAIL,
+      senderUserId: SENDER_USER_ID,
+    });
+    const { fetch: f, calls } = sendMock();
+
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      encryptionKey: KEY,
+      sandbox: SANDBOX,
+    });
+    expect(out).toMatchObject({
+      ok: false,
+      status: 503,
+      error: "Send is not configured — finish HubSpot sequence setup",
+    });
+    expect(calls).toHaveLength(0); // no broken enroll — nothing left the process
+  });
+
+  it("reads the sequence + sender from the CONNECTION, not the args", async () => {
+    // A DIFFERENT portal's identity proves the send path takes the sequence/sender
+    // from the resolved connection row — not from any global/default.
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED, {
+      sequenceId: "999000111",
+      senderEmail: SANDBOX_EMAIL,
+      senderUserId: "77",
+    });
+    const { fetch: f, calls } = sendMock();
+
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      encryptionKey: KEY,
+      sandbox: SANDBOX,
+    });
+    expect(out).toMatchObject({ ok: true, enrolled: true });
+    const enroll = calls.find((c) => c.path.endsWith("/enrollments"));
+    expect(enroll?.query.get("userId")).toBe("77");
+    expect(enroll?.body).toMatchObject({ sequenceId: "999000111" });
   });
 });
