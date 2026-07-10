@@ -16,7 +16,8 @@ import { voiceProseFields, type VoiceBrief } from "./schema";
  * pretending a regex measures warmth.
  *
  * Pure: no I/O, no clock. A violation is a RESULT, not a throw — `synthesize.ts` feeds
- * the violations back into exactly one retry, and a second failure kills the brief.
+ * the violations back into the model as an edit list on retry, and a brief that keeps
+ * failing after its retries are spent is killed.
  * A brief that states an unprovable number must not ship; that is the same line D2
  * draws, applied to prose instead of facts.
  */

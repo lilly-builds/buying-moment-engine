@@ -46,7 +46,7 @@ You are given EVIDENCE: a set of facts, each with an id, gathered from the pract
 HARD RULES — these are constraints, not preferences. A brief that breaks one is discarded.
 1. Every fact you state must come from the EVIDENCE. Never use prior knowledge about this practice. Never infer, estimate, or round.
 2. When a field asks for "evidenceIds", list the ids of the EVIDENCE items your sentence relies on. Use the ids exactly as given. Never invent an id. Never cite an id for a sentence it does not support.
-3. NUMBERS. Never write a number that does not appear, digit for digit, in the EVIDENCE — and never spell one out to get around this (no "forty percent", no "thirty seconds"). If you want to say a number and cannot find it, say it without the number. Write "around the clock", never "24/7". Write "most calls", never "80% of calls". Never quantify the EVIDENCE, even vaguely: if it is one review, write "a patient wrote", never "a couple of patients" or "several patients". The VERTICAL PACK's proof-point and ROI figures are another practice's results, not this one's — quote them ONLY inside an objection rebuttal, never in the opener or a touch. Everywhere else, say what the proof shows without its numbers.
+3. NUMBERS. Never write a number that does not appear, digit for digit, in the EVIDENCE — and never spell one out to get around this (no "forty percent", no "thirty seconds"). If you want to say a number and cannot find it, say it without the number. Write "around the clock", never "24/7". Write "most calls", never "80% of calls". Never quantify the EVIDENCE, even vaguely: if it is one review, write "a patient wrote", never "a couple of patients" or "several patients". The VERTICAL PACK is positioning drawn from OTHER practices and market data, so EVERY number anywhere in it — its pain line, its tone-reference example, its proof point, its ROI benchmarks — is another practice's, never this one's. You may state a pack number ONLY inside an objection rebuttal; in the headline, the opener, and every touch, make the point without the number. The tone reference shows sentence RHYTHM only — never reuse its words or its numbers.
 4. Never state how many signals are firing, and never count anything. Those change after you write; the dashboard renders them live.
 5. ABSENCE IS ABSENCE. If the EVIDENCE does not name the person, do not name a person. If it does not name their EHR, do not name an EHR. Omit it. An empty section is honest; a guessed one ends the call.
 6. Do not write an email address, a phone number, or a URL into any sentence.
@@ -56,7 +56,7 @@ HARD RULES — these are constraints, not preferences. A brief that breaks one i
 HOW TO SELL — this is the difference between a brief an AE uses and one they rewrite.
 - OPEN IN THEIR WORLD. The first sentence is about them, never about us and never about you. Do not start a message with "I". Start with what is happening at their front desk.
 - NAME THE PAIN BETTER THAN THEY CAN. Use the pack's vocabulary. When you describe their problem more precisely than they would, you have earned the next sentence.
-- TEACH ONE THING. Every message must hand them something they did not know when they opened it: a pattern, a consequence, a number from the pack's proof. If a message teaches nothing, it is a follow-up nobody answers.
+- TEACH ONE THING. Every message must hand them something they did not know when they opened it: a pattern, a consequence, a sharp observation about their world. Reach for an insight, not a number — the pack's figures already appear on the card, and a number in the prose is almost always one the evidence cannot support. If a message teaches nothing, it is a follow-up nobody answers.
 - SPECIFIC BEATS GENERAL. One real detail from the evidence outperforms every adjective. Certainty comes from specificity, never from intensity. Delete every word that survives without changing the meaning.
 - QUESTIONS BEAT ASSERTIONS. A question about their world gets a reply. A claim about our product gets deleted.
 - ONE ASK. Exactly one call to action, and it is small, named, and easy to say yes to. Never stack two asks.
@@ -210,7 +210,7 @@ export function buildVoicePrompt(request: VoiceRequest): string {
     `lead with: ${pack.opener.leadWith}`,
     `their vocabulary: ${pack.opener.vocabulary.join("; ")}`,
     `tone: ${pack.opener.tone}`,
-    `tone reference (do NOT copy this sentence): ${pack.opener.exampleOpener}`,
+    `tone reference — RHYTHM ONLY, never reuse its words or numbers: ${pack.opener.exampleOpener}`,
     ...proof,
     "roi benchmarks (quote these figures ONLY inside an objection rebuttal, never in the opener or a touch):",
     ...pack.roiBenchmark.items.map((item) => `  - ${item.label}`),
