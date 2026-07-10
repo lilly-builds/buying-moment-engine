@@ -4,6 +4,8 @@ import type {
   PdlClient,
   PdlCompanyRequest,
   PdlCompanyResult,
+  PdlPersonDiscoveryRequest,
+  PdlPersonDiscoveryResult,
   PdlPersonRequest,
   PdlPersonResult,
 } from "./types";
@@ -63,6 +65,41 @@ export async function runPdlPersonEnrich(
       }),
     },
     () => deps.client.enrichPerson(request),
+  );
+}
+
+/**
+ * Metered person discovery. PDL Person Search bills per returned profile, not per
+ * request. We cap `size` in the client and meter exactly the returned `data.length`.
+ */
+export async function runPdlPersonDiscover(
+  deps: PdlDeps,
+  request: PdlPersonDiscoveryRequest,
+): Promise<PdlPersonDiscoveryResult> {
+  return deps.meter(
+    {
+      provider: "pdl",
+      operation: "person.search",
+      pipelineStep: PIPELINE_STEP_PDL,
+      practiceId: deps.practiceId ?? null,
+      units: (result) => result.billedRecords,
+      unitCostUsd: PDL_USD_PER_MATCHED_RECORD,
+      meta: (result) => ({
+        returnedRecords: result.billedRecords,
+        matched: result.matched,
+        confidence: result.confidence,
+        total: result.total,
+        person: result.fullName,
+        role: result.role,
+        company: request.companyName,
+        city: request.city ?? null,
+        state: request.state ?? null,
+        targetRoles: request.targetRoles,
+        unparseable: result.unparseable,
+        parseError: result.parseError,
+      }),
+    },
+    () => deps.client.discoverPerson(request),
   );
 }
 

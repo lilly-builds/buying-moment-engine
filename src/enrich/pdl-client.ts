@@ -2,8 +2,11 @@ import { z } from "zod";
 import {
   PDL_COMPANY_ENRICH_URL,
   PDL_FETCH_TIMEOUT_MS,
+  PDL_MIN_DISCOVERY_CONFIDENCE,
   PDL_MIN_LIKELIHOOD,
+  PDL_PERSON_DISCOVERY_SIZE,
   PDL_PERSON_ENRICH_URL,
+  PDL_PERSON_SEARCH_URL,
 } from "./config";
 import {
   PdlRateLimitError,
@@ -11,6 +14,8 @@ import {
   type PdlClient,
   type PdlCompanyRequest,
   type PdlCompanyResult,
+  type PdlPersonDiscoveryRequest,
+  type PdlPersonDiscoveryResult,
   type PdlPersonRequest,
   type PdlPersonResult,
 } from "./types";
@@ -85,6 +90,27 @@ const personResponseSchema = z.object({
     .nullish(),
 });
 
+const personSearchResponseSchema = z.object({
+  status: z.number(),
+  data: z
+    .array(
+      z
+        .object({
+          full_name: restrictedString,
+          job_title: restrictedString,
+          job_company_name: restrictedString,
+          job_company_website: restrictedString,
+          location_locality: restrictedString,
+          location_region: restrictedString,
+          work_email: restrictedString,
+          linkedin_url: restrictedString,
+        })
+        .loose(),
+    )
+    .default([]),
+  total: z.number().nullish(),
+});
+
 /** Same licence convention as the person payload — a `false` must not break the parse. */
 const companyResponseSchema = z.object({
   status: z.number(),
@@ -107,6 +133,20 @@ const NO_MATCH: Omit<PdlPersonResult, "billed"> = {
   // A no-match / unparsed payload tells us nothing about what PDL holds.
   emailWithheldByPlan: false,
   linkedinWithheldByPlan: false,
+};
+
+const NO_DISCOVERY_MATCH: PdlPersonDiscoveryResult = {
+  billedRecords: 0,
+  matched: false,
+  unparseable: false,
+  parseError: null,
+  total: null,
+  confidence: null,
+  fullName: null,
+  role: null,
+  companyName: null,
+  workEmail: null,
+  linkedinUrl: null,
 };
 
 const NO_COMPANY_MATCH: Omit<PdlCompanyResult, "billed"> = {
@@ -204,6 +244,115 @@ export function normalizePersonResponse(
   };
 }
 
+function normalizedText(value: string | boolean | null | undefined): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function includesAny(
+  haystack: string | boolean | null | undefined,
+  needles: readonly string[],
+): boolean {
+  const normalized = normalizedText(haystack);
+  return needles.some((needle) => normalized.includes(normalizedText(needle)));
+}
+
+function scoreDiscoveryCandidate(
+  candidate: {
+    full_name?: string | boolean | null;
+    job_title?: string | boolean | null;
+    job_company_name?: string | boolean | null;
+    job_company_website?: string | boolean | null;
+    location_locality?: string | boolean | null;
+    location_region?: string | boolean | null;
+    work_email?: string | boolean | null;
+    linkedin_url?: string | boolean | null;
+  },
+  request: PdlPersonDiscoveryRequest,
+): number {
+  let score = 0;
+  if (
+    request.websiteDomain &&
+    normalizedText(candidate.job_company_website) ===
+      normalizedText(request.websiteDomain)
+  ) {
+    score += 0.45;
+  } else if (
+    normalizedText(candidate.job_company_name) ===
+    normalizedText(request.companyName)
+  ) {
+    score += 0.45;
+  } else if (includesAny(candidate.job_company_name, [request.companyName])) {
+    score += 0.3;
+  }
+  if (includesAny(candidate.job_title, request.targetRoles)) score += 0.3;
+  if (
+    request.city &&
+    normalizedText(candidate.location_locality) === normalizedText(request.city)
+  ) {
+    score += 0.15;
+  } else if (!request.city) {
+    score += 0.05;
+  }
+  if (
+    request.state &&
+    normalizedText(candidate.location_region) === normalizedText(request.state)
+  ) {
+    score += 0.05;
+  }
+  if (fieldValue(candidate.work_email) || fieldValue(candidate.linkedin_url))
+    score += 0.1;
+  return Math.min(score, 1);
+}
+
+/** Normalize a Person Search body. Search has no PDL likelihood, so we score confidence. */
+export function normalizePersonSearchResponse(
+  body: unknown,
+  request: PdlPersonDiscoveryRequest,
+): PdlPersonDiscoveryResult {
+  const parsed = personSearchResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    return {
+      ...NO_DISCOVERY_MATCH,
+      unparseable: true,
+      parseError: parsed.error.issues
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; "),
+    };
+  }
+
+  const data = parsed.data;
+  const billedRecords = data.status === 200 ? data.data.length : 0;
+  if (data.status !== 200 || data.data.length === 0) {
+    return { ...NO_DISCOVERY_MATCH, billedRecords, total: data.total ?? null };
+  }
+
+  const [candidate] = data.data;
+  const confidence = scoreDiscoveryCandidate(candidate, request);
+  const fullName = fieldValue(candidate.full_name);
+  if (confidence < PDL_MIN_DISCOVERY_CONFIDENCE || !fullName) {
+    return {
+      ...NO_DISCOVERY_MATCH,
+      billedRecords,
+      total: data.total ?? null,
+      confidence,
+    };
+  }
+
+  return {
+    billedRecords,
+    matched: true,
+    unparseable: false,
+    parseError: null,
+    total: data.total ?? null,
+    confidence,
+    fullName,
+    role: fieldValue(candidate.job_title),
+    companyName: fieldValue(candidate.job_company_name),
+    workEmail: fieldValue(candidate.work_email),
+    linkedinUrl: fieldValue(candidate.linkedin_url),
+  };
+}
+
 /** Normalize a company-enrich body. PURE. Used only by experiment #1. */
 export function normalizeCompanyResponse(
   body: unknown,
@@ -250,6 +399,33 @@ async function pdlGet(
   return { httpStatus: res.status, body: await readJsonBody(res) };
 }
 
+function escapeSql(value: string): string {
+  return value.replaceAll("'", "''").toLowerCase();
+}
+
+function personDiscoverySql(request: PdlPersonDiscoveryRequest): string {
+  const companyClauses = [
+    `job_company_name='${escapeSql(request.companyName)}'`,
+    request.websiteDomain
+      ? `job_company_website='${escapeSql(request.websiteDomain)}'`
+      : null,
+  ].filter(Boolean);
+  const roleClauses = request.targetRoles
+    .map((role) => `job_title='${escapeSql(role)}'`)
+    .join(" OR ");
+  const locationClauses = [
+    "location_country='united states'",
+    request.city ? `location_locality='${escapeSql(request.city)}'` : null,
+  ].filter(Boolean);
+
+  return [
+    "SELECT * FROM person WHERE",
+    locationClauses.join(" AND "),
+    `AND (${companyClauses.join(" OR ")})`,
+    `AND (${roleClauses})`,
+  ].join(" ");
+}
+
 /** Production binding. `apiKey` is injected, never read from the module scope. */
 export function pdlClient(apiKey: string): PdlClient {
   return {
@@ -264,6 +440,21 @@ export function pdlClient(apiKey: string): PdlClient {
         apiKey,
       );
       return normalizePersonResponse(body, httpStatus);
+    },
+
+    async discoverPerson(
+      request: PdlPersonDiscoveryRequest,
+    ): Promise<PdlPersonDiscoveryResult> {
+      const { body } = await pdlGet(
+        PDL_PERSON_SEARCH_URL,
+        {
+          sql: personDiscoverySql(request),
+          size: String(PDL_PERSON_DISCOVERY_SIZE),
+          titlecase: "true",
+        },
+        apiKey,
+      );
+      return normalizePersonSearchResponse(body, request);
     },
 
     async enrichCompany(request: PdlCompanyRequest): Promise<PdlCompanyResult> {

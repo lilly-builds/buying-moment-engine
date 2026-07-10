@@ -17,7 +17,7 @@ export const metadata: Metadata = {
  * (see `src/lib/auth.ts`), and it reads no database.
  */
 export default function FeedPreviewPage() {
-  const items = demoFeedItems(new Date());
+  const items = demoFeedItems();
   return (
     <div
       className="flex flex-1 flex-col"

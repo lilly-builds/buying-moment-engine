@@ -301,7 +301,7 @@ export function demoBrief(now: Date): RenderedBrief {
  * ⚡ The feed — a ranked flow of prospects at a buying moment (D8: signal count first).
  * Mirrors the FeedItem shape `app/page.tsx` hands to `<Feed>`.
  */
-export function demoFeedItems(now: Date): FeedItem[] {
+export function demoFeedItems(): FeedItem[] {
   return [
     {
       id: "demo-cedarline",
