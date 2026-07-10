@@ -134,6 +134,9 @@ function TouchEditor({
   spotlight?: boolean;
 }) {
   const rows = Math.max(4, touch.body.split("\n").length + 3);
+  // Unique per touch so each visible <label> binds to its own field (htmlFor/id).
+  const subjectId = `touch-${touch.touchNumber}-subject`;
+  const bodyId = `touch-${touch.touchNumber}-body`;
   return (
     <div
       data-tour={spotlight ? "edit-email" : undefined}
@@ -148,28 +151,47 @@ function TouchEditor({
         </Badge>
       </div>
       {touch.channel === "call" ? (
-        <textarea
-          aria-label={`Touch ${touch.touchNumber} notes`}
-          value={touch.body}
-          onChange={(e) => onChange({ body: e.target.value })}
-          rows={rows}
-          className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        />
-      ) : (
-        <>
-          <input
-            aria-label={`Touch ${touch.touchNumber} subject`}
-            value={touch.subject}
-            onChange={(e) => onChange({ subject: e.target.value })}
-            className="w-full rounded-panel border-0 bg-surface px-3 py-2 font-sans text-sm font-book text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand"
-          />
+        // A call touch is the AE's own prep — its notes are NEVER emailed, so the
+        // label says so plainly (no subject field: a call has no subject line).
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={bodyId} className="font-sans text-sm text-ink-muted">
+            Call notes — just for you, never sent
+          </label>
           <textarea
-            aria-label={`Touch ${touch.touchNumber} body`}
+            id={bodyId}
             value={touch.body}
             onChange={(e) => onChange({ body: e.target.value })}
             rows={rows}
             className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
           />
+        </div>
+      ) : (
+        // Each field carries a VISIBLE label bound with htmlFor/id — so an AE never
+        // has to guess which box is the subject line and which is the email body.
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={subjectId} className="font-sans text-sm text-ink-muted">
+              Subject line
+            </label>
+            <input
+              id={subjectId}
+              value={touch.subject}
+              onChange={(e) => onChange({ subject: e.target.value })}
+              className="w-full rounded-panel border-0 bg-surface px-3 py-2 font-sans text-sm font-book text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={bodyId} className="font-sans text-sm text-ink-muted">
+              Message
+            </label>
+            <textarea
+              id={bodyId}
+              value={touch.body}
+              onChange={(e) => onChange({ body: e.target.value })}
+              rows={rows}
+              className="w-full resize-y rounded-panel border-0 bg-surface p-3 font-sans text-sm text-ink-body outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            />
+          </div>
         </>
       )}
     </div>
