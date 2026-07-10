@@ -146,9 +146,8 @@ first. Connecting flips two things: the AI spend now bills to the org's own acco
 Send button on a brief is the demand-driven nudge that routes a rep's request to the RevOps owner who
 does this one-time setup. Full step-by-step: [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
 
-![The Connections page: HubSpot OAuth plus Anthropic and PDL key setup](docs/screenshots/integrations.png)
+![The Connections page: HubSpot OAuth plus Anthropic and PDL key setup](docs/screenshots/integrations.gif)
 *The Connections page (`/integrations`): one OAuth click for HubSpot, two pasted keys for the engine. The only setup anyone does.*
-<!-- TODO: Lilly drops this shot - docs/screenshots/integrations.png (see SHOT-LIST.md) -->
 
 ---
 
