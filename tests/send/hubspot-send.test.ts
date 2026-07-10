@@ -6,26 +6,33 @@ import {
   CUSTOM_SUBJECT_PROPERTY,
   HUBSPOT_SEQUENCES_VERSION,
   MAX_CUSTOM_BODY_CHARS,
+  SEND_PROPERTY_NAMES,
   BodyTooLongError,
+  touchPropertyPair,
   type HubSpotSendDeps,
 } from "@/src/send/hubspot-send";
 import { RealPracticeSendBlockedError } from "@/src/send/guard";
 import { mockFetch, type FetchCall } from "../crm/mock-fetch";
 
-/** A HubSpot mock for the send surface: property provisioning, PATCH, enroll. */
+/**
+ * A HubSpot mock for the send surface: property provisioning, PATCH, enroll.
+ * Property creates are idempotent (409 on repeat), tracked by the actual property
+ * name — the sender now provisions six (subject + body for each of three touches).
+ */
 function sendMock() {
   const props = new Set<string>();
   return mockFetch((call) => {
-    const { method, path } = call;
+    const { method, path, body } = call;
     if (method === "POST" && path === "/crm/v3/properties/contacts/groups") {
       return { status: 201, body: {} };
     }
     if (method === "POST" && path === "/crm/v3/properties/contacts") {
-      if (props.has(CUSTOM_BODY_PROPERTY)) {
+      const name = String((body as { name?: unknown })?.name ?? "");
+      if (props.has(name)) {
         return { status: 409, body: { category: "OBJECT_ALREADY_EXISTS" } };
       }
-      props.add(CUSTOM_BODY_PROPERTY);
-      return { status: 201, body: { name: CUSTOM_BODY_PROPERTY } };
+      props.add(name);
+      return { status: 201, body: { name } };
     }
     if (method === "PATCH" && path.startsWith("/crm/v3/objects/contacts/")) {
       return { status: 200, body: { id: path.split("/").pop() } };
@@ -104,7 +111,7 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
     });
   });
 
-  it("provisions the subject + body properties AT MOST once per sender (idempotent)", async () => {
+  it("provisions ALL per-touch properties AT MOST once per sender (idempotent)", async () => {
     const { fetch: f, calls } = sendMock();
     const sender = createHubSpotSender(deps(f));
     await sender.sendTouch({ recipient: sandboxRecipient, touchNumber: 1, subject: "s1", body: "one" });
@@ -112,8 +119,82 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
     const propertyCreates = calls.filter(
       (c) => c.method === "POST" && c.path === "/crm/v3/properties/contacts",
     );
-    // Exactly two creates total (subject + body), created once — never re-created.
-    expect(propertyCreates).toHaveLength(2);
+    // One create per send property (subject + body × 3 touches = 6), each created
+    // once — never re-created across sends (memoised provisioning).
+    expect(propertyCreates).toHaveLength(SEND_PROPERTY_NAMES.length);
+    expect(propertyCreates).toHaveLength(6);
+    // Every declared send property was actually provisioned.
+    const created = new Set(
+      propertyCreates.map((c) => String((c.body as { name?: unknown }).name)),
+    );
+    for (const name of SEND_PROPERTY_NAMES) expect(created.has(name)).toBe(true);
+  });
+
+  it("sendSequence writes all 3 touches' pairs in ONE PATCH and enrolls ONCE", async () => {
+    const { fetch: f, calls } = sendMock();
+    const sender = createHubSpotSender(deps(f));
+
+    const touches = [
+      { touchNumber: 1, subject: "s1", body: "Hi — worth 15 minutes?" },
+      { touchNumber: 2, subject: "s2", body: "One thing worth sharing." },
+      { touchNumber: 3, subject: "s3", body: "Closing the loop." },
+    ];
+    const result = await sender.sendSequence({ recipient: sandboxRecipient, touches });
+    expect(result).toEqual({
+      provider: "hubspot",
+      contactId: "ct_42",
+      touchNumber: 1,
+      enrolled: true,
+    });
+
+    // Exactly ONE PATCH carrying all 6 values, each in its own pair.
+    const patches = calls.filter((c) => c.method === "PATCH");
+    expect(patches).toHaveLength(1);
+    const props = (patches[0].body as { properties: Record<string, string> }).properties;
+    expect(Object.keys(props)).toHaveLength(6);
+    for (const t of touches) {
+      const pair = touchPropertyPair(t.touchNumber);
+      expect(props[pair.subject]).toBe(t.subject);
+      expect(props[pair.body]).toBe(t.body);
+    }
+    // Touch 1 lands in the ORIGINAL unsuffixed pair (back-compat with the Sequence's step 1).
+    expect(props[CUSTOM_SUBJECT_PROPERTY]).toBe("s1");
+    expect(props[CUSTOM_BODY_PROPERTY]).toBe("Hi — worth 15 minutes?");
+
+    // Exactly ONE enrollment — a contact can hold only one active enrollment.
+    expect(calls.filter((c) => c.path.endsWith("/enrollments"))).toHaveLength(1);
+  });
+
+  it("sendSequence runs the D9 firewall FIRST — a real practice makes ZERO calls", async () => {
+    const { fetch: f, calls } = sendMock();
+    const sender = createHubSpotSender(deps(f));
+    const real: Recipient = {
+      contactId: "ct_real",
+      email: "owner@real-derm.com",
+      classification: "real_practice",
+    };
+    await expect(
+      sender.sendSequence({
+        recipient: real,
+        touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      }),
+    ).rejects.toThrow(RealPracticeSendBlockedError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("sendSequence rejects an over-long touch body before any network call", async () => {
+    const { fetch: f, calls } = sendMock();
+    const sender = createHubSpotSender(deps(f));
+    await expect(
+      sender.sendSequence({
+        recipient: sandboxRecipient,
+        touches: [
+          { touchNumber: 1, subject: "ok", body: "fine" },
+          { touchNumber: 2, subject: "ok", body: "x".repeat(MAX_CUSTOM_BODY_CHARS + 1) },
+        ],
+      }),
+    ).rejects.toThrow(BodyTooLongError);
+    expect(calls).toHaveLength(0);
   });
 
   it("provisionProperty:false makes ZERO schema calls — only PATCH + enroll (live grant)", async () => {

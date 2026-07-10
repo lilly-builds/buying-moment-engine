@@ -38,6 +38,14 @@ describe("scope split (free portals must still install)", () => {
     expect(HUBSPOT_REQUIRED_SCOPES).toContain("crm.schemas.deals.write");
   });
 
+  it("required scopes include the CONTACT schema writes ensureSendProperties needs", () => {
+    // The per-touch send properties live on the contact object, provisioned at
+    // connect — without contacts-schema write, that POST 403s MISSING_SCOPES.
+    // Both are FREE-tier (unlike the OPTIONAL Sequences send scope).
+    expect(HUBSPOT_REQUIRED_SCOPES).toContain("crm.schemas.contacts.read");
+    expect(HUBSPOT_REQUIRED_SCOPES).toContain("crm.schemas.contacts.write");
+  });
+
   it("hasSendScope reads the GRANTED scopes, in string or array form", () => {
     const granted = `crm.objects.deals.write ${HUBSPOT_SEND_SCOPE}`;
     expect(hasSendScope(granted)).toBe(true);

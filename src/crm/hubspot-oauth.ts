@@ -15,8 +15,11 @@
  * is available on a free HubSpot portal (verified live 2026-07-08 — the free
  * portal 246702075 granted all eleven).
  *
- * `crm.schemas.*.write` is here because `ensureLeadProperties` creates the four
- * tag properties at connect time; without it that call 403s (`MISSING_SCOPES`).
+ * `crm.schemas.*.write` is here because provisioning creates custom properties at
+ * connect time; without it those calls 403 (`MISSING_SCOPES`). `crm.schemas.contacts.*`
+ * is included because `ensureSendProperties` creates the per-touch send properties on
+ * the CONTACT object at connect — all FREE-tier (unlike the Sequences send scope, which
+ * stays OPTIONAL). Existing portals re-consent once to grant the added contacts-schema scope.
  */
 export const HUBSPOT_REQUIRED_SCOPES = [
   "oauth",
@@ -28,6 +31,8 @@ export const HUBSPOT_REQUIRED_SCOPES = [
   "crm.objects.deals.write",
   "crm.schemas.companies.read",
   "crm.schemas.companies.write",
+  "crm.schemas.contacts.read",
+  "crm.schemas.contacts.write",
   "crm.schemas.deals.read",
   "crm.schemas.deals.write",
 ] as const;

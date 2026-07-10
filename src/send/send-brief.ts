@@ -27,8 +27,9 @@ import { createHubSpotSender } from "./hubspot-send";
  *   3. Resolve the HubSpot connection SERVER-SIDE (no portal id from input — IDOR),
  *      and confirm the GRANTED scopes include Sequences enrollment.
  *   4. Ensure the contact exists in HubSpot (the idempotent CRM push mints/returns
- *      its `contactId`), then enroll — which writes the edited subject + body into
- *      the two custom contact properties and sends through the rep's connected inbox.
+ *      its `contactId`), then enroll ONCE — which writes each touch's edited subject
+ *      + body into its own custom-contact-property pair and sends through the rep's
+ *      connected inbox, the Sequence dripping each touch's own copy.
  */
 
 /**
@@ -41,12 +42,24 @@ import { createHubSpotSender } from "./hubspot-send";
  */
 const SANDBOX_GEO_PREFIX = "demo:";
 
-export interface SendBriefEmailArgs {
-  practiceId: string;
+/** One AE-approved touch handed to the send — its position + exact edited copy. */
+export interface SendBriefTouch {
+  /** Which touch in the cadence (1..3) — decides its Sequence email step / property pair. */
+  touchNumber: number;
   /** The AE's exact edited subject line (shipped verbatim). */
   subject: string;
   /** The AE's exact edited plain-text body (shipped verbatim). */
   body: string;
+}
+
+export interface SendBriefEmailArgs {
+  practiceId: string;
+  /**
+   * The AE's exact edited touches (>=1). All are shipped in ONE enroll — each
+   * written into the property pair for its `touchNumber`, so the Sequence's step-N
+   * email renders touch N's own copy. A single-touch array still works (touch 1 only).
+   */
+  touches: SendBriefTouch[];
   /** The named next-step CTA carried on the sequence (R4), if any. */
   cta?: string | null;
   encryptionKey: Buffer;
@@ -57,7 +70,10 @@ export interface SendBriefEmailArgs {
 export interface SendBriefEmailSuccess {
   ok: true;
   contactId: string;
+  /** The first (lowest) touch number shipped — the enrollment starts here. */
   touchNumber: number;
+  /** How many touches' copy was shipped in the enroll. */
+  touchesSent: number;
   enrolled: boolean;
 }
 
@@ -149,6 +165,12 @@ export async function sendBriefEmail(
 ): Promise<SendBriefEmailResult> {
   const provider = args.provider ?? "hubspot";
 
+  // Defensive: the route validates this, but a launch with no touches has nothing
+  // to ship — fail before resolving anything (400, not an opaque downstream throw).
+  if (args.touches.length === 0) {
+    return { ok: false, status: 400, error: "No touches to send" };
+  }
+
   const resolved = await resolveRecipient(db, args.practiceId);
   if (!resolved) {
     return {
@@ -199,9 +221,9 @@ export async function sendBriefEmail(
     { practiceId: args.practiceId, lead: resolved.lead, provider },
   );
 
-  // Enroll: writes the edited subject + body into the two custom contact
-  // properties and sends the token step through the rep's connected inbox. The
-  // sender re-runs the D9 firewall with the real contactId (belt and suspenders).
+  // Enroll: writes each touch's edited subject + body into its property pair and
+  // sends the token steps through the rep's connected inbox. The sender re-runs the
+  // D9 firewall with the real contactId (belt and suspenders).
   const sender = createHubSpotSender({
     fetch: deps.fetch,
     getAccessToken,
@@ -210,8 +232,10 @@ export async function sendBriefEmail(
     senderEmail: args.sendConfig.senderEmail,
     userId: args.sendConfig.userId,
     sandbox: args.sendConfig.sandbox,
-    // The custom properties are provisioned OUT OF BAND (portal setup): the send
-    // grant holds `crm.objects.contacts.write` but not `crm.schemas.contacts.write`.
+    // The custom properties are provisioned at CONNECT (`completeHubSpotConnect` →
+    // `ensureSendProperties`, now that `crm.schemas.contacts.write` is a required
+    // scope), so the send path only writes + enrolls. The sender's default would
+    // provision on first send; false keeps the hot path to two calls (PATCH + enroll).
     provisionProperty: false,
   });
 
@@ -220,18 +244,25 @@ export async function sendBriefEmail(
     email: resolved.email,
     classification: resolved.classification,
   };
-  const result = await sender.sendTouch({
+  // Launch the whole cadence in ONE enroll: each touch's copy lands in the property
+  // pair for its touchNumber, so the Sequence's step-N email renders touch N's own
+  // copy. The named CTA rides the touches (rendered as the sequence's link in the
+  // HubSpot template — see onboarding/hubspot-setup-handoff.md).
+  const result = await sender.sendSequence({
     recipient,
-    touchNumber: 1,
-    subject: args.subject,
-    body: args.body,
-    cta: args.cta ?? null,
+    touches: args.touches.map((t) => ({
+      touchNumber: t.touchNumber,
+      subject: t.subject,
+      body: t.body,
+      cta: args.cta ?? null,
+    })),
   });
 
   return {
     ok: true,
     contactId: result.contactId,
     touchNumber: result.touchNumber,
+    touchesSent: args.touches.length,
     enrolled: result.enrolled,
   };
 }

@@ -9,38 +9,67 @@ import { sendBriefEmail } from "@/src/send/send-brief";
 export const runtime = "nodejs";
 
 /**
- * Email SEND (R10, U11) — the "Send" button on a brief. Enrolls the practice's
- * contact into a live HubSpot Sequence so the AE's exact edited subject + body
- * ships through the rep's connected inbox. Session-gated (R18).
+ * Email SEND (R10, U11) — the "Launch outreach" action on a brief. Enrolls the
+ * practice's contact ONCE into a live HubSpot Sequence and ships EVERY edited touch's
+ * copy (each into its own property pair) so the Sequence's step-N email renders touch
+ * N's own subject + body through the rep's connected inbox. Session-gated (R18).
  *
  * SECURITY / D9: the recipient address is resolved SERVER-SIDE from the practice's
- * own contact row — the body carries only the practice id + the edited copy, never
+ * own contact row — the body carries only the practice id + the edited touches, never
  * an address or a portal id. The D9 firewall runs before any HubSpot call, so a
  * send can only ever reach the registered sandbox address.
  */
 
-interface SendBody {
-  practiceId: string;
+interface SendTouchBody {
+  touchNumber: number;
   subject: string;
   body: string;
-  cta?: string | null;
+}
+
+interface SendBody {
+  practiceId: string;
+  touches: SendTouchBody[];
+  cta: string | null;
+}
+
+/** One touch is valid iff it has a 1..3 touchNumber and non-empty subject + body. */
+function parseTouch(input: unknown): SendTouchBody | null {
+  if (typeof input !== "object" || input === null) return null;
+  const t = input as Record<string, unknown>;
+  if (
+    typeof t.touchNumber !== "number" ||
+    !Number.isInteger(t.touchNumber) ||
+    t.touchNumber < 1 ||
+    t.touchNumber > 3 ||
+    typeof t.subject !== "string" ||
+    t.subject.length === 0 ||
+    typeof t.body !== "string" ||
+    t.body.length === 0
+  ) {
+    return null;
+  }
+  return { touchNumber: t.touchNumber, subject: t.subject, body: t.body };
 }
 
 function parseBody(input: unknown): SendBody | null {
   if (typeof input !== "object" || input === null) return null;
   const b = input as Record<string, unknown>;
-  if (
-    typeof b.practiceId !== "string" ||
-    b.practiceId.length === 0 ||
-    typeof b.subject !== "string" ||
-    b.subject.length === 0 ||
-    typeof b.body !== "string" ||
-    b.body.length === 0
-  ) {
+  if (typeof b.practiceId !== "string" || b.practiceId.length === 0) return null;
+  if (!Array.isArray(b.touches) || b.touches.length === 0 || b.touches.length > 3) {
     return null;
   }
+  const touches: SendTouchBody[] = [];
+  const seen = new Set<number>();
+  for (const raw of b.touches) {
+    const touch = parseTouch(raw);
+    // Reject a malformed touch OR a duplicate position (two touches can't map to
+    // one property pair / Sequence step).
+    if (!touch || seen.has(touch.touchNumber)) return null;
+    seen.add(touch.touchNumber);
+    touches.push(touch);
+  }
   const cta = typeof b.cta === "string" ? b.cta : null;
-  return { practiceId: b.practiceId, subject: b.subject, body: b.body, cta };
+  return { practiceId: b.practiceId, touches, cta };
 }
 
 export async function POST(request: NextRequest) {
@@ -72,8 +101,7 @@ export async function POST(request: NextRequest) {
   try {
     const outcome = await sendBriefEmail(getDb(), deps, {
       practiceId: body.practiceId,
-      subject: body.subject,
-      body: body.body,
+      touches: body.touches,
       cta: body.cta,
       encryptionKey,
       sendConfig,
@@ -85,6 +113,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       contactId: outcome.contactId,
       touchNumber: outcome.touchNumber,
+      touchesSent: outcome.touchesSent,
       enrolled: outcome.enrolled,
     });
   } catch {
