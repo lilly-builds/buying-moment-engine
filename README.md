@@ -21,9 +21,8 @@ That is the whole product. A rep should never open a blank page. The feed hands 
 real practices that just did something that means they are ready to buy, and each one arrives with
 the brief already written and every fact cited.
 
-![The feed of real practices at a buying moment, hottest on top](docs/screenshots/feed.png)
+![The feed of real practices at a buying moment, hottest on top](docs/screenshots/feed.gif)
 *The push feed: real named practices at a buying moment, ranked so the hottest rise to the top.*
-<!-- TODO: Lilly drops this shot - docs/screenshots/feed.png (see SHOT-LIST.md) -->
 
 ---
 
@@ -83,9 +82,8 @@ before the brief is ever stored.** This is the part that is genuinely hard, and 
 That is what makes a brief safe to act on without re-checking. The product's whole promise is that
 a rep can trust it, so the trust is built in code, not asserted in copy.
 
-![An open brief with a source citation clicked open](docs/screenshots/brief-citation.png)
+![An open brief with a source citation clicked open](docs/screenshots/brief-citation.gif)
 *A brief with a citation opened. Every fact links to its source, verified verbatim before the brief was stored.*
-<!-- TODO: Lilly drops this shot - docs/screenshots/brief-citation.png (see SHOT-LIST.md) -->
 
 The briefs cover **four verticals**, each with its own authored pack (the pain line, opener, proof
 point, EHR-as-signal, and ROI benchmark): Dermatology, Women's Health / OB-GYN, Ophthalmology, and
