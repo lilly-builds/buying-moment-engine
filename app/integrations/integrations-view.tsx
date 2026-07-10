@@ -14,8 +14,16 @@ import {
   TopNav,
 } from "@/design/components";
 import { gradients } from "@/design/tokens";
-import type { RevOpsOwner } from "@/src/target/config";
+import { DEFAULT_TARGET, type RevOpsOwner } from "@/src/target/config";
+import { ConnectionRow } from "@/design/components/onboarding/connection-row";
+import {
+  CONNECTIONS,
+  deriveConnectionStatus,
+  deriveGoLive,
+  type ConnectionId,
+} from "@/src/connect/connections";
 import { ValueOpener } from "./value-opener";
+import { SequenceSetupHelp } from "./sequence-setup-help";
 
 /**
  * Integrations / Connections (U17) — where the tool binds to the stack the JD
@@ -610,6 +618,125 @@ function RequestIntegrationCard() {
   );
 }
 
+// ── Connections checklist (the RevOps onboarding) ────────────────────────────
+
+const CONNECTION_META = Object.fromEntries(
+  CONNECTIONS.map((c) => [c.id, c]),
+) as Record<ConnectionId, (typeof CONNECTIONS)[number]>;
+
+/** The honest go-live line — keyed on the real send-ready signal (connected AND a
+ *  sequence id), so "You're live" means the tool can genuinely send. */
+function GoLiveSummary({
+  hubspot,
+  owner,
+}: {
+  hubspot: HubSpotStatus;
+  owner: RevOpsOwner;
+}) {
+  const go = deriveGoLive(hubspot);
+  const message = go.live
+    ? "You're live — sending and CRM tracking are on."
+    : go.sequencePending
+      ? "Almost there — finish setting up your sequence to go live."
+      : `One step left — ${owner.firstName} connects HubSpot to go live.`;
+  return (
+    <div
+      className={
+        go.live
+          ? "flex items-center gap-3 rounded-panel bg-success-surface px-4 py-3"
+          : "flex items-center gap-3 rounded-panel bg-white/10 px-4 py-3"
+      }
+    >
+      <span
+        aria-hidden
+        className={
+          go.live
+            ? "size-2 shrink-0 rounded-pill bg-success-ink"
+            : "size-2 shrink-0 rounded-pill border border-white/50"
+        }
+      />
+      <p
+        className={
+          go.live
+            ? "font-sans text-base text-success-ink"
+            : "font-sans text-base text-white/90"
+        }
+      >
+        {message}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The Connections checklist: HubSpot + the two BYOK keys as StepCard-style rows
+ * with status pills (design §C). The HubSpot row is a 3-step flow — connect → set
+ * up your sequence → sequence saved (the shipped SequenceSetupCard) — wrapping the
+ * PR #21 pieces, not rebuilding them.
+ */
+function ConnectionsChecklist({
+  hubspot,
+  engineKeys,
+  owner,
+}: {
+  hubspot: HubSpotStatus;
+  engineKeys: EngineKeyStatus;
+  owner: RevOpsOwner;
+}) {
+  const ctx = { hubspot, engineKeys };
+  const hub = CONNECTION_META.hubspot;
+  return (
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
+          Connections
+        </h2>
+        <p className="max-w-2xl font-sans text-base text-white/80">
+          One OAuth connect turns sending on; two keys run the engine on your own
+          account. Keys are encrypted and never shown again.
+        </p>
+      </div>
+
+      <GoLiveSummary hubspot={hubspot} owner={owner} />
+
+      {/* HubSpot — connect → set up your sequence → sequence saved */}
+      <ConnectionRow
+        icon={hub.icon}
+        line={hub.line}
+        chip={hub.chip}
+        status={deriveConnectionStatus("hubspot", ctx)}
+        required={hub.required}
+      >
+        <HubSpotCard status={hubspot} />
+        {hubspot.state === "connected" ? (
+          <>
+            <SequenceSetupHelp />
+            <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
+          </>
+        ) : null}
+      </ConnectionRow>
+
+      {/* The two BYOK engine keys */}
+      {(["anthropic", "pdl"] as const).map((id) => {
+        const meta = CONNECTION_META[id];
+        const keyMeta = ENGINE_KEYS.find((k) => k.id === id);
+        if (!keyMeta) return null;
+        return (
+          <ConnectionRow
+            key={id}
+            icon={meta.icon}
+            line={meta.line}
+            chip={meta.chip}
+            status={deriveConnectionStatus(id, ctx)}
+          >
+            <EngineKeyCard meta={keyMeta} initiallySet={engineKeys[id]} />
+          </ConnectionRow>
+        );
+      })}
+    </section>
+  );
+}
+
 // ── The page ────────────────────────────────────────────────────────────────
 
 export interface IntegrationsViewProps {
@@ -630,6 +757,7 @@ export function IntegrationsView({
   hubspot,
   engineKeys = { anthropic: false, pdl: false },
   banner,
+  owner = DEFAULT_TARGET.revOpsOwner,
   leadCount = 0,
   firstBriefHref = null,
 }: IntegrationsViewProps) {
@@ -651,28 +779,11 @@ export function IntegrationsView({
             description="Connect the tools your team already runs. Leads the engine surfaces get pushed, tagged, and tracked where you work."
           />
 
-          <section className="flex flex-col gap-4">
-            <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
-              CRM
-            </h2>
-            <HubSpotCard status={hubspot} />
-            {hubspot.state === "connected" ? (
-              <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
-            ) : null}
-          </section>
-
-          <section className="flex flex-col gap-4">
-            <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
-              Engine keys
-            </h2>
-            <p className="max-w-2xl font-sans text-base text-white/80">
-              These run the tool on your own account. Paste each one once. HubSpot above is the
-              only OAuth connect. Keys are encrypted and never shown again.
-            </p>
-            {ENGINE_KEYS.map((k) => (
-              <EngineKeyCard key={k.id} meta={k} initiallySet={engineKeys[k.id]} />
-            ))}
-          </section>
+          <ConnectionsChecklist
+            hubspot={hubspot}
+            engineKeys={engineKeys}
+            owner={owner}
+          />
 
           <section className="flex flex-col gap-4">
             <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
