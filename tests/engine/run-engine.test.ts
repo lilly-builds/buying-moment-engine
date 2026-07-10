@@ -22,6 +22,7 @@ import type { RunDiscoveryDeps } from "@/jobs/run-discovery";
 import { upsertPractice } from "@/db/ingest";
 import { attachSignal, tagVertical } from "@/src/engine/resolver";
 import { computeExpiresAt } from "@/src/engine/freshness";
+import type { Database } from "@/db/types";
 
 /**
  * The engine heartbeat (Thread 06) — ONE run fires every signal source, then cascades the fresh
@@ -204,6 +205,40 @@ describe("runEngine", () => {
     });
 
     expect("total" in summary.downstream && summary.downstream.total).toBe(1);
+  });
+
+  it("isolates a hard STAGE failure — a throwing downstream query folds into {errored}, sources still run", async () => {
+    // A db that throws on any use. detectors=[] → the detector stage never touches it; discovery=null;
+    // only the downstream stage's practicesNeedingBriefs reaches it, so runStage's own catch (not the
+    // batch driver's per-lead catch) is what must fold the throw into an {errored} marker.
+    const throwingDb = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("db down");
+        },
+      },
+    ) as unknown as Database;
+
+    const summary = await runEngine({
+      db: throwingDb,
+      meter,
+      now: NOW,
+      detectors: [], // no detectors → the detector stage returns a clean empty summary, unaffected
+      discovery: null,
+      pipelineClients: goldenClients(),
+      briefLimit: 5,
+      logger: quiet,
+    });
+
+    // Only the Errored marker carries `error` (BatchSummary has a numeric `errored`), so `error`
+    // is the discriminant that proves runStage caught a whole-stage throw.
+    expect("error" in summary.downstream).toBe(true);
+    if ("error" in summary.downstream) {
+      expect(summary.downstream.error).toContain("db down");
+    }
+    // The detector stage still produced a normal summary — the failure did not cascade.
+    expect((summary.sources.detectors as { ran: true }).ran).toBe(true);
   });
 
   it("isolates a per-lead failure in the cascade — the run still returns a summary", async () => {

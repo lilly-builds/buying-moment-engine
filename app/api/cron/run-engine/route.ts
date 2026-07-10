@@ -14,6 +14,7 @@ import { resolveProviderKey } from "@/src/keys/provider-keys";
 import {
   runEngine,
   DEFAULT_ENGINE_BRIEF_LIMIT,
+  MAX_ENGINE_BRIEF_LIMIT,
   type PipelineClients,
 } from "@/jobs/run-engine";
 import { scrapePractice } from "@/src/enrich/scrape";
@@ -39,6 +40,9 @@ import { resolvePracticeWebsite } from "@/src/enrich/website";
  * R19: one meter is built here and threaded through runEngine into every paid stage.
  */
 
+// Node runtime — the engine uses the pg driver + Node crypto; also the repo convention for every
+// DB/crypto-touching route (Next 16 defaults to nodejs, but declare it so the requirement is explicit).
+export const runtime = "nodejs";
 // Never statically optimized — every hit runs the engine against live env + DB.
 export const dynamic = "force-dynamic";
 // Vercel Fluid Compute ceiling (Hobby + Pro = 300s). runEngine's briefLimit keeps a run inside it.
@@ -61,7 +65,9 @@ export function resolveBriefLimit(): number {
   const raw = process.env.ENGINE_BRIEF_LIMIT?.trim();
   if (!raw) return DEFAULT_ENGINE_BRIEF_LIMIT;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_ENGINE_BRIEF_LIMIT;
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_ENGINE_BRIEF_LIMIT;
+  // Clamp the upper edge too: a huge value must not defeat the 300s bound or issue an enormous pull.
+  return Math.min(Math.floor(n), MAX_ENGINE_BRIEF_LIMIT);
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -69,54 +75,70 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const db = getDb();
-  const now = new Date();
-  // One meter → every paid call this run lands a cost_events row (R19), so SCHEDULED-run spend
-  // is a real scoreboard number, not an untracked leak.
-  const meter = createMeter(drizzleCostRecorder(db));
+  // Route setup runs OUTSIDE runEngine's per-stage isolation, so guard it here: a throw during dep
+  // assembly (getDb, key resolution) becomes a logged, structured 500 instead of a bare framework
+  // error — and the idempotent cron just retries next tick.
+  try {
+    const db = getDb();
+    const now = new Date();
+    // One meter → every paid call this run lands a cost_events row (R19), so SCHEDULED-run spend
+    // is a real scoreboard number, not an untracked leak.
+    const meter = createMeter(drizzleCostRecorder(db));
 
-  // Anthropic powers discovery's review-qualifier, enrichment extraction, and brief synthesis.
-  // BYOK (U17): stored EliseAI key first, env fallback — resolveProviderKey does both.
-  const anthropicApiKey = (await resolveProviderKey(db, "anthropic")) ?? undefined;
-  const pdlKey = process.env.PDL_API_KEY;
-  const hasGoogle = Boolean(process.env.GOOGLE_PLACES_API_KEY);
+    // Anthropic powers discovery's review-qualifier, enrichment extraction, and brief synthesis.
+    // BYOK (U17): stored EliseAI key first, env fallback — resolveProviderKey does both.
+    const anthropicApiKey = (await resolveProviderKey(db, "anthropic")) ?? undefined;
+    const pdlKey = process.env.PDL_API_KEY;
+    const hasGoogle = Boolean(process.env.GOOGLE_PLACES_API_KEY);
 
-  // Discovery is the paid Google source. Skip it (don't crash the whole run) when its creds are
-  // absent — the free detector sources still fire and the summary reports the skip honestly.
-  let discovery: RunDiscoveryDeps | null = null;
-  if (anthropicApiKey && hasGoogle) {
-    const tenant = getTenantProfile(DEFAULT_DISCOVERY_TENANT_ID);
-    const metro = selectMetro(tenant, now); // rotation picks this run's single metro (U6)
-    discovery = buildLiveDiscoveryDeps({ db, now, tenant, metro, meter, anthropicApiKey });
-  }
-
-  // The downstream cascade needs Anthropic (extract + brief voice) AND PDL (the verified-contact
-  // gap). Without both, run the free signal sources only rather than fabricate a client.
-  const canBrief = Boolean(anthropicApiKey && pdlKey);
-  const pipelineClients: PipelineClients | undefined = canBrief
-    ? {
-        scrape: (url: string) => scrapePractice({ fetch }, url),
-        extract: anthropicExtractClient(anthropicApiKey as string),
-        pdl: pdlClient(pdlKey as string),
-        voice: anthropicVoiceClient(anthropicApiKey as string),
-        // Plan B website lookup — only when Google is available; metered per practice.
-        resolveWebsite: hasGoogle
-          ? (p) => resolvePracticeWebsite({ meter, practiceId: p.id }, p)
-          : undefined,
-        // agentic escalation intentionally OFF — cost discipline (matches scripts/run-pipeline.ts).
+    // Discovery is the paid Google source. Skip it (don't crash the whole run) when its creds are
+    // absent. Its dep assembly is isolated too: a malformed tenant profile (once it becomes
+    // DB-editable) must degrade to discovery-off, never sink the free detector sources.
+    let discovery: RunDiscoveryDeps | null = null;
+    if (anthropicApiKey && hasGoogle) {
+      try {
+        const tenant = getTenantProfile(DEFAULT_DISCOVERY_TENANT_ID);
+        const metro = selectMetro(tenant, now); // rotation picks this run's single metro (U6)
+        discovery = buildLiveDiscoveryDeps({ db, now, tenant, metro, meter, anthropicApiKey });
+      } catch (err) {
+        console.warn("engine.discovery.config_error", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-    : undefined;
-  const briefLimit = pipelineClients ? resolveBriefLimit() : 0;
+    }
 
-  const summary = await runEngine({
-    db,
-    meter,
-    now,
-    detectors: detectorRegistry,
-    discovery,
-    pipelineClients,
-    briefLimit,
-  });
+    // The downstream cascade needs Anthropic (extract + brief voice) AND PDL (the verified-contact
+    // gap). Both truthy narrows each to `string` (no casts); without both, run the free sources only.
+    const pipelineClients: PipelineClients | undefined =
+      anthropicApiKey && pdlKey
+        ? {
+            scrape: (url: string) => scrapePractice({ fetch }, url),
+            extract: anthropicExtractClient(anthropicApiKey),
+            pdl: pdlClient(pdlKey),
+            voice: anthropicVoiceClient(anthropicApiKey),
+            // Plan B website lookup — only when Google is available; metered per practice.
+            resolveWebsite: hasGoogle
+              ? (p) => resolvePracticeWebsite({ meter, practiceId: p.id }, p)
+              : undefined,
+            // agentic escalation OFF — cost discipline (matches scripts/run-pipeline.ts).
+          }
+        : undefined;
+    const briefLimit = pipelineClients ? resolveBriefLimit() : 0;
 
-  return NextResponse.json(summary);
+    const summary = await runEngine({
+      db,
+      meter,
+      now,
+      detectors: detectorRegistry,
+      discovery,
+      pipelineClients,
+      briefLimit,
+    });
+
+    return NextResponse.json(summary);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.warn("engine.run.setup_error", { error });
+    return NextResponse.json({ ran: false, stage: "setup", error }, { status: 500 });
+  }
 }

@@ -42,6 +42,11 @@ import type { Lead, PipelineDeps } from "@/src/engine/pipeline";
  *  even when every lead needs an Opus brief; overridable via `ENGINE_BRIEF_LIMIT`. */
 export const DEFAULT_ENGINE_BRIEF_LIMIT = 10;
 
+/** Hard ceiling on the per-run cohort. A fat-fingered `ENGINE_BRIEF_LIMIT` (e.g. `100000`) must
+ *  not defeat the very bound this module exists to hold — no single run pulls or briefs past this,
+ *  so wall-clock and the `practicesNeedingBriefs` pull stay bounded regardless of the env value. */
+export const MAX_ENGINE_BRIEF_LIMIT = 50;
+
 /** The enrich + synthesize client bundle — everything `PipelineDeps` needs EXCEPT the shared
  *  db / meter / now / logger / force the engine threads in from one place. */
 export type PipelineClients = Pick<

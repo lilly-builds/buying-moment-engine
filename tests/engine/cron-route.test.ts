@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GET, resolveBriefLimit } from "@/app/api/cron/run-engine/route";
-import { DEFAULT_ENGINE_BRIEF_LIMIT } from "@/jobs/run-engine";
+import { DEFAULT_ENGINE_BRIEF_LIMIT, MAX_ENGINE_BRIEF_LIMIT } from "@/jobs/run-engine";
 
 /**
  * The scheduled engine trigger is fail-closed (Thread 06): only Vercel Cron, carrying the
@@ -74,5 +74,10 @@ describe("resolveBriefLimit", () => {
     expect(resolveBriefLimit()).toBe(DEFAULT_ENGINE_BRIEF_LIMIT);
     process.env.ENGINE_BRIEF_LIMIT = "-5";
     expect(resolveBriefLimit()).toBe(DEFAULT_ENGINE_BRIEF_LIMIT);
+  });
+
+  it("a huge value is clamped to the ceiling (can't defeat the 300s bound)", () => {
+    process.env.ENGINE_BRIEF_LIMIT = "100000";
+    expect(resolveBriefLimit()).toBe(MAX_ENGINE_BRIEF_LIMIT);
   });
 });
