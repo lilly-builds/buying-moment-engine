@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { resolveTarget } from "@/src/target/config";
 import {
   IntegrationsView,
   type ConnectBanner,
@@ -15,11 +16,13 @@ export const metadata: Metadata = {
  * (fixtures here, the real connection there), so the pixels match. Public in dev
  * via the `/styleguide/` prefix; reads no database.
  *
- * Toggle the fixtures from the URL so both states are reviewable:
- *   /styleguide/integrations                    -> disconnected (the Connect CTA)
- *   /styleguide/integrations?state=connected     -> connected (portal + capabilities)
- *   /styleguide/integrations?banner=connected     -> the post-OAuth success banner
- *   /styleguide/integrations?banner=error          -> a failed-connect banner
+ * Toggle the fixtures from the URL so every state is reviewable:
+ *   /styleguide/integrations                       -> disconnected (Connect CTA; opener with real N)
+ *   ?state=connected                               -> connected, no sequence yet ("Almost — set up your sequence")
+ *   ?state=connected&seq=1                          -> connected + sequence set ("You're live", all green)
+ *   ?leads=0                                        -> the degraded opener (no hot leads → feed link)
+ *   ?banner=connected                              -> the post-OAuth success banner
+ *   ?banner=error                                  -> a failed-connect banner
  */
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -42,7 +45,7 @@ export default async function IntegrationsPreviewPage({
   const hubspot: HubSpotStatus =
     state === "connected"
       ? // `?state=connected` previews a portal that still needs its sequence id;
-        // `?state=connected&seq=1` previews one already set.
+        // `?state=connected&seq=1` previews one already set (fully live).
         { state: "connected", sequenceId: firstParam(params.seq) ? "712515259" : null }
       : { state: "disconnected" };
 
@@ -53,5 +56,20 @@ export default async function IntegrationsPreviewPage({
         ? { kind: "error", code: "connect_failed" }
         : null;
 
-  return <IntegrationsView hubspot={hubspot} banner={banner} />;
+  // Opener fixtures: `?leads=0` previews the honest degraded copy (no number),
+  // otherwise a representative real count + a sample first-brief link.
+  const noLeads = firstParam(params.leads) === "0";
+  const leadCount = noLeads ? 0 : 12;
+  const firstBriefHref = noLeads ? null : "/practice/demo";
+  const owner = resolveTarget(process.env).revOpsOwner;
+
+  return (
+    <IntegrationsView
+      hubspot={hubspot}
+      banner={banner}
+      owner={owner}
+      leadCount={leadCount}
+      firstBriefHref={firstBriefHref}
+    />
+  );
 }
