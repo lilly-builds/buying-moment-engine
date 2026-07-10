@@ -34,6 +34,25 @@ describe("ingestRawSignal", () => {
     expect(await t.db.select().from(practices)).toHaveLength(1);
   });
 
+  it("promotes a source-provided website onto the practice (R-W1)", async () => {
+    const withSite = {
+      ...validSignal,
+      dedupeHash: "hash-site",
+      payload: { ...validSignal.payload, website: "https://sunshinederm.com" },
+    };
+    const res = await ingestRawSignal(t.db, withSite);
+    expect(res.status).toBe("ingested");
+    const [practice] = await t.db.select().from(practices);
+    expect(practice.websiteUrl).toBe("https://sunshinederm.com");
+  });
+
+  it("leaves website_url null when the payload has no website (no regression)", async () => {
+    const res = await ingestRawSignal(t.db, validSignal);
+    expect(res.status).toBe("ingested");
+    const [practice] = await t.db.select().from(practices);
+    expect(practice.websiteUrl).toBeNull();
+  });
+
   it("flags a malformed raw row rejected and never promotes it to normalized tables", async () => {
     const malformed = {
       dedupeHash: "bad-1",

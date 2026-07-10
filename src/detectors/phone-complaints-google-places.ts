@@ -32,6 +32,17 @@ export const googlePlaceDetailsResponseSchema = z.object({
       place_id: z.string(),
       name: z.string().optional(),
       url: z.url().optional(),
+      // The practice's OWN homepage (distinct from `url`, the Google Maps link).
+      // A public listing fact Google permits using — ToS bars review TEXT, not the
+      // website. Seeds enrichment's scrape (R-W1) at zero marginal cost.
+      //
+      // `.catch(undefined)`: `website` is MERCHANT-entered (unlike the Google-generated
+      // `url`), so it can arrive malformed ("drsmith.com", no scheme). Without the catch
+      // a bad website would fail the whole `result` parse → the whole response → and the
+      // detector would emit ZERO candidates, silently dropping a real phone-complaint
+      // signal. It is only a scrape seed, re-validated downstream, so a junk value must
+      // degrade to "no website", never cost us the buying moment.
+      website: z.url().optional().catch(undefined),
       reviews: z.array(googlePlaceReviewSchema).optional(),
     })
     .optional(),
@@ -139,6 +150,9 @@ export function normalizePlaceReviewsToCandidate(
     evidence,
   };
   if (query.geoKey) candidate.geoKey = query.geoKey;
+  // Keep the source-provided homepage (R-W1) so it flows to the practice as the
+  // lead is found — free, on the Details call we already make.
+  if (response.result.website) candidate.website = response.result.website;
   return candidate;
 }
 
@@ -163,7 +177,8 @@ export async function fetchGooglePlaceDetails(query: PhoneComplaintsQuery): Prom
 
   const url = new URL(GOOGLE_PLACES_BASE_URL);
   url.searchParams.set("place_id", query.placeId);
-  url.searchParams.set("fields", "place_id,name,url,reviews");
+  // `website` = the practice's homepage (R-W1), captured free on this same call.
+  url.searchParams.set("fields", "place_id,name,url,website,reviews");
   url.searchParams.set("key", apiKey);
 
   const res = await fetch(url.toString(), {

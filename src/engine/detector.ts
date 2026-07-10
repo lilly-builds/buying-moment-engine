@@ -36,6 +36,15 @@ export interface SignalCandidate {
   confidence: number; // 0..1
   detectedAt: Date;
   geoKey?: string;
+  /**
+   * The practice's own homepage, when the lead SOURCE hands it to us for free
+   * (R-W1) — e.g. Google Places Details returns `website` on the call the detector
+   * already pays for. Captured here so it flows through ingest to the practice as
+   * the lead is found, seeding enrichment's scrape. Optional: a source without a
+   * website (Adzuna, GDELT) simply omits it, and a deliberate Places name-lookup
+   * fills the gap later (Plan B, `src/enrich/website.ts`).
+   */
+  website?: string;
 }
 
 /**
@@ -85,6 +94,10 @@ export function candidateToRawSignals(
       confidence: atom.confidence ?? candidate.confidence,
     };
     if (atom.snippet !== undefined) payload.snippet = atom.snippet;
+    // The source-provided website rides the payload (R-W1). Repeated on every atom
+    // so it survives whichever atom promotes the practice first; the ingest rail's
+    // ON CONFLICT DO NOTHING then keeps the first-seen value (never clobbers).
+    if (candidate.website !== undefined) payload.website = candidate.website;
 
     const raw: RawSignalInput = {
       dedupeHash: candidateDedupeHash(

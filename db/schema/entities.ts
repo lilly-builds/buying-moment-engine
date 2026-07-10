@@ -55,6 +55,15 @@ export const practices = pgTable(
     city: text("city"),
     state: text("state"),
     geoKey: text("geo_key").notNull(),
+    // The scrape SEED for enrichment (the practice's own homepage), not a cited
+    // brief fact. Sourced upstream — "if the lead source hands us a website, keep
+    // it" (Google Places on the call we already make), else a deliberate Places
+    // name-lookup fills it (see `src/enrich/website.ts`). Deliberately NOT in
+    // `practice_facts`: the brief's CITED `website` fact still comes from verified
+    // extraction (D2), so this bare hint carries no provenance and never collides
+    // with that fact's (practice, field) unique key. Nullable — a practice we
+    // cannot find a site for enriches thin, honestly, and never blocks.
+    websiteUrl: text("website_url"),
     // First-class tag (R17). Defaults to `unclassified` — the honest "not yet
     // classified" state; U5's resolver sets the real vertical.
     vertical: vertical("vertical").notNull().default("unclassified"),

@@ -43,6 +43,13 @@
       "when": 1783630651115,
       "tag": "0005_discovery_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783635967777,
+      "tag": "0006_elite_maverick",
+      "breakpoints": true
     }
   ]
 }

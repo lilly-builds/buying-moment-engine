@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchGooglePlaceDetails,
   normalizePlaceReviewsToCandidate,
   googlePlaceDetailsResponseSchema,
   type GooglePlaceDetailsResponse,
@@ -60,6 +61,53 @@ describe("normalizePlaceReviewsToCandidate", () => {
       expect(atom.claim).not.toContain("nightmare");
       expect(atom.claim).not.toContain("20 minutes");
     }
+  });
+
+  it("captures the source-provided website onto the candidate (R-W1)", () => {
+    const response: GooglePlaceDetailsResponse = {
+      status: "OK",
+      result: {
+        place_id: QUERY.placeId,
+        website: "https://sunshinederm.com",
+        reviews: [
+          { text: "Impossible to reach — I can't get through on the phone, ever." },
+          { text: "Left on hold for 20 minutes then cut off." },
+          { text: "Great doctor and friendly staff." },
+        ],
+      },
+    };
+    const candidate = normalizePlaceReviewsToCandidate(response, QUERY, NOW);
+    expect(candidate).not.toBeNull();
+    expect(candidate?.website).toBe("https://sunshinederm.com");
+  });
+
+  it("leaves website undefined when the Places result has none", () => {
+    const parsed = googlePlaceDetailsResponseSchema.parse(fixture);
+    const candidate = normalizePlaceReviewsToCandidate(parsed, QUERY, NOW);
+    expect(candidate).not.toBeNull();
+    expect(candidate?.website).toBeUndefined();
+  });
+
+  it("a MALFORMED website never nukes the signal — it degrades to no website", () => {
+    // Google Business Profile `website` is merchant-entered; "drsmith.com" has no scheme.
+    const parsed = googlePlaceDetailsResponseSchema.parse({
+      status: "OK",
+      result: {
+        place_id: QUERY.placeId,
+        website: "drsmith.com", // invalid URL
+        reviews: [
+          { text: "Impossible to reach — I can't get through on the phone, ever." },
+          { text: "Left on hold for 20 minutes then cut off." },
+          { text: "Nice office." },
+        ],
+      },
+    });
+    const candidate = normalizePlaceReviewsToCandidate(parsed, QUERY, NOW);
+    // The buying moment survives (this is the regression Finding #1 guards against)...
+    expect(candidate).not.toBeNull();
+    expect(candidate?.kind).toBe("phone_complaints");
+    // ...and the junk website is simply dropped, not stored.
+    expect(candidate?.website).toBeUndefined();
   });
 
   it("returns null when the place lookup status is not OK", () => {
@@ -141,5 +189,30 @@ describe("googlePlaceDetailsResponseSchema", () => {
       result: { place_id: "abc", url: "not-a-url" },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("fetchGooglePlaceDetails", () => {
+  const OLD_KEY = process.env.GOOGLE_PLACES_API_KEY;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    process.env.GOOGLE_PLACES_API_KEY = "test-key";
+    fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ status: "OK" }), { status: 200 }));
+  });
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    if (OLD_KEY === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = OLD_KEY;
+  });
+
+  it("requests the website field on the Details call (R-W1, free capture)", async () => {
+    await fetchGooglePlaceDetails({ practiceHint: "X", placeId: "place-123" });
+    const calledUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    const fields = new URL(calledUrl).searchParams.get("fields")?.split(",") ?? [];
+    expect(fields).toContain("website");
+    expect(fields).toContain("reviews");
   });
 });

@@ -1,4 +1,4 @@
-import { asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Database } from "./types";
 import {
   briefs,
@@ -381,4 +381,116 @@ export async function feedPractices(
       b.signalCount - a.signalCount ||
       b.freshest.detectedAt.getTime() - a.freshest.detectedAt.getTime(),
   );
+}
+
+export interface PracticeNeedingBrief {
+  id: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  geoKey: string;
+  /** The scrape seed for the conductor; null → Plan B fills it (U3). */
+  websiteUrl: string | null;
+  /** Distinct FRESH signal kinds — the ranking key, same rule as the feed (D8). */
+  freshSignalCount: number;
+}
+
+/**
+ * The seeding pull (U6): practices that are AT a buying moment but have no brief yet.
+ *
+ * Deliberately the SAME three exclusions as `feedPractices` — a brief we generate here
+ * must be one that can actually appear in the feed:
+ *   1. `unclassified` → no pack, no pitch (kept out in SQL).
+ *   2. ZERO fresh signals → not at a buying moment (grouping drops it — it contributes
+ *      no fresh kind, so it never enters `byPractice`).
+ *   3. EXPIRED signals → aged out of the moment (`isFresh`, the single source of truth,
+ *      NOT re-expressed as SQL).
+ * Plus the one this query adds: a practice that ALREADY has a brief is excluded
+ * (`LEFT JOIN briefs ... IS NULL`) — the query-level half of the conductor's idempotency
+ * (the conductor's `getBrief` skip is the other half).
+ *
+ * Ordered hottest-first (distinct fresh kinds desc, then freshest detection desc) so a
+ * small `limit` briefs the most-briefable, highest-signal practices first (cost discipline).
+ * Grouped + limited in code because freshness is a code predicate; at demo scale (dozens
+ * of practices) this is well within budget.
+ *
+ * `includeBriefed` (the seeding script's `--force`) drops the no-brief filter so already-
+ * briefed practices are pulled too — a DELIBERATE regeneration path. The conductor still
+ * needs `force: true` to actually rewrite them (otherwise it skips a found brief); the two
+ * travel together in the CLI.
+ */
+export async function practicesNeedingBriefs(
+  db: Database,
+  opts: { now?: Date; limit?: number; includeBriefed?: boolean } = {},
+): Promise<PracticeNeedingBrief[]> {
+  const now = opts.now ?? new Date();
+  const notUnclassified = ne(practices.vertical, "unclassified");
+  const where = opts.includeBriefed
+    ? notUnclassified
+    : and(notUnclassified, isNull(briefs.id));
+  const rows = await db
+    .select({
+      id: practices.id,
+      name: practices.name,
+      city: practices.city,
+      state: practices.state,
+      geoKey: practices.geoKey,
+      websiteUrl: practices.websiteUrl,
+      kind: signals.kind,
+      detectedAt: signals.detectedAt,
+      expiresAt: signals.expiresAt,
+    })
+    .from(practices)
+    .innerJoin(signals, eq(signals.practiceId, practices.id))
+    .leftJoin(briefs, eq(briefs.practiceId, practices.id))
+    .where(where)
+    .orderBy(asc(practices.id), asc(signals.kind), asc(signals.detectedAt));
+
+  interface Acc extends PracticeNeedingBrief {
+    freshest: Date;
+    kinds: Set<string>;
+  }
+  const byPractice = new Map<string, Acc>();
+
+  for (const row of rows) {
+    if (row.detectedAt === null) continue;
+    if (!isFresh(row.expiresAt, now)) continue;
+
+    let entry = byPractice.get(row.id);
+    if (!entry) {
+      entry = {
+        id: row.id,
+        name: row.name,
+        city: row.city,
+        state: row.state,
+        geoKey: row.geoKey,
+        websiteUrl: row.websiteUrl,
+        freshSignalCount: 0,
+        freshest: row.detectedAt,
+        kinds: new Set(),
+      };
+      byPractice.set(row.id, entry);
+    }
+    if (!entry.kinds.has(row.kind)) {
+      entry.kinds.add(row.kind);
+      entry.freshSignalCount += 1;
+    }
+    if (row.detectedAt > entry.freshest) entry.freshest = row.detectedAt;
+  }
+
+  const sorted = [...byPractice.values()].sort(
+    (a, b) =>
+      b.freshSignalCount - a.freshSignalCount ||
+      b.freshest.getTime() - a.freshest.getTime(),
+  );
+  const limited = opts.limit !== undefined ? sorted.slice(0, opts.limit) : sorted;
+  return limited.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    city: entry.city,
+    state: entry.state,
+    geoKey: entry.geoKey,
+    websiteUrl: entry.websiteUrl,
+    freshSignalCount: entry.freshSignalCount,
+  }));
 }
