@@ -445,13 +445,13 @@ describe("lintVoice", () => {
     expect(result.violations.filter((v) => v.kind === "vague-quantifier")).toEqual([]);
   });
 
-  it("flags an em-dash pile-up", () => {
+  it("flags any em dash (the cap is zero)", () => {
     const dashes = `a${"—".repeat(MAX_EM_DASHES_PER_FIELD + 1)}b`;
     const result = lintVoice(voice({ headline: dashes }), CORPUS);
     expect(result.violations).toContainEqual({
       kind: "em-dash-overuse",
       field: "headline",
-      detail: expect.stringContaining(`${MAX_EM_DASHES_PER_FIELD + 1} em dashes`),
+      detail: expect.stringContaining("em dash"),
     });
   });
 

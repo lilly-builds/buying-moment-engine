@@ -17,7 +17,15 @@ import type { Recipient, SendAdapter } from "./adapter";
 export const TOUCH_COUNT = 3;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** touch 1 now · touch 2 at +3 days · touch 3 at +6 days (throttle). */
+/**
+ * touch 1 now · touch 2 at +3 days · touch 3 at +6 days (throttle).
+ *
+ * NOTE (2026-07-10): the LIVE UI send path does NOT use these offsets — it enrolls ONCE
+ * into the HubSpot Sequence, whose OWN step delays (email 2 +1 business day, email 3
+ * +3 business days — see `onboarding/hubspot-setup-handoff.md`) drive the real cadence,
+ * and the AE-facing words in `app/brief-view.tsx` (`SEQUENCE_STEP`) mirror those. This
+ * app-owned schedule is a separate, not-yet-wired path; reconcile the two if it goes live.
+ */
 export const DEFAULT_TOUCH_OFFSETS_MS: readonly number[] = [0, 3 * DAY_MS, 6 * DAY_MS];
 
 export interface SequenceTouch {
