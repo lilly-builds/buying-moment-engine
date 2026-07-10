@@ -13,10 +13,13 @@ import type { PackInput } from "./schema";
  * named customer; one uncontextualized "34%" graphic with no attribution),
  * the orthopedic blog post (platform/industry stats only, zero named
  * customers), Series-E and $200M-ARR press, and LinkedIn/press sweeps across
- * multiple query variants. No named EliseAI orthopedics or surgery-center
- * customer with a citable metric exists publicly as of 2026-07-07. This is a
- * config value to fill the moment a real metric surfaces — see
- * docs/pack-sources.md for the full negative-result trail.
+ * multiple query variants. Re-swept 2026-07-10 (beyond the first pass: EliseAI
+ * press/blog after 2026-06-10 incl. the 2026-06-24 Forbes piece, the resources
+ * library + webinars page, G2/Capterra reviews, the ElevenLabs partner blog,
+ * and adjacent multi-specialty/MSO/ASC angles) — still no named EliseAI
+ * orthopedics or surgery-center customer with a citable metric exists publicly
+ * as of 2026-07-10. This is a config value to fill the moment a real metric
+ * surfaces — see docs/pack-sources.md for the full, dated negative-result trail.
  */
 export const orthopedicsPack: PackInput = {
   vertical: "orthopedics",

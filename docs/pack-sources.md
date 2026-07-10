@@ -1,7 +1,7 @@
 # Pack Sources — flat URL ledger (U13)
 
 Every URL used in `vertical-packs.md`, the exact claim it backs, and how it was verified.
-**Access date for all entries: 2026-07-07.** "Fetched" = page retrieved and claim confirmed in the page text on that date.
+**Access date for the original entries: 2026-07-07.** "Fetched" = page retrieved and claim confirmed in the page text on that date. The orthopedics proof-point gap was **re-swept 2026-07-10** — see the dated section at the end of this file; the ortho pack remains `proof_pending` (no fabrication).
 
 ## EliseAI customer stories & blog (proof points)
 
@@ -51,6 +51,47 @@ Every URL used in `vertical-packs.md`, the exact claim it backs, and how it was 
 |---|---|
 | **"Georgia Dermatology — 88% of calls handled, 3+ hrs/day saved"** (spec's derm example) | NOT FOUND anywhere public: no such customer story, blog, or press; the 88% figure never surfaced. Nearest real items are the Georgia Skin Cancer "4 FTEs" testimonial and an unattributed "3+ hours saved per day" on https://eliseai.com/health/dermatology. Dropped; Texas Dermatology used instead. |
 | **"Women's Excellence"** (spec's WH candidate) | No citable EliseAI page surfaced in searches. Dropped; WHCT + Southdale/MetroPartners used instead. |
-| **Any named EliseAI orthopedics / surgery-center customer** | NOT FOUND after: customer-stories index, healthai linked-story list, ortho vertical page, ortho blog post, BusinessWire Series-E (2025-08-20) and $200M-ARR (2026-06-10) releases, FierceHealthcare coverage (page itself 403s to fetch; search summaries name no ortho customer), LinkedIn/press sweeps, multiple query variants incl. "orthopaedic"/"surgery center." Ortho pack ships `proof_pending`. |
+| **Any named EliseAI orthopedics / surgery-center customer** | NOT FOUND after: customer-stories index, healthai linked-story list, ortho vertical page, ortho blog post, BusinessWire Series-E (2025-08-20) and $200M-ARR (2026-06-10) releases, FierceHealthcare coverage (page itself 403s to fetch; search summaries name no ortho customer), LinkedIn/press sweeps, multiple query variants incl. "orthopaedic"/"surgery center." Ortho pack ships `proof_pending`. **Re-verified 2026-07-10** — still NOT FOUND; full refreshed trail in § "Orthopedics proof-point re-sweep — 2026-07-10" below. |
 | **11.5% US adult orthopedic no-show** (J Healthcare Management, 2018, "Correlation of Appointment Times and Subspecialty…") | Real study, but full text AND abstract pages are paywalled (LWW 402, Ovid 402) — could not be click-verified, so intentionally NOT used. Open-access 16% figure (PMC6664577) used instead. |
 | **Heartland Women's Healthcare / Advantia** (https://eliseai.com/blog/heartland-womens-healthcare-expected-staff-efficiency-the-patient-experience-gains-were-even-bigger-0wmkq) | Surfaced late in research; not fetched/verified, not needed (two verified WH proofs already). Available as a future third WH candidate. |
+
+## Orthopedics proof-point re-sweep — 2026-07-10
+
+A second, exhaustive hunt for a real, citable EliseAI orthopedics (or genuinely
+ortho-inclusive) proof point, going **beyond** the 2026-07-07 sweep along the new angles
+below. **Outcome: still NOT FOUND. Ortho pack stays `proof_pending` — no fabrication.**
+Every page below was click-verified (opened and read), not taken from a search snippet.
+Every named EliseAI healthcare customer that surfaced is dermatology, women's-health, or
+ophthalmology — never orthopedics, and never a surgery center / ASC / multi-specialty group
+that names orthopedics with a metric.
+
+**Canonical customer surfaces — re-checked, no new ortho story since 2026-07-07:**
+
+| URL | What it shows on 2026-07-10 | Ortho? |
+|---|---|---|
+| https://eliseai.com/health/customer-stories | 6 rows: Affiliated Dermatology (19% appt-conversion lift), Southdale OBGYN, MetroPartners OBGYN, Texas Dermatology (250+ new patients/mo), Dermatology & Skin Health (10% revenue gap closed), Dermatology Partners. (6 rows vs. the 2026-07-07 count of 5 only because Southdale OBGYN + MetroPartners OBGYN — one combined story on 2026-07-07, see line 20 above — are listed separately here; no genuinely new story appeared, and none orthopedic.) | None |
+| https://eliseai.com/healthai | Story/logo set: Women's Excellence, Austin Area GYN, Jacksonville Dermatology, Neiman Dermatology, Texas Dermatology, Women's Health Connecticut, Dermatology Partners, Grin Eye Care, KC Skin & Cancer | None |
+| https://eliseai.com/health/orthopedic | Still no named customer; the "34%" graphic ("Fewer No-Shows, Higher Revenue") remains uncontextualized/unattributed — unusable as a proof (R5) | None |
+| https://www.eliseai.com/resources | Content library: zero ortho case study or webinar; only a guide co-authored with MetroPartners OBGYN (women's health) | None |
+| https://eliseai.com/webinars | All 24 webinars are property-management / multifamily; zero healthcare webinars, let alone ortho | None |
+
+**Post-2026-06-10 press (new since the prior sweep) — no ortho customer named:**
+
+| URL | Date | Named EliseAI healthcare customer(s) | Ortho? |
+|---|---|---|---|
+| https://www.forbes.com/sites/amyfeldman/2026/06/24/these-29-year-olds-ai-chatbot-for-scheduling-doctor-visits-is-now-worth-12-billion/ | 2026-06-24 | None — EliseAI appears only in passing (valuation ~$2.2B); article is about competitor Assort Health | None |
+| https://eliseai.com/blog/openai-names-eliseai-as-a-trusted-partner | 2026-01-13 | Kansas City Skin & Cancer Center (derm — "saves 14+ staff hours daily"). "urgent orthopedic injury coordination" mentioned generically, no named customer | None |
+| https://www.fiercehealthcare.com/ai-and-machine-learning/eliseai-banks-250m-a16z-bessemer-venture-partners-grow-its-healthcare | Series-E coverage (2025-08-20; $2.2B valuation) | Page 403s to fetch (as before); via search the only named healthcare customer is Women's Health CT (women's health) | None |
+
+**Reviews & partner sources — no ortho customer:**
+
+| URL | What it shows | Ortho? |
+|---|---|---|
+| https://www.g2.com/products/eliseai/reviews | ~4.5/5; reviews predominantly EliseAI's property-management origin business, not healthcare | None |
+| https://www.capterra.com/p/10013373/EliseAI/ | Property-management-weighted reviews; no ortho healthcare customer | None |
+| https://elevenlabs.io/blog/elise-ai | ElevenLabs (voice partner) piece on EliseAI: only aggregate platform stats (66% cost-per-call reduction, 88% of calls handled) — zero named customers | None |
+| https://www.youtube.com/watch?v=aa3aPFKAXsw ("EliseAI Case Study") | About **Subscript** (EliseAI's own billing vendor — EliseAI is the customer), not a healthcare case study | N/A |
+
+**Query variants run (2026-07-10):** "EliseAI orthopedic customer case study appointments scheduled"; "EliseAI orthopedics/surgery-center/orthopaedic customer story metrics 2026"; "EliseAI new customer story orthopedic/multi-specialty/MSO"; "EliseAI orthopedic testimonial hours saved/calls handled G2 Capterra"; "EliseAI orthopedic case study webinar YouTube"; "EliseAI orthopaedic/sports-medicine/bone-and-joint announces/partners/implements." All returned the same generic vertical-page positioning ("across dermatology, women's health, orthopedics, and ophthalmology"), never a named ortho customer with a metric.
+
+**Conclusion:** the honest state is unchanged from 2026-07-07 and is now provably current as of 2026-07-10. A documented, current `proof_pending` is a *strength* — it proves the pack never invents customer data. Fill `proofPoint` with `{ tag: "real", … }` (and update `tests/packs/packs.test.ts`) the moment a real, click-verifiable ortho metric surfaces.
