@@ -33,6 +33,8 @@ export type AdzunaSearchResponse = z.output<typeof adzunaSearchResponseSchema>;
 export interface StaffingSpikeQuery {
   /** Adzuna `what` keyword query. */
   what: string;
+  /** Adzuna `where` location query, e.g. "Austin, TX". */
+  where?: string;
   /** 1-indexed results page. */
   page: number;
 }
@@ -115,6 +117,7 @@ export async function fetchAdzunaJobs(query: StaffingSpikeQuery): Promise<unknow
   url.searchParams.set("app_id", appId);
   url.searchParams.set("app_key", appKey);
   url.searchParams.set("what", query.what);
+  if (query.where) url.searchParams.set("where", query.where);
   url.searchParams.set("content-type", "application/json");
 
   const res = await fetch(url.toString(), {

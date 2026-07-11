@@ -37,6 +37,74 @@ const NOISE_TOKENS = new Set([
   "at",
 ]);
 
+/**
+ * Demo metros and common location/direction tails that listing sites append to
+ * brand names: "Sanova Dermatology | Austin - North Austin", "Austin Retina
+ * Associates - Central". These should not dilute the identity score.
+ */
+const LOCATION_TAIL_TOKENS = new Set([
+  "austin",
+  "houston",
+  "dallas",
+  "charlotte",
+  "tampa",
+  "phoenix",
+  "texas",
+  "tx",
+  "north",
+  "south",
+  "east",
+  "west",
+  "central",
+  "downtown",
+  "midtown",
+  "uptown",
+  "northeast",
+  "northwest",
+  "southeast",
+  "southwest",
+]);
+
+/** Known source geo variants for the current EliseAI demo metros. */
+const GEO_ALIASES: Record<string, string> = {
+  "austin-travis-county": "austin-tx",
+  "houston-harris-county": "houston-tx",
+  "dallas-dallas-county": "dallas-tx",
+  "charlotte-mecklenburg-county": "charlotte-nc",
+  "tampa-hillsborough-county": "tampa-fl",
+  "phoenix-maricopa-county": "phoenix-az",
+};
+
+function slug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function normalizeGeoKey(geoKey: string): string {
+  const key = slug(geoKey);
+  return GEO_ALIASES[key] ?? key;
+}
+
+function tailIsLocationOnly(tail: string): boolean {
+  const tokens = normalizeName(tail)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => LOCATION_TAIL_TOKENS.has(token));
+}
+
+export function stripLocationTail(name: string): string {
+  const beforePipe = name.split("|")[0]?.trim() ?? name;
+  const parts = beforePipe.split(/\s+[–—-]\s+/);
+  if (parts.length <= 1) return beforePipe;
+  const tail = parts.at(-1) ?? "";
+  if (tailIsLocationOnly(tail)) return parts.slice(0, -1).join(" - ").trim();
+  return beforePipe;
+}
+
 /** Common abbreviations seen in practice names, mapped to a canonical token. */
 const TOKEN_ALIASES: Record<string, string> = {
   assoc: "associates",
@@ -71,7 +139,7 @@ const TOKEN_ALIASES: Record<string, string> = {
  * corporation look 40% different from its plain-named self.
  */
 export function canonicalizeName(name: string): string[] {
-  return normalizeName(name)
+  return normalizeName(stripLocationTail(name))
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter((token) => token.length > 1)
@@ -110,7 +178,7 @@ export function isSameEntity(
   a: Pick<PracticeCandidate, "name" | "geoKey">,
   b: Pick<PracticeCandidate, "name" | "geoKey">,
 ): boolean {
-  if (a.geoKey !== b.geoKey) return false;
+  if (normalizeGeoKey(a.geoKey) !== normalizeGeoKey(b.geoKey)) return false;
   return nameSimilarity(a.name, b.name) >= NAME_MATCH_THRESHOLD;
 }
 
@@ -132,13 +200,24 @@ export async function resolvePractice(
   db: Database,
   candidate: PracticeCandidate,
 ): Promise<ResolvedPractice> {
+  const normalizedGeoKey = normalizeGeoKey(candidate.geoKey);
   const inGeo = await db
     .select({ id: practices.id, name: practices.name })
     .from(practices)
-    .where(eq(practices.geoKey, candidate.geoKey));
+    .where(eq(practices.geoKey, normalizedGeoKey));
+
+  // Also consider old source-specific rows that predate canonical geo-keying
+  // (e.g. Adzuna "houston-harris-county"). This lets the fix repair existing
+  // orphan rows instead of only preventing new ones.
+  const legacyRows = await db
+    .select({ id: practices.id, name: practices.name, geoKey: practices.geoKey })
+    .from(practices);
 
   let best: { id: string; name: string; score: number } | null = null;
-  for (const row of inGeo) {
+  for (const row of [
+    ...inGeo.map((row) => ({ ...row, geoKey: normalizedGeoKey })),
+    ...legacyRows.filter((row) => normalizeGeoKey(row.geoKey) === normalizedGeoKey),
+  ]) {
     const score = nameSimilarity(candidate.name, row.name);
     if (score >= NAME_MATCH_THRESHOLD && (!best || score > best.score)) {
       best = { id: row.id, name: row.name, score };
@@ -148,7 +227,10 @@ export async function resolvePractice(
     return { practiceId: best.id, merged: true, matchedName: best.name };
   }
 
-  const created = await upsertPractice(db, candidate);
+  const created = await upsertPractice(db, {
+    ...candidate,
+    geoKey: normalizedGeoKey,
+  });
   return { practiceId: created.id, merged: false };
 }
 

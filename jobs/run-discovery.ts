@@ -83,6 +83,8 @@ export interface RunDiscoveryDeps {
   limit?: number;
   /** A review qualifies only at/above this confidence (default DEFAULT_CONFIDENCE_FLOOR). */
   confidenceFloor?: number;
+  /** Optional targeted pass to stack other sources onto each qualified practice. */
+  crossCheck?: (practiceId: string) => Promise<unknown>;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -297,6 +299,10 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
       refresh: true,
     });
 
+    if (deps.crossCheck) {
+      await deps.crossCheck(resolved.practiceId);
+    }
+
     await archive(candidate, vertical, "qualified", true, tenant.signalKind);
     summary.qualified += 1;
     summary.qualifiedPlaces.push({
@@ -396,6 +402,7 @@ export function buildLiveDiscoveryDeps(params: {
   confidenceFloor?: number;
   meter?: Meter;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
+  crossCheck?: (practiceId: string) => Promise<unknown>;
   /** Pre-resolved Anthropic key (stored BYOK key or env). Falls back to env when omitted. */
   anthropicApiKey?: string;
 }): RunDiscoveryDeps {
@@ -413,6 +420,7 @@ export function buildLiveDiscoveryDeps(params: {
     limit: params.limit,
     confidenceFloor: params.confidenceFloor,
     logger: params.logger,
+    crossCheck: params.crossCheck,
     meter: params.meter ?? createMeter(drizzleCostRecorder(params.db)),
     searchFetcher: fetchPlacesTextSearch,
     // Newest reviews, not Google's positive-skewed "most_relevant" default — the
