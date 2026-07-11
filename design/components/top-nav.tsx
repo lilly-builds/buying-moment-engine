@@ -32,6 +32,8 @@ interface NavItem {
   href: string;
   label: string;
   isActive: (pathname: string) => boolean;
+  /** Optional `data-tour` hook so the RevOps tour can spotlight this nav link. */
+  dataTour?: string;
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
@@ -45,6 +47,7 @@ const NAV_ITEMS: readonly NavItem[] = [
     href: "/scoreboard",
     label: "Scoreboard",
     isActive: (p) => p.startsWith("/scoreboard"),
+    dataTour: "nav-scoreboard",
   },
   {
     href: "/signals",
@@ -112,6 +115,7 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
               <li key={item.href}>
                 <Link
                   href={item.href}
+                  data-tour={item.dataTour}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "rounded-control px-3 py-2 font-sans text-base transition-colors",

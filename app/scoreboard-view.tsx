@@ -182,7 +182,8 @@ export function ScoreboardView({ data }: { data: ScoreboardData }) {
         <PageContainer className="pb-12 pt-6">
           <div className="flex flex-col gap-6">
             {/* ── The two lagging outcomes ─────────────────────────────── */}
-            <div className="grid gap-6 md:grid-cols-2">
+            {/* `roi-scoreboard` = the RevOps tour's spotlight for its ROI-preview step. */}
+            <div data-tour="roi-scoreboard" className="grid gap-6 md:grid-cols-2">
               {active.endGoals.map((m) => (
                 <Card key={m.label} variant="elevated" padding="lg">
                   <StatTile

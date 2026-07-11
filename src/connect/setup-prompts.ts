@@ -16,6 +16,8 @@
  * Verified against the live dashboards on 2026-07-10.
  */
 
+import { HUBSPOT_SEQUENCE_PROMPT } from "./sequence-setup-prompt";
+
 export interface KeySetup {
   provider: "anthropic" | "pdl";
   /** The exact page to open — direct, no redirect. */
@@ -43,7 +45,7 @@ export const ANTHROPIC_SETUP: KeySetup = {
     "Go to platform.claude.com/settings/keys (sign in if it asks).",
     'Click "Create key" (top-right).',
     'Name it gtm-maestro, leave Workspace on "Default", then click "Add".',
-    "Copy the key that appears — it starts with sk-ant- and is shown only once.",
+    "Copy the key that appears. It starts with sk-ant- and is shown only once.",
     "Paste it into the Anthropic field above.",
   ],
 };
@@ -71,4 +73,49 @@ export const PDL_SETUP: KeySetup = {
 export const KEY_SETUPS: Record<"anthropic" | "pdl", KeySetup> = {
   anthropic: ANTHROPIC_SETUP,
   pdl: PDL_SETUP,
+};
+
+/**
+ * The HubSpot SEQUENCE setup — the one send step no API can automate (HubSpot has
+ * no create/list-sequence endpoint). The RevOps leader hands this prompt to Claude
+ * Code + the Claude Chrome extension; the agent builds the dynamic sequence in
+ * their HubSpot AND (hands-free, STEP D) writes the sequence ID back into GTM
+ * Maestro's "Sequence ID" field, so the leader pastes nothing.
+ *
+ * SINGLE SOURCE OF TRUTH: this is `onboarding/hubspot-setup-handoff.md` Path (2),
+ * copied VERBATIM — the Connections page renders it and the doc mirrors it, so the
+ * wording never drifts. The STEP D "read the ID → Save → VERIFY the badge" flow is
+ * load-bearing (it closes the zero-paste loop); the "STOP before anything that
+ * would send" guardrail is load-bearing (D9). Do NOT edit either.
+ */
+export interface SequenceSetup {
+  /** One-line "what this does" for the card intro. */
+  summary: string;
+  /** The direct HubSpot Sequences page — where the sequence is built. */
+  hubspotUrl: string;
+  /** The copy-paste Claude Chrome prompt (verbatim, handoff Path 2). */
+  chromePrompt: string;
+  /** The setup videos, in order (handoff Path 3) — referenced, not served here. */
+  videos: { file: string; label: string }[];
+}
+
+export const SEQUENCE_SETUP: SequenceSetup = {
+  summary:
+    "Build your send sequence once. Claude can do it for you, then fill the ID in here.",
+  hubspotUrl: "https://app.hubspot.com/sequences",
+  // Verbatim from the handoff doc (see `sequence-setup-prompt.ts` — never retyped).
+  chromePrompt: HUBSPOT_SEQUENCE_PROMPT,
+  videos: [
+    { file: "hubspot-ui-setup-1.mov", label: "Where to start in HubSpot" },
+    {
+      file: "hubspot-custom-properties-subject-and-email-body2.mov",
+      label: "The custom properties",
+    },
+    {
+      file: "hubspot-custom-email-sequence-setup-3.mov",
+      label: "Building the sequence",
+    },
+    { file: "hubspot-find-sequence-id-4.mov", label: "Finding the sequence ID" },
+    { file: "hubspot-gmail-connect-5.mov", label: "Connecting the sending inbox" },
+  ],
 };

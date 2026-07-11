@@ -1,7 +1,21 @@
 import { gradients } from "@/design/tokens";
 import { cn } from "@/design/lib/cn";
-import type { OnboardingStep } from "@/src/onboarding/steps";
+import type { StepIconKey } from "@/src/onboarding/steps";
 import { StepIcon } from "./step-icon";
+
+/**
+ * The presentational content the card draws — the orb icon, the one-instruction
+ * line (two weights), an optional supporting sentence, and the ✦ chip. Both the AE
+ * `OnboardingStep` and the RevOps tour step satisfy this, so one card renders both.
+ */
+export interface StepCardContent {
+  icon: StepIconKey;
+  line: { text: string; bold?: boolean }[];
+  detail?: { text: string; em?: boolean; bold?: boolean }[];
+  /** An optional framed list (label + value per row) — the connect-overview beat. */
+  bullets?: { label: string; text: string }[];
+  chip: string;
+}
 
 /**
  * StepCard — the guided-step card (U17).
@@ -54,7 +68,7 @@ function ProgressDots({ current, total }: { current: number; total: number }) {
 }
 
 export interface StepCardProps {
-  step: OnboardingStep;
+  step: StepCardContent;
   /** 1-based position of this step. */
   current: number;
   /** Total steps in the mini-mission. */
@@ -80,8 +94,10 @@ export function StepCard({
       role="dialog"
       aria-label="Getting started"
       className={cn(
-        // A landscape rectangle, matching the reference card's proportions.
-        "flex w-[32rem] max-w-[calc(100vw-2rem)] flex-col gap-4 rounded-media bg-surface px-8 py-7 shadow-card",
+        // A landscape rectangle, matching the reference card's proportions. Wide
+        // enough that the longest step (the slide-1 welcome) wraps in few enough
+        // lines to keep its Next/Skip controls on-screen.
+        "flex w-[40rem] max-w-[calc(100vw-2rem)] flex-col gap-4 rounded-media bg-surface px-8 py-7 shadow-card",
         className,
       )}
     >
@@ -121,6 +137,23 @@ export function StepCard({
             ),
           )}
         </p>
+      ) : null}
+
+      {/* 2c · optional framed list — the connect-overview beat frames all three */}
+      {step.bullets ? (
+        <ul className="flex flex-col gap-2">
+          {step.bullets.map((b, i) => (
+            <li
+              key={i}
+              className="flex gap-2.5 font-sans text-base leading-relaxed text-ink-body"
+            >
+              <span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-pill bg-health" />
+              <span>
+                <span className="font-semibold text-ink">{b.label}:</span> {b.text}
+              </span>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       {/* 3 · the ✦ context chip */}

@@ -678,7 +678,10 @@ export function IntegrationsView({
             <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
               CRM
             </h2>
-            <HubSpotCard status={hubspot} />
+            {/* data-tour hook: the RevOps onboarding spotlights this card (connect-hubspot). */}
+            <div data-tour="connect-hubspot">
+              <HubSpotCard status={hubspot} />
+            </div>
             {hubspot.state === "connected" ? (
               <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
             ) : null}
@@ -691,8 +694,11 @@ export function IntegrationsView({
             <p className="max-w-2xl font-sans text-base text-white/80">
               These run the tool on your own account. Keys are encrypted and never shown again.
             </p>
+            {/* data-tour hooks: the RevOps onboarding spotlights each key card (key-anthropic / key-pdl). */}
             {ENGINE_KEYS.map((k) => (
-              <EngineKeyCard key={k.id} meta={k} initiallySet={engineKeys[k.id]} />
+              <div key={k.id} data-tour={`key-${k.id}`}>
+                <EngineKeyCard meta={k} initiallySet={engineKeys[k.id]} />
+              </div>
             ))}
           </section>
 
