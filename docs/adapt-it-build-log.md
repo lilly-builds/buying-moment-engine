@@ -45,10 +45,22 @@ Plan: `docs/plans/2026-07-11-adapt-it-saas-plan.md` · North star: `docs/plans/a
 - **Run it:** `cd /Users/love/Developer/bme-adapt-it && npx next dev --webpack` then open
   http://localhost:3000/welcome (Turbopack crashes on the symlinked node_modules; use --webpack).
 
+## Security hardening (added after a background review of the pushed commits, 2026-07-11)
+- A background security review flagged the `active_workspace` cookie as forgeable (gate-bypass in
+  session.ts, cross-tenant IDOR read on `/prospect/[id]`, cross-tenant IDOR WRITE on
+  `/api/workspace/update`). FIXED: the cookie is now a signed capability `slug.hmac` (HMAC-SHA256 with
+  the existing `TOKEN_ENCRYPTION_KEY`, Web Crypto so it verifies in both Edge proxy and Node).
+  `src/workspace/cookie-sign.ts` + verify in `session.ts` and `getActiveWorkspace()`. The server only
+  ever mints a signature for the workspace a visitor just created, so a visitor can hold a valid cookie
+  ONLY for their own workspace and cannot forge one for another slug. Verified live: valid signed cookie
+  -> 200; forged bare cookie -> 307 denied on `/`, `/customize`, `/scoreboard`, and the update write. 7
+  new tests (incl. the exact signature-reuse IDOR attempt). Full suite 1110 green.
+
 ## Roadmap (intentionally OUT of scope tonight, documented honestly)
-- **True multi-tenant isolation (RLS + tenant_id on every entity table).** Tonight is config-level tenancy:
-  a tenant's own sample data is safe to expose by cookie; EliseAI real data stays allowlist-gated. A forged
-  cookie could see another tenant's *synthetic sample* rows (not real data). Production needs per-row RLS.
+- **True multi-tenant isolation (RLS + tenant_id on every entity table).** Tonight is config-level tenancy
+  hardened by the signed cookie above: a visitor can only act as the workspace they created, and EliseAI
+  real data stays allowlist-gated. Per-row RLS at the DB layer is still the right defense-in-depth for
+  production (so isolation does not depend on the app layer alone).
 - **Real signup auth** that issues a per-tenant session (today the tenant path is cookie-based, no account).
 - **Live signal detection for arbitrary industries.** The sample feed is Claude-generated; the detector
   seams already accept injected queries, so wiring real Adzuna/GDELT/Places queries per industry is the next step.

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { signWorkspaceCookie, verifyWorkspaceCookie } from "./cookie-sign";
 import { ELISEAI_DEFAULT } from "./default";
 import type { WorkspaceConfig } from "./schema";
 import { getWorkspaceBySlug } from "./store";
@@ -47,7 +48,9 @@ const DEFAULT_WORKSPACE: ActiveWorkspace = {
  */
 export async function getActiveWorkspace(): Promise<ActiveWorkspace> {
   const store = await cookies();
-  const slug = store.get(ACTIVE_WORKSPACE_COOKIE)?.value;
+  // The cookie is `slug.hmac`; verify the signature so a forged/tampered value
+  // (a different tenant's slug) resolves to null and falls back to the default.
+  const slug = await verifyWorkspaceCookie(store.get(ACTIVE_WORKSPACE_COOKIE)?.value);
   if (!slug) return DEFAULT_WORKSPACE;
 
   try {
@@ -79,7 +82,9 @@ export async function getActiveWorkspace(): Promise<ActiveWorkspace> {
 export async function setActiveWorkspace(slug: string): Promise<void> {
   try {
     const store = await cookies();
-    store.set(ACTIVE_WORKSPACE_COOKIE, slug, {
+    // Sign the value (`slug.hmac`) so it cannot be forged for another tenant's slug.
+    const signed = await signWorkspaceCookie(slug);
+    store.set(ACTIVE_WORKSPACE_COOKIE, signed, {
       httpOnly: true,
       sameSite: "lax",
       path: "/",

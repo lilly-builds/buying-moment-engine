@@ -7,6 +7,7 @@ import {
   isTenantWorkspaceCookieValue,
   parseAllowlist,
 } from "@/src/lib/auth";
+import { verifyWorkspaceCookie } from "@/src/workspace/cookie-sign";
 
 /**
  * Session refresh + route gate (R18), called from the root `proxy.ts`.
@@ -81,9 +82,14 @@ export async function updateSession(
     // This is the ONLY branch that gets this allowance: the fail-closed branch
     // above (Supabase Auth env missing) stays strict, isPublic-only.
     const wsCookie = request.cookies.get("active_workspace")?.value;
+    // Verify the cookie's HMAC signature: a forged value (another tenant's slug
+    // with no valid signature) fails here, so the proxy never opens a tenant route
+    // on a forged cookie. Web Crypto works in the Edge runtime.
+    const verifiedSlug = await verifyWorkspaceCookie(wsCookie);
     const tenantAllowed =
       isTenantAppPath(request.nextUrl.pathname) &&
-      isTenantWorkspaceCookieValue(wsCookie);
+      verifiedSlug !== null &&
+      isTenantWorkspaceCookieValue(verifiedSlug);
     if (!tenantAllowed) return redirectToLogin(request);
   }
 
