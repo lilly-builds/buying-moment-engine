@@ -152,6 +152,87 @@ For the **demo/beta**, Google's ~5 reviews per seeded practice is enough to *pro
 
 ---
 
+## Architecture decision — Places is a lead SOURCE (discovery), not just an enrichment lookup
+
+> **Run Places as a first-class discovery source: sweep an ICP category across a rotation of metros, pull each found practice's reviews, and let the phone-complaint classifier promote the ones showing the buying moment. It is *not* merely a `name → place_id` enrichment lookup on a list someone else hands us.**
+
+**Status:** Decision record. **Date:** 2026-07-09. **Decided by:** Lilly. This **supersedes** the working assumption baked into the U4 code comments ("the orchestrator supplies the real per-practice `{ practiceHint, placeId }` pairs … from its own list of known customers", `phone-complaints.ts:32–38`) — that enrichment-only framing was the *fallback*, never the plan.
+
+### The two options we weighed
+
+| | **Option 1 — Source (discovery)** ✅ chosen | **Option 2 — Enrichment (lookup)** |
+|---|---|---|
+| Input | `(category, metro)` → enumerate every matching practice | a list of already-known practices |
+| Motion | geography-driven: *"check every practice in these metros"* | list-driven: *"check exactly these N accounts"* |
+| Finds strangers? | **yes** — surfaces practices no other source sees | no — only re-checks names already in the pool |
+| Cost scales with | city size × cadence | your list size |
+
+### Why discovery is even possible (the framing fix)
+
+The orchestrator hand-off memo said Places *"can't find strangers — it can only check names on a list you hand it."* **That is half right.** Places has no *search-by-review-content* API (you cannot query "all businesses with complaint phrases") — but it **does** have *search-by-category-and-place*: legacy **Text Search** (`/place/textsearch/json`, e.g. `"dental clinic in Austin, TX"`) returns a list of businesses with their `place_id`s. So the flow is **enumerate a metro cheaply → pull reviews on the results → classify**; you filter on review *content* client-side after the pull, not server-side. (This is exactly what the OptiFlow prior art does via Apify — below.)
+
+### Why "source" is strictly the bigger, safer choice (the one-pool insight)
+
+The engine keeps **one practice pool keyed by normalized name**, and the push feed **ranks by signal count** (a 3-signal practice outranks a 1-signal one — spec D7). *Verified in code:* signals from any detector merge onto the same practice via `normalizeName` (`src/ingest/validate.ts:47`) and are counted + sorted in `db/queries.ts:signalCount` (`b.signalCount − a.signalCount`, descending). Therefore:
+
+- **Discovery** = a source that adds *new practices* to the pool.
+- **Enrichment** = a source that adds *new signals* to practices already in the pool.
+- **City-rotation Places does BOTH at once.** Any practice it finds that Adzuna/GDELT *also* found automatically stacks to 2+ signals through the name-merge — we get the enrichment/stacking **for free**. Choosing "source" is a **superset** of choosing "enrichment": nothing is lost, and we additionally reach practices the other two sources never see (a practice with phone complaints but no job posts and no news events is invisible to Adzuna and GDELT — Places discovery is the only path to it).
+
+### The real constraint was cost × depth — and why we proceed anyway
+
+Viability was never the question; **cost × review-depth** was. Reviews are the **priciest SKU** (~4¢/pull) and cap at **~5 reviews/place** we don't own, so a blind sweep pays the top SKU on *every* business to find the few whose phone pain surfaces in 5 reviews.
+
+**Decision (Lilly):** proceed as a source. *"4 cents per lead — if it leads us to more qualified leads, and the product is way more than 4 cents, it's worth the cost-to-revenue trade. It can always be tracked, and metrics of the running live system can guide any changes."* A practice worth thousands in EliseAI ARR is trivially worth ~4¢ to surface; the cost meter is already wired into every fetch (`ctx.meter`), so live cost/yield metrics steer cadence, city choice, and thresholds. The earlier cost caution applies only to the **demo phase** (Lilly's key, the ~1k-free-review-pulls/month ceiling), and there it is a *reliability* concern (don't exhaust the free tier mid-demo), not an economics one.
+
+**Reconciliation with the earlier cost model:** the *"demo bill ≈ $0"* claim above assumed a *pre-seeded, cached* feed with only incidental fresh pulls. Active discovery sweeps make regular fresh pulls **by design**, so demo-phase spend is no longer ~$0 — it is bounded, metered, and an operational parameter to watch (cadence × cities × per-city cap), not an accident. The two-cap (soft/hard) model still backstops it.
+
+### Prior-art correction — OptiFlow does NOT qualify on reviews
+
+Lilly's `lead-gen-optiflow` was cited as a working precedent. Reading the actual repo (verified, file-cited) corrects the record:
+
+- OptiFlow is a **ringless-voicemail cold-outreach pipeline**, not a review-signal engine. It scrapes Google Maps via Apify with **`maxReviews: 0`** — it never pulls review text — stores `rating`/`review_count` but **never filters, thresholds, or ranks on them**. "Qualified" there = *has phone + scrapeable website + good-enough generated script* (`src/pipeline/process-lead.ts` gates).
+- **Portable from OptiFlow:** the city-rotation *skeleton* — a hardcoded metro list, weekly clock-derived rotation (`api/process/rotate-city.ts`: no cursor table — the active city is `weeksSinceStart % 4`), Apify "category in city" enumeration, a segment taxonomy, a per-lead cost ledger, and `sha256(place_id|phone)` idempotency dedupe.
+- **Net-new here (OptiFlow never had it):** the "reviews → buying signal" qualification itself — which in *this* repo already exists as `classifyPhoneComplaint`. So we are not re-porting OptiFlow; we are attaching its rotation front-end to a review-classifier it never had.
+- **Inherited gotcha:** OptiFlow's dedupe is *downstream-only* — it still re-pays Apify to re-scrape a metro each rotation. Our analog: we'd re-pay the 4¢ reviews SKU for the same `place_id` next rotation unless we cache `place_id + last_checked` and skip within a freshness window. Storing `place_id` long-term is the one thing Google's ToS explicitly permits (see Citation section), so the compliant fix exists.
+
+### What this costs to build (scope)
+
+In this repo, "Places as a source" is **one net-new module**; everything downstream is reuse:
+
+- **Net-new:** `resolvePlacesInCity(category, metro, limit)` — legacy Text Search → returns the `PhoneComplaintsQuery[]` (`{ practiceHint, placeId, geoKey }`) the detector *already loops over*. Mirrors the existing `fetchGooglePlaceDetails` (injected fetcher + Zod schema + pure normalize) so it unit-tests on a fixture with no live key.
+- **Reuse:** the detector loop, `classifyPhoneComplaint`, ingest/dedupe, the name-merge stacking, signal-count ranking, and the cost meter are all built. Today the detector ships with an **empty query list** (`phone-complaints.ts:117`); discovery is literally *populating that list per rotation*.
+- **Then layer (post-e2e):** rotation config (start dumb — a metros array + which-city-this-run) and an archive lane for non-signal practices (keyed by `place_id`, ToS-clean) that later signals can resurface.
+
+### Optional efficiency levers (metric-tunable, not gates)
+
+- **Rating pre-filter:** legacy Text Search returns `rating` + `user_ratings_total` in the *same* enumeration call, so skipping the 4.8-star practices *before* spending 4¢ on their reviews is nearly free and doubles as signal-quality. Ship without it; add if the numbers show waste.
+- **Re-fetch cache:** the `place_id + last_checked` skip-window (above) avoids re-paying across rotations.
+
+### Depth caveat (unchanged, still honest)
+
+At ~5 reviews/place, per-practice hit-rate for phone complaints specifically is modest — the complaint must land in Google's top-5. For the **demo** that is enough to *prove the signal fires* on real, citable practices; **v1** widens depth via the multi-source set (Google + Yelp + Healthgrades) already named in the Strategy section, not by re-pinging one place.
+
+### Rollout
+
+1. Build the resolver + fixture unit test (no live key).
+2. **Live e2e:** one metro × one category × small limit (~10 places) → real details+reviews+classifier → print candidates. Proves Places end-to-end as a prospect source for a few cents, before any full sweep.
+3. Layer rotation config + archive lane; instrument yield/cost from the meter; tune from live data.
+
+### Verification status (this decision, 2026-07-09)
+
+| Claim | Status |
+|---|---|
+| Signals merge per practice by `normalizeName`; feed ranks by signal count | ✅ **verified in code** (`db/queries.ts`, `src/ingest/validate.ts`) |
+| Detector ships an empty query list; discovery = populating it | ✅ **verified** (`src/detectors/phone-complaints.ts:117`) |
+| Live review-details call uses the **legacy** endpoint (`/place/details/json`) | ✅ **verified** (`phone-complaints-google-places.ts:145`) |
+| `GOOGLE_PLACES_API_KEY` present locally | ✅ **verified** (`.env.local`) |
+| OptiFlow does no review qualification (`maxReviews: 0`); rotation is clock-derived, no cursor table | ✅ **verified** (repo read: `setup-apify-tasks.ts`, `api/process/rotate-city.ts`) |
+| Legacy Text Search enumerates by category+metro and returns `place_id` + `rating` + `user_ratings_total` in one call | 🟡 **strong** — long-standing API behavior, symmetric with the details endpoint already in code; **not** re-verified against live docs this pass → confirm on the Text Search (legacy) reference before building |
+| ~4¢/review-pull, ~1k free/month | 🟡 **approximate** — 2026 pricing in flux (see Cost model) |
+
+---
+
 ## Setup — do once (whoever deploys)
 
 1. **Create a project** — [console.cloud.google.com](https://console.cloud.google.com) → New Project → `eliseai-signals`.
