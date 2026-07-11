@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { VariantConfig, VariantKey } from "./variants";
+import { SignalField } from "@/components/marketing/signal-field";
 
 /* Font stacks come from the root layout's CSS vars. */
 const DISPLAY = "var(--font-inter-tight), system-ui, sans-serif";
@@ -82,13 +83,24 @@ export function Hero({ config, form }: { config: VariantConfig; form: ReactNode 
   const rows = HERO_ROWS[config.key];
   return (
     <section id="top" className="relative overflow-hidden" style={{ background: "var(--ground)" }}>
+      {/* the living signal field: companies, and the moments igniting across them */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          WebkitMaskImage: "radial-gradient(130% 115% at 100% 0%, #000 22%, transparent 62%)",
+          maskImage: "radial-gradient(130% 115% at 100% 0%, #000 22%, transparent 62%)",
+        }}
+      >
+        <SignalField accent={config.theme.accent} cadence={1.0} calm={0.22} />
+      </div>
       {/* soft accent glow */}
       <div
         aria-hidden
         className="pointer-events-none absolute -top-40 right-[-10%] h-[520px] w-[520px] rounded-full opacity-[0.10] blur-3xl"
         style={{ background: "var(--accent)" }}
       />
-      <div className={`${container} grid items-center gap-14 pb-16 pt-16 sm:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10 lg:pb-24`}>
+      <div className={`${container} relative z-10 grid items-center gap-14 pb-16 pt-16 sm:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10 lg:pb-24`}>
         <div>
           <Eyebrow>{config.eyebrow}</Eyebrow>
           <h1
