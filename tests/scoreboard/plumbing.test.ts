@@ -1,30 +1,102 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../setup";
 import { seedDemo } from "@/db/seed-demo";
 import { buildScoreboardData, loadScoreboardInputs, loadScoreboardData } from "@/app/scoreboard/data";
-import { feedPractices, practiceSignalRows } from "@/db/queries";
+import { DEMO_GEO_KEY_PREFIX, feedPractices, practiceSignalRows } from "@/db/queries";
 import { getBrief } from "@/db/brief";
 import { renderBrief } from "@/src/brief/render";
-import { roiEvents } from "@/db/schema";
+import { practices, roiEvents } from "@/db/schema";
 
 /**
  * The UI-plumbing contract, proven end-to-end through the REAL data layer (U8/U9/U12).
  *
- * `seedDemo` writes the same rows the demo will run against; the assertions then drive the
- * exact functions the real routes call — `getBrief` + `practiceSignalRows` + `renderBrief`
- * for the brief page, `loadScoreboardData` for the scoreboard — and check the aggregate
- * numbers, the honesty tags, and idempotency. No network, no keys: PGlite is real Postgres.
+ * `seedDemo` writes clearly-demo rows (every practice carries a `demo:` geo key). The
+ * integrity fix (D9 / ROI honesty) is that those rows NEVER reach the live `/feed` or
+ * `/scoreboard` — only the real pipeline does. So this file proves two things:
+ *
+ *   1. Exclusion — after `seedDemo`, the real feed is empty and the real scoreboard is
+ *      the honest all-zero board (no fabricated ROI leaks through).
+ *   2. Aggregation math — the assembler still turns a realistic funnel into the right
+ *      `ScoreboardData`. Because the real board excludes `demo:` keys, we RELABEL the
+ *      seeded cohort as real (strip the prefix) to run the pipeline over data the board
+ *      actually counts. Same rows, now counted; the numbers prove the math while block 1
+ *      proves the exclusion.
  *
  * `NOW` is fixed so the seeded freshness windows and the render clock never drift apart.
+ * No network, no keys: PGlite is real Postgres.
  */
 const NOW = new Date("2026-07-09T12:00:00Z");
 
-describe("UI plumbing — seed → real routes", () => {
+/** Relabel every seeded practice as real by stripping the `demo:` prefix from its geo key. */
+async function promoteSeedToReal(t: TestDb): Promise<void> {
+  await t.db
+    .update(practices)
+    .set({ geoKey: sql`replace(${practices.geoKey}, ${DEMO_GEO_KEY_PREFIX}, '')` });
+}
+
+describe("real feed + scoreboard EXCLUDE demo-seeded data (D9 integrity fix)", () => {
   let t: TestDb;
   beforeEach(async () => {
     t = await createTestDb();
     await seedDemo(t.db, NOW);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("the real feed carries none of the demo-seeded practices", async () => {
+    expect(await feedPractices(t.db, NOW)).toEqual([]);
+  });
+
+  it("the real scoreboard is the honest all-zero board, not fabricated seed ROI", async () => {
+    const data = await loadScoreboardData(t.db);
+    expect(data.scopes.all.leading[0].value).toBe("0"); // meetings the tool booked
+    expect(data.scopes.all.endGoals[0].value).toBe("0"); // deals won
+    expect(data.scopes.all.endGoals[1].value).toBe("—"); // CAC: no denominator → no number
+    expect(data.scopes.all.feedback.total).toBe(0);
+    expect(data.bigTest.buyingMoment).toEqual({ meetings: 0, deals: 0 });
+  });
+
+  // The deep brief is a per-id lookup, NOT a real-board aggregate, so reaching a seeded
+  // practice directly (e.g. a deep link) still renders. Proven here so the exclusion is
+  // scoped to the feed/scoreboard, not to every read.
+  it("the deep brief still renders for a practice reached by id", async () => {
+    const [cedarline] = await t.db
+      .select({ id: practices.id })
+      .from(practices)
+      .where(eq(practices.geoKey, "demo:cedarline-austin-tx"));
+    expect(cedarline).toBeDefined();
+
+    const result = await getBrief(t.db, cedarline.id);
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+
+    const signals = await practiceSignalRows(t.db, cedarline.id);
+    expect(signals).toHaveLength(3);
+
+    const rendered = renderBrief(result.brief, signals, NOW);
+    expect(rendered.live.signalCount).toBe(3);
+    expect(rendered.headline).toBe("Front desk underwater right as a 5th location opens");
+    expect(rendered.stale).toBe(false);
+  });
+
+  it("a seeded practice with no brief resolves to the honest 'missing' state", async () => {
+    const [harborlight] = await t.db
+      .select({ id: practices.id })
+      .from(practices)
+      .where(eq(practices.geoKey, "demo:harborlight"));
+    const result = await getBrief(t.db, harborlight.id);
+    expect(result.status).toBe("missing");
+  });
+});
+
+describe("scoreboard aggregation math over a REAL cohort", () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await createTestDb();
+    await seedDemo(t.db, NOW);
+    await promoteSeedToReal(t); // relabel as real so the real board counts the funnel
   });
   afterEach(async () => {
     await t.close();
@@ -37,35 +109,6 @@ describe("UI plumbing — seed → real routes", () => {
     // Cedarline carries three fresh signals, so it ranks first (D8: signal count).
     expect(feed[0].name).toBe("Cedarline Dermatology Group");
     expect(feed[0].signalCount).toBe(3);
-  });
-
-  // ── Deep brief (U9) ──────────────────────────────────────────────────────
-  it("the Cedarline brief renders found, with three live signals and its headline", async () => {
-    const feed = await feedPractices(t.db, NOW);
-    const cedarline = feed.find((r) => r.name === "Cedarline Dermatology Group");
-    expect(cedarline).toBeDefined();
-
-    const result = await getBrief(t.db, cedarline!.id);
-    expect(result.status).toBe("found");
-    if (result.status !== "found") return;
-
-    const signals = await practiceSignalRows(t.db, cedarline!.id);
-    expect(signals).toHaveLength(3);
-
-    const rendered = renderBrief(result.brief, signals, NOW);
-    expect(rendered.live.signalCount).toBe(3);
-    // The moment it cites is still firing, so the model's headline stands (not the constant).
-    expect(rendered.headline).toBe("Front desk underwater right as a 5th location opens");
-    // The seeded signals match the stored fingerprint → the card is not stale.
-    expect(rendered.stale).toBe(false);
-  });
-
-  it("a practice with no brief resolves to the honest 'missing' state, never a throw", async () => {
-    const feed = await feedPractices(t.db, NOW);
-    const harborlight = feed.find((r) => r.name === "Harborlight Women's Health");
-    expect(harborlight).toBeDefined();
-    const result = await getBrief(t.db, harborlight!.id);
-    expect(result.status).toBe("missing");
   });
 
   // ── Scoreboard (U12) ─────────────────────────────────────────────────────
@@ -127,16 +170,27 @@ describe("UI plumbing — seed → real routes", () => {
       await fresh.close();
     }
   });
+});
 
-  // ── Idempotency (D13 / R17) ──────────────────────────────────────────────
-  it("re-running the seed writes nothing new", async () => {
+// ── Idempotency (D13 / R17) ────────────────────────────────────────────────
+describe("seed idempotency", () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await createTestDb();
+    await seedDemo(t.db, NOW);
+  });
+  afterEach(async () => {
+    await t.close();
+  });
+
+  it("re-running the seed writes nothing new, and the board stays honestly zero", async () => {
     const before = await t.db.select({ n: sql<number>`count(*)` }).from(roiEvents);
     await seedDemo(t.db, NOW); // second run
     const after = await t.db.select({ n: sql<number>`count(*)` }).from(roiEvents);
     expect(Number(after[0].n)).toBe(Number(before[0].n));
 
-    // And the aggregate numbers are unchanged.
+    // And the real board is still zero — demo rows never leak in, run once or twice.
     const data = buildScoreboardData(await loadScoreboardInputs(t.db));
-    expect(data.scopes.all.leading[0].value).toBe("10");
+    expect(data.scopes.all.leading[0].value).toBe("0");
   });
 });
