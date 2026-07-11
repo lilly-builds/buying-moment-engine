@@ -59,13 +59,13 @@ describe("isPublicPath (R18)", () => {
 });
 
 describe("parseAllowlist / isAllowlisted", () => {
-  const allowlist = parseAllowlist("Lilly@Opterra.com, ae@eliseai.com");
+  const allowlist = parseAllowlist("User@Example.com, team@other.com");
 
   it("parses, trims, and lowercases", () => {
-    expect(allowlist).toEqual(["lilly@opterra.com", "ae@eliseai.com"]);
+    expect(allowlist).toEqual(["user@example.com", "team@other.com"]);
   });
   it("matches case-insensitively", () => {
-    expect(isAllowlisted("LILLY@opterra.com", allowlist)).toBe(true);
+    expect(isAllowlisted("USER@example.com", allowlist)).toBe(true);
   });
   it("rejects a non-listed email", () => {
     expect(isAllowlisted("stranger@evil.com", allowlist)).toBe(false);
@@ -75,12 +75,63 @@ describe("parseAllowlist / isAllowlisted", () => {
     expect(isAllowlisted(null, allowlist)).toBe(false);
   });
   it("an empty allowlist fails closed", () => {
-    expect(isAllowlisted("ae@eliseai.com", [])).toBe(false);
+    expect(isAllowlisted("team@other.com", [])).toBe(false);
+  });
+});
+
+describe("isAllowlisted — domain-rule allowlist (@domain)", () => {
+  // Why this exists: when the exact addresses we must allow are format-guesses on a
+  // catch-all domain, an exact-match miss silently locks a legitimate person out
+  // (no bounce). A `@domain` entry admits anyone at that domain regardless of the
+  // local-part spelling, without opening the gate to anyone else.
+  const allowlist = parseAllowlist("@example.com, person@other.com");
+
+  it("admits any local-part at the listed domain", () => {
+    expect(isAllowlisted("user@example.com", allowlist)).toBe(true);
+    expect(isAllowlisted("first.last@example.com", allowlist)).toBe(true);
+    expect(isAllowlisted("someone.else@example.com", allowlist)).toBe(true);
+  });
+
+  it("still honors a plain exact entry alongside a domain rule", () => {
+    expect(isAllowlisted("person@other.com", allowlist)).toBe(true);
+    // an exact entry must NOT behave like a domain rule
+    expect(isAllowlisted("stranger@other.com", allowlist)).toBe(false);
+  });
+
+  it("is case-insensitive for the domain match", () => {
+    expect(isAllowlisted("First.Last@Example.com", allowlist)).toBe(true);
+  });
+
+  it("rejects a different domain", () => {
+    expect(isAllowlisted("user@evil.com", allowlist)).toBe(false);
+    expect(isAllowlisted("notanexample@gmail.com", allowlist)).toBe(false);
+  });
+
+  it("anchors on the full @domain — a look-alike suffix must NOT match", () => {
+    // the classic bypass: append the allowed domain as a subdomain of an attacker host
+    expect(isAllowlisted("user@example.com.evil.com", allowlist)).toBe(false);
+    // a substring that isn't preceded by `@` must not match either
+    expect(isAllowlisted("user@notexample.com", allowlist)).toBe(false);
+    // a subdomain is a DIFFERENT domain, not the listed one
+    expect(isAllowlisted("user@mail.example.com", allowlist)).toBe(false);
+  });
+
+  it("a bare @ or a dotless @entry is NOT a domain rule and matches nothing", () => {
+    // `@` alone or `@com` must never become 'allow everyone at any/that TLD'
+    expect(isAllowlisted("anyone@anywhere.com", parseAllowlist("@"))).toBe(false);
+    expect(isAllowlisted("anyone@com", parseAllowlist("@com"))).toBe(false);
+    expect(isAllowlisted("x@y.com", parseAllowlist("@com"))).toBe(false);
+  });
+
+  it("empty / whitespace entries match nothing (parse drops them)", () => {
+    const parsed = parseAllowlist(" , @example.com ,  ");
+    expect(parsed).toEqual(["@example.com"]);
+    expect(isAllowlisted("user@example.com", parsed)).toBe(true);
   });
 });
 
 describe("requireSession", () => {
-  const allowlist = parseAllowlist("ae@eliseai.com");
+  const allowlist = parseAllowlist("team@other.com");
 
   it("401 when the session is absent", () => {
     const r = requireSession(null, allowlist);
@@ -93,8 +144,8 @@ describe("requireSession", () => {
     if (!r.ok) expect(r.status).toBe(401);
   });
   it("ok when the session email is allowlisted", () => {
-    const r = requireSession({ user: { email: "ae@eliseai.com" } }, allowlist);
+    const r = requireSession({ user: { email: "team@other.com" } }, allowlist);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.email).toBe("ae@eliseai.com");
+    if (r.ok) expect(r.email).toBe("team@other.com");
   });
 });
