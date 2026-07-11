@@ -16,7 +16,6 @@ import {
 } from "@/design/components";
 import { LeadFeedback } from "@/design/components/brief/lead-feedback";
 import { SendGate } from "@/design/components/brief/send-gate";
-import { gradients } from "@/design/tokens";
 import type { RenderedBrief, FiredSignal } from "@/src/brief/render";
 import { windowDaysFor } from "@/src/brief/render";
 import { toSignalKind } from "@/src/ui/signal-display";
@@ -153,8 +152,7 @@ function TouchEditor({
   return (
     <div
       data-tour={spotlight ? "edit-email" : undefined}
-      className="flex flex-col gap-3 rounded-panel p-6"
-      style={{ backgroundImage: gradients.brand }}
+      className="gradient-brand flex flex-col gap-3 rounded-panel p-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="font-display text-h5 font-book text-ink-black">{step.role}</span>
@@ -687,10 +685,7 @@ export function BriefView({
 
   return (
     // The health-blue hero paints the whole page — same surface as the feed.
-    <div
-      className="flex flex-1 flex-col"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
+    <div className="gradient-hero flex flex-1 flex-col">
       <TopNav tone="dark" />
 
       {/* Hero — the buying-moment headline is the spine (D1), and the mode toggle.

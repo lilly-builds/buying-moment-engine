@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { getActiveConnection } from "@/db/crm";
 import { hasProviderCredential } from "@/db/integrations";
+import { getActiveWorkspace } from "@/src/workspace/active";
 import {
   IntegrationsView,
   type ConnectBanner,
@@ -14,11 +15,14 @@ import {
 // crashing. Same contract as `app/page.tsx` and `app/scoreboard/page.tsx`.
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Integrations · GTM Maestro",
-  description:
-    "Connect HubSpot and the rest of your stack — surfaced leads push, tag, and track where your team already works.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { config } = await getActiveWorkspace();
+  return {
+    title: `Integrations · ${config.brand.productName}`,
+    description:
+      "Connect HubSpot and the rest of your stack — surfaced leads push, tag, and track where your team already works.",
+  };
+}
 
 /** Resolve the live HubSpot connection, degrading to disconnected on any failure.
  *  When connected, carry the per-connection sequence id so the view can show the

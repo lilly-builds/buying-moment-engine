@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { PageContainer, TopNav } from "@/design/components";
-import { gradients } from "@/design/tokens";
 import { Feed } from "../../feed";
 import { demoFeedItems } from "../demo-fixtures";
 
@@ -19,10 +18,7 @@ export const metadata: Metadata = {
 export default function FeedPreviewPage() {
   const items = demoFeedItems();
   return (
-    <div
-      className="flex flex-1 flex-col"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
+    <div className="gradient-hero flex flex-1 flex-col">
       <TopNav tone="dark" />
       <main className="flex flex-1 flex-col">
         <PageContainer className="py-8">

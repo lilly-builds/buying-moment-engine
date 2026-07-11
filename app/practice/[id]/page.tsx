@@ -7,7 +7,6 @@ import { practiceSignalRows } from "@/db/queries";
 import { renderBrief } from "@/src/brief/render";
 import type { SignalRow } from "@/src/brief/inputs";
 import { ButtonLink, Card, PageContainer, SectionHeader, TopNav } from "@/design/components";
-import { gradients } from "@/design/tokens";
 import { BriefView } from "../../brief-view";
 
 // Read the stored brief at request time — never at build time — so `next build` and a
@@ -124,7 +123,7 @@ export default async function PracticeBriefPage({
  */
 function BriefUnavailable({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex flex-1 flex-col" style={{ backgroundImage: gradients.healthHero }}>
+    <div className="gradient-hero flex flex-1 flex-col">
       <TopNav tone="dark" />
       <main className="flex flex-1 flex-col">
         <PageContainer className="flex flex-1 items-center justify-center py-16">

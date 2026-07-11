@@ -15,7 +15,6 @@ import {
   type StatDelta,
   type StatHonesty,
 } from "@/design/components";
-import { gradients, signalGradients } from "@/design/tokens";
 import { VERTICAL_FILTERS, type FeedFilterValue } from "@/src/ui/signal-display";
 
 /**
@@ -152,11 +151,9 @@ export function ScoreboardView({ data }: { data: ScoreboardData }) {
   const active = data.scopes[scope] ?? data.scopes.all;
 
   return (
-    // The health-blue hero paints the whole page — same surface as the feed + brief.
-    <div
-      className="flex flex-1 flex-col"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
+    // The calm working surface — the sustained-analysis screens (feed, scoreboard,
+    // customize) recede so the brief and the landing keep the full arrival hero.
+    <div className="gradient-hero-calm flex flex-1 flex-col">
       <TopNav tone="dark" />
 
       <PageContainer className="pb-2 pt-10">
@@ -238,7 +235,7 @@ export function ScoreboardView({ data }: { data: ScoreboardData }) {
                       label={s.label}
                       valueLabel={`${Math.round(s.rate * 100)}%`}
                       fraction={s.rate}
-                      gradient={signalGradients[s.kind]}
+                      gradient={`var(--gradient-signal-${s.kind})`}
                       caption={s.detail}
                     />
                   ))}

@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card } from "@/design/components";
-import { gradients } from "@/design/tokens";
 
 /**
  * "Buying Moment Signals" — the intro (page #3 of the three, the Data Sources display).
@@ -151,10 +150,7 @@ export function SignalsIntro() {
     // The SAME health-blue hero gradient the feed paints — so the hand-off has no colour
     // jump. The gradient lives on <main> and does NOT fade; only the CONTENT glides out,
     // leaving continuous blue that the (prefetched) feed then paints over.
-    <main
-      className="relative min-h-dvh overflow-hidden"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
+    <main className="gradient-hero relative min-h-dvh overflow-hidden">
       {/* On exit the content glides FORWARD (scale up) as it fades — the sense of moving
           toward the feed — while the blue stays put underneath. */}
       <div

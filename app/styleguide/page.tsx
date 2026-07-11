@@ -11,9 +11,14 @@ import {
   SignalPill,
   Tag,
   TopNav,
-  type SignalKind,
 } from "@/design/components";
-import { gradients, signalGradients, themeVars, type ThemeVar } from "@/design/tokens";
+import {
+  gradients,
+  gradientTokens,
+  SIGNAL_KINDS,
+  themeVars,
+  type ThemeVar,
+} from "@/design/tokens";
 import { RULES_BY_SCOPE, RULE_SCOPES } from "@/design/rules";
 import { FeedDemo } from "./feed-demo";
 import { SegmentedDemo } from "./segmented-demo";
@@ -346,10 +351,16 @@ export default function StyleguidePage() {
         <Section
           eyebrow="Colour"
           title="Gradients"
-          description="Values verified from the stylesheet; placement verified live — EliseAI paints these as hero backgrounds, nowhere else. healthHero is our CSS stand-in for a raster hero, and is INFERRED."
+          description="Promoted to --gradient-* CSS tokens (Adapt-It P2), so one runtime override re-skins them per tenant. Values verified from the stylesheet; the hero is our CSS stand-in for a raster hero, and is INFERRED."
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Object.entries(gradients).map(([name, value]) => (
+            {(
+              [
+                ...Object.entries(gradientTokens),
+                ["--gradient-brand-soft", gradients.brandSoft],
+                ["--gradient-wash", gradients.wash],
+              ] as [string, string][]
+            ).map(([name, value]) => (
               <div key={name} className="flex flex-col gap-2">
                 <div
                   className="h-28 w-full rounded-card border border-line-soft"
@@ -597,10 +608,7 @@ export default function StyleguidePage() {
             </div>
 
             {/* glass — translucent, so it must sit on a coloured surface to be seen. */}
-            <div
-              className="rounded-card p-8"
-              style={{ backgroundImage: gradients.healthHero }}
-            >
+            <div className="gradient-hero rounded-card p-8">
               <Card variant="glass" padding="md" className="max-w-xs">
                 <div className="flex flex-col gap-2">
                   <code className="font-mono text-xs uppercase opacity-60">glass</code>
@@ -653,7 +661,7 @@ export default function StyleguidePage() {
                 is marked by its clock turning amber, not by bleaching its signals.
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                {(Object.keys(signalGradients) as SignalKind[]).map((k) => (
+                {SIGNAL_KINDS.map((k) => (
                   <SignalPill key={k} kind={k} />
                 ))}
               </div>
@@ -725,10 +733,7 @@ export default function StyleguidePage() {
               align="center"
             />
 
-            <div
-              className="rounded-card p-12"
-              style={{ backgroundImage: gradients.healthHero }}
-            >
+            <div className="gradient-hero rounded-card p-12">
               <SectionHeader
                 eyebrow="AI for healthcare"
                 title="Simplify Your Practice, Elevate Patient Care"
@@ -757,10 +762,7 @@ export default function StyleguidePage() {
           title="Top nav"
           description="Transparent, backdrop-blur 25px, with a 1px hairline that flips light/dark. The live bar is fixed; ours is sticky so pages can't forget the offset. The light variant is mounted at the top of this page."
         >
-          <div
-            className="relative overflow-hidden rounded-card"
-            style={{ backgroundImage: gradients.healthHero }}
-          >
+          <div className="gradient-hero relative overflow-hidden rounded-card">
             <TopNav
               tone="dark"
               actions={<Button variant="primary-dark" size="sm">Request Demo</Button>}

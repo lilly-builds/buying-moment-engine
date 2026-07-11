@@ -14,7 +14,6 @@ import {
   Textarea,
   TopNav,
 } from "@/design/components";
-import { gradients } from "@/design/tokens";
 
 /**
  * Integrations / Connections (U17) — where the tool binds to the stack the JD
@@ -659,10 +658,9 @@ export function IntegrationsView({
   banner,
 }: IntegrationsViewProps) {
   return (
-    <div
-      className="flex flex-1 flex-col"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
+    // The calm working surface — a config screen, kept coherent with the feed,
+    // scoreboard, and customize studio rather than the brief's full arrival hero.
+    <div className="gradient-hero-calm flex flex-1 flex-col">
       <TopNav tone="dark" />
       <main className="flex flex-1 flex-col">
         <PageContainer className="flex flex-col gap-8 py-8">

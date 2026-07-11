@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getActiveWorkspace } from "@/src/workspace/active";
 import { SignalsIntro } from "./signals-intro";
 
 /**
@@ -10,11 +11,14 @@ import { SignalsIntro } from "./signals-intro";
  * working screen, and the nav lives on the feed it hands off to.
  */
 
-export const metadata: Metadata = {
-  title: "Buying Moment Signals · GTM Maestro",
-  description:
-    "The public data sources behind the buying-moment feed: job listings, reviews, and acquisition news.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { config } = await getActiveWorkspace();
+  return {
+    title: `Buying Moment Signals · ${config.brand.productName}`,
+    description:
+      "The public data sources behind the buying-moment feed: job listings, reviews, and acquisition news.",
+  };
+}
 
 export default function SignalsPage() {
   return <SignalsIntro />;

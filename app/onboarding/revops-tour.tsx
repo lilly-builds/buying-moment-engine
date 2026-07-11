@@ -10,7 +10,6 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/design/components";
-import { gradients } from "@/design/tokens";
 import { StepCard } from "@/design/components/onboarding/step-card";
 import { StepIcon } from "@/design/components/onboarding/step-icon";
 import { SpotlightOverlay } from "@/design/components/onboarding/spotlight-overlay";
@@ -296,10 +295,7 @@ function RevopsFinale({ onClose }: { onClose: () => void }) {
         onClick={startConnecting}
         className="relative z-10 shadow-card"
       >
-        <span
-          className="flex h-7 w-7 items-center justify-center rounded-pill text-white"
-          style={{ backgroundImage: gradients.orb }}
-        >
+        <span className="gradient-orb flex h-7 w-7 items-center justify-center rounded-pill text-white">
           <StepIcon icon="key" className="h-4 w-4" />
         </span>
         Start connecting

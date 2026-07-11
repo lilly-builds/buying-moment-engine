@@ -1,5 +1,9 @@
+import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
+import { isAllowlistedRequest } from "@/src/lib/auth-guard";
+import { getActiveWorkspace } from "@/src/workspace/active";
 import { ScoreboardView } from "../scoreboard-view";
+import { TenantScoreboardView } from "../tenant-scoreboard-view";
 import { emptyScoreboardData, loadScoreboardData } from "./data";
 
 // Aggregate live at request time — never at build time — so `next build` and a keyless
@@ -16,6 +20,23 @@ export const dynamic = "force-dynamic";
  * data layer (`./data`), not the view.
  */
 export default async function ScoreboardPage() {
+  // A tenant workspace must NOT see EliseAI's global roi_events (they are EliseAI's
+  // own performance). It gets the honest "fills in as you work leads" board instead;
+  // only the synthetic default (id === "default") shows the real aggregated numbers.
+  const workspace = await getActiveWorkspace();
+  if (workspace.id !== "default") {
+    return <TenantScoreboardView productName={workspace.config.brand.productName} />;
+  }
+
+  // Belt-and-suspenders (R18): this is the DEFAULT/EliseAI branch, which
+  // aggregates real roi_events. The proxy's tenant-cookie allowance opens
+  // /scoreboard so a tenant sees ITS OWN honest board above — it never
+  // authorizes this real-data branch. Re-check the allowlist so a forged/stale
+  // active_workspace cookie can never reach real performance data.
+  if (!(await isAllowlistedRequest())) {
+    redirect("/login");
+  }
+
   let data;
   try {
     data = await loadScoreboardData(getDb());

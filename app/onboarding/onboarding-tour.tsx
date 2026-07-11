@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/design/components";
-import { gradients } from "@/design/tokens";
 import { StepCard } from "@/design/components/onboarding/step-card";
 import {
   buildOnboardingSteps,
@@ -334,10 +333,7 @@ export function OnboardingTour() {
 
           {/* the celebration card — same style as the step cards, bigger + centred */}
           <div className="relative z-10 flex w-[34rem] max-w-[calc(100vw-2rem)] flex-col items-center gap-6 rounded-media bg-surface px-10 py-10 text-center shadow-card">
-            <span
-              className="flex h-16 w-16 items-center justify-center rounded-pill text-3xl shadow-soft"
-              style={{ backgroundImage: gradients.orb }}
-            >
+            <span className="gradient-orb flex h-16 w-16 items-center justify-center rounded-pill text-3xl shadow-soft">
               🎉
             </span>
             <div className="flex flex-col gap-1.5">

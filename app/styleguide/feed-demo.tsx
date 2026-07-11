@@ -10,7 +10,6 @@ import {
   SignalPill,
   type SignalKind,
 } from "@/design/components";
-import { gradients } from "@/design/tokens";
 
 /**
  * The composed feed — U8's screen in miniature, built only from the kit.
@@ -121,10 +120,7 @@ export function FeedDemo() {
     // The same container the top-nav demo uses: `rounded-card` + `overflow-hidden`
     // over the health-hero gradient. Header, filter, and feed all sit inside it, so
     // the feed reads as one contained surface rather than loose rows on the page.
-    <div
-      className="relative overflow-hidden rounded-card"
-      style={{ backgroundImage: gradients.healthHero }}
-    >
+    <div className="gradient-hero relative overflow-hidden rounded-card">
       {/* 56px — the same inset EliseAI pads `.new-nav-fixed` with. */}
       <div className="flex flex-col gap-8 p-14">
         {/* `tone="dark"` — the title sits on a blue surface, so it takes white ink. */}

@@ -58,7 +58,15 @@ export interface FeedProps {
  * tag (the name says it, the filter acts on it), no location line (that is a
  * call-prep decision, so it lives in the brief). See design/rules.ts.
  */
-function FeedCard({ item, first = false }: { item: FeedItem; first?: boolean }) {
+function FeedCard({
+  item,
+  first = false,
+  index = 0,
+}: {
+  item: FeedItem;
+  first?: boolean;
+  index?: number;
+}) {
   const pills = toSignalKinds(item.signalKinds);
   const windowDays = windowDaysFor(item.freshestKind);
 
@@ -69,7 +77,14 @@ function FeedCard({ item, first = false }: { item: FeedItem; first?: boolean }) 
   );
 
   return (
-    <Card variant="flat" padding="md">
+    // `raised` gives the row quiet depth on the blue field; the rows glide in one
+    // after another (capped stagger, reduced-motion aware via the globals guard).
+    <Card
+      variant="raised"
+      padding="md"
+      className="animate-card-glide-in"
+      style={{ animationDelay: `${Math.min(index, 10) * 55}ms` }}
+    >
       <div className="flex flex-wrap items-center justify-between gap-8">
         <div className="flex min-w-0 flex-col gap-3">
           <h4 className="font-display text-h5 text-ink">{item.name}</h4>
@@ -166,14 +181,14 @@ export function Feed({ items }: FeedProps) {
               // The tour spotlights the top of the list for step 1 ("Your hottest
               // leads are up top"). `first` also exposes the row's open-brief hook.
               <div key={item.id} data-tour="feed-top">
-                <FeedCard item={item} first />
+                <FeedCard item={item} first index={i} />
               </div>
             ) : (
-              <FeedCard key={item.id} item={item} />
+              <FeedCard key={item.id} item={item} index={i} />
             ),
           )
         ) : (
-          <Card variant="flat" padding="lg">
+          <Card variant="raised" padding="lg">
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <p className="font-display text-h5 text-ink">
                 No prospects at a buying moment here yet
