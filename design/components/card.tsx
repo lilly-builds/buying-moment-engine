@@ -27,11 +27,14 @@ const VARIANTS: Record<CardVariant, string> = {
   glass: "bg-white/60 backdrop-blur-md border border-white/70",
 };
 
+// Phones tighten a step so content owns the narrow column instead of losing it to
+// gutters (a `p-8` card on a 390px screen spends 64px on padding before any content).
+// Desktop (sm:+) is unchanged — the verified-live padding.
 const PADDING: Record<CardPadding, string> = {
   none: "",
   sm: "p-4",
-  md: "p-6",
-  lg: "p-8",
+  md: "p-5 sm:p-6",
+  lg: "p-5 sm:p-8",
 };
 
 export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, "className"> {

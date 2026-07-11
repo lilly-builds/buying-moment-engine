@@ -58,6 +58,23 @@ import {
 
 const store = createTourStore("bme.revops-onboarding.v1");
 
+/**
+ * Resolve a `data-tour` selector to the element that's actually on screen. A hook
+ * can render in two places across breakpoints — the Scoreboard link lives in both
+ * the desktop top bar and the mobile bottom tab bar (one hidden at any width) — and
+ * a plain `querySelector` would grab whichever comes first in the DOM, sometimes the
+ * `display:none` one (a 0×0 rect that puts the spotlight in the corner). Prefer the
+ * first match with a real box; fall back to the first node so callers never dead-end.
+ */
+function visibleTarget(selector: string): Element | null {
+  const els = document.querySelectorAll(selector);
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return el;
+  }
+  return els[0] ?? null;
+}
+
 function pageForPath(pathname: string): RevopsTourPage | null {
   if (pathname === "/" || pathname === "/styleguide/feed") return "feed";
   if (pathname.startsWith("/practice/") || pathname === "/styleguide/brief") return "brief";
@@ -159,7 +176,7 @@ export function RevopsTour() {
     const selector = `[data-tour="${step.target}"]`;
 
     const look = () => {
-      const el = document.querySelector(selector);
+      const el = visibleTarget(selector);
       if (el) {
         const r = el.getBoundingClientRect();
         const vh = window.innerHeight;
@@ -206,7 +223,7 @@ export function RevopsTour() {
     if (!active || !step || !step.target) return;
     const selector = `[data-tour="${step.target}"]`;
     const remeasure = () => {
-      const el = document.querySelector(selector);
+      const el = visibleTarget(selector);
       if (el) setSpot({ order: step.order, rect: rectOf(el) });
     };
     window.addEventListener("scroll", remeasure, { passive: true, capture: true });

@@ -70,7 +70,7 @@ function FeedCard({ item, first = false }: { item: FeedItem; first?: boolean }) 
 
   return (
     <Card variant="flat" padding="md">
-      <div className="flex flex-wrap items-center justify-between gap-8">
+      <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4 sm:gap-y-8">
         <div className="flex min-w-0 flex-col gap-3">
           <h4 className="font-display text-h5 text-ink">{item.name}</h4>
 

@@ -211,6 +211,17 @@
     font-family: var(--font-sans);
   }
 
+  /* Clearance for the fixed mobile bottom tab bar (design/components/top-nav →
+     BottomTabBar). Only below md, where that bar exists; the tab bar carries its
+     own safe-area inset, and this reserves the scroll room so the last actionable
+     row (View brief, Send, Connect) never sits under it. The page's hero gradient
+     fills the viewport behind the opaque bar, so no seam shows on short pages. */
+  @media (max-width: 767px) {
+    body {
+      padding-bottom: calc(3.75rem + env(safe-area-inset-bottom));
+    }
+  }
+
   /* EliseAI's headings are Inter Tight at the 450 "book" weight with tight
      tracking — the "big, thin, tight" signature. VERIFIED-LIVE. */
   h1,

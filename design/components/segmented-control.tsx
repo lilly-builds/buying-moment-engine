@@ -32,6 +32,14 @@ export interface SegmentedControlProps<T extends string> {
   /** `health` tints the active segment blue — use it on healthcare-vertical filters. */
   accent?: "brand" | "health";
   size?: "sm" | "md";
+  /**
+   * A few options that should read as a TOGGLE (e.g. the brief's Send / Prep) —
+   * on a phone the track spans the full width and the segments split it evenly, so
+   * it lands as one thumb-wide switch rather than two small pills adrift in a row.
+   * Desktop is unchanged (the track hugs its content). Leave off for many-option
+   * FILTERS: those stay natural-width and scroll horizontally when they can't fit.
+   */
+  fill?: boolean;
   /** Required: a radiogroup with no accessible name is unusable by screen reader. */
   label: string;
   className?: string;
@@ -48,6 +56,7 @@ export function SegmentedControl<T extends string>({
   onValueChange,
   accent = "brand",
   size = "md",
+  fill = false,
   label,
   className,
 }: SegmentedControlProps<T>) {
@@ -95,15 +104,15 @@ export function SegmentedControl<T extends string>({
       role="radiogroup"
       aria-label={label}
       className={cn(
-        // `w-fit` sizes the track to its pills but never past its container, so an
-        // `inline-flex` inside a flex column doesn't stretch to the full width and
-        // leave a dead grey gutter on the right (the original reason for `w-fit`).
-        // The widest track (the 5-option feed filter, ~630px) still can't fit a phone
-        // — nor the feed header's action slot on a tablet — so `max-w-full` caps it
-        // and `overflow-x-auto` scrolls the pills (they carry `shrink-0` below so they
-        // stay full-size). One behaviour at every width: fit when there's room, scroll
-        // when there isn't — which leaves the verified-live desktop track unchanged.
-        "inline-flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-pill bg-surface-subtle p-1",
+        "flex items-center gap-1 rounded-pill bg-surface-subtle p-1",
+        // Desktop (sm:+) is the verified-live track: `w-fit` hugs the pills, never
+        // stretching to leave a dead grey gutter. On a PHONE the two modes split:
+        fill
+          ? // TOGGLE — span the row and let the segments share it evenly below.
+            "w-full sm:w-fit"
+          : // FILTER — take the full width and scroll (the 5-option track is ~630px,
+            // wider than any phone); pills keep full size via `shrink-0` and snap.
+            "w-full snap-x overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-fit sm:overflow-visible",
         className,
       )}
     >
@@ -123,11 +132,11 @@ export function SegmentedControl<T extends string>({
             onClick={() => onValueChange(option.value)}
             onKeyDown={(event) => onKeyDown(event, index)}
             className={cn(
-              // `shrink-0`: when the track has to scroll (a slot narrower than the pills,
-              // e.g. the 5-option filter on a phone), the pills keep their full size and
-              // scroll instead of squishing; inert at any width where the track fits.
-              "shrink-0 rounded-pill font-sans font-book tracking-control whitespace-nowrap transition-colors",
+              "snap-start rounded-pill font-sans font-book tracking-control whitespace-nowrap transition-colors",
               "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+              // TOGGLE splits the phone track evenly (`flex-1`), then hugs on desktop.
+              // FILTER keeps each pill full-size so the track scrolls instead of squishing.
+              fill ? "flex-1 sm:flex-none" : "shrink-0",
               SIZES[size],
               selected
                 ? accent === "health"

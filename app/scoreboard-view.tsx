@@ -160,7 +160,7 @@ export function ScoreboardView({ data }: { data: ScoreboardData }) {
       <TopNav tone="dark" />
 
       <PageContainer className="pb-2 pt-10">
-        <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
+        <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-5 backdrop-blur-sm sm:p-8">
           <SectionHeader
             eyebrow="ROI Scoreboard"
             title="The impact of a buying moment GTM engine"

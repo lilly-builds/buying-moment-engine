@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Inter_Tight, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { RevopsTour } from "./onboarding/revops-tour";
@@ -36,6 +36,13 @@ export const metadata: Metadata = {
   title: "GTM Maestro — Buying-Moment Engine",
   description:
     "A push feed of healthcare practices at a buying moment, each with a verified, source-linked brief.",
+};
+
+// `cover` lets the page paint under the phone's home indicator / notch, which is
+// what makes `env(safe-area-inset-*)` non-zero — the mobile bottom tab bar and the
+// body clearance in globals.css both rely on that inset to clear the home indicator.
+export const viewport: Viewport = {
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

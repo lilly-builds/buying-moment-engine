@@ -59,7 +59,9 @@ export function PageContainer({
       className={cn(
         "mx-auto w-full",
         WIDTHS[width],
-        !flush && "px-gutter",
+        // 16px gutter on phones, the verified-live 24px from sm:+. Nav and content
+        // both flow through here, so they stay on the same edge at every width.
+        !flush && "px-4 sm:px-gutter",
         className,
       )}
       {...rest}

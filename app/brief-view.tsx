@@ -699,21 +699,23 @@ export function BriefView({
       <PageContainer className="pb-2 pt-10">
         {/* Clean headline hero — the buying-moment headline OWNS the header (D1 spine);
             who-to-contact runs as a full-width strip below it (Lilly, 2026-07-10). */}
-        <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
-          <div data-tour="why-now" className="flex flex-col gap-3">
-            {/* Practice name (left) and the mode toggle (right) share the top row. */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-5 backdrop-blur-sm sm:p-8">
+          <div data-tour="why-now" className="flex flex-col gap-4">
+            {/* Practice name (left) and the mode toggle (right) share the top row on
+                desktop; on a phone the toggle drops to its own full-width line. */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <span className="font-sans text-base font-medium uppercase tracking-eyebrow text-white">
                 {factual.practiceName}
                 {location ? ` · ${location}` : ""}
               </span>
-              <div data-tour="prep-toggle" className="w-fit shrink-0">
+              <div data-tour="prep-toggle" className="w-full shrink-0 sm:w-auto">
                 <SegmentedControl<BriefMode>
                   label="Choose what to work on this brief"
                   options={MODE_OPTIONS}
                   value={mode}
                   onValueChange={setMode}
                   accent="brand"
+                  fill
                 />
               </div>
             </div>
