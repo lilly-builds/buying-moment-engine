@@ -297,6 +297,12 @@ function Welcome({ onStart }: { onStart: () => void }) {
       <Button variant="primary-dark" size="lg" onClick={onStart}>
         Start
       </Button>
+      <a
+        href="/adapt/chat"
+        className="rounded-control font-sans text-sm text-white/80 underline-offset-4 hover:text-white hover:underline"
+      >
+        Rather talk it through?
+      </a>
     </div>
   );
 }

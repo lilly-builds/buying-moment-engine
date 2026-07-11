@@ -197,10 +197,29 @@
   }
 }
 
-/* Respect reduced-motion: no glide, no travelling pulse, no confetti flight. */
+/* The conversational onboarding (/adapt/chat): a message rises + fades as it lands.
+   A plain class (not a Tailwind `animate-*` utility) so it needs no `--animate-*`
+   token in the parity-locked @theme block — same pattern as the gradient classes. */
+@keyframes chat-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.chat-msg-in {
+  animation: chat-msg-in 0.24s ease-out both;
+}
+
+/* Respect reduced-motion: no glide, no travelling pulse, no confetti flight, no
+   message rise. */
 @media (prefers-reduced-motion: reduce) {
   .animate-signal-flow,
-  .animate-card-glide-in {
+  .animate-card-glide-in,
+  .chat-msg-in {
     animation: none;
   }
   .confetti-piece {
