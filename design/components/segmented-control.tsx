@@ -95,10 +95,15 @@ export function SegmentedControl<T extends string>({
       role="radiogroup"
       aria-label={label}
       className={cn(
-        // `w-fit`: `inline-flex` sets the inner layout, not the outer size — inside a
-        // flex column the default `align-self: stretch` blows the track out to the
-        // full column width and leaves a dead grey gutter on the right.
-        "inline-flex w-fit items-center gap-1 rounded-pill bg-surface-subtle p-1",
+        // `w-fit` sizes the track to its pills but never past its container, so an
+        // `inline-flex` inside a flex column doesn't stretch to the full width and
+        // leave a dead grey gutter on the right (the original reason for `w-fit`).
+        // The widest track (the 5-option feed filter, ~630px) still can't fit a phone
+        // — nor the feed header's action slot on a tablet — so `max-w-full` caps it
+        // and `overflow-x-auto` scrolls the pills (they carry `shrink-0` below so they
+        // stay full-size). One behaviour at every width: fit when there's room, scroll
+        // when there isn't — which leaves the verified-live desktop track unchanged.
+        "inline-flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-pill bg-surface-subtle p-1",
         className,
       )}
     >
@@ -118,7 +123,10 @@ export function SegmentedControl<T extends string>({
             onClick={() => onValueChange(option.value)}
             onKeyDown={(event) => onKeyDown(event, index)}
             className={cn(
-              "rounded-pill font-sans font-book tracking-control whitespace-nowrap transition-colors",
+              // `shrink-0`: when the track has to scroll (a slot narrower than the pills,
+              // e.g. the 5-option filter on a phone), the pills keep their full size and
+              // scroll instead of squishing; inert at any width where the track fits.
+              "shrink-0 rounded-pill font-sans font-book tracking-control whitespace-nowrap transition-colors",
               "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
               SIZES[size],
               selected

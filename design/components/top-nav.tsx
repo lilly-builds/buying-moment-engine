@@ -86,12 +86,17 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
       <PageContainer
         as="nav"
         aria-label="Primary"
-        className="flex h-[69px] items-center gap-8"
+        // Mobile: the logo + 4 links + gap-8 can't fit a phone's 69px row, so the
+        // links wrap to their OWN full-width row beneath the logo (see the `<ul>`).
+        // At md:+ this collapses back to the verified-live single bar, byte-for-byte
+        // (`flex-nowrap` is the default, `gap-x-8` = `gap-8` on one line, `py-0` +
+        // `h-[69px]` reproduce the fixed-height row).
+        className="flex flex-wrap items-center gap-x-8 gap-y-3 py-3 md:h-[69px] md:flex-nowrap md:py-0"
       >
         <Link
           href="/"
           className={cn(
-            "flex items-center gap-2.5 rounded-control",
+            "flex shrink-0 items-center gap-2.5 rounded-control",
             dark ? "text-white" : "text-ink",
           )}
         >
@@ -108,11 +113,17 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
           </span>
         </Link>
 
-        <ul className="flex items-center gap-1">
+        {/* `order-last` drops the links under the logo (and any actions) on a phone;
+            `w-full` gives them their own row and `overflow-x-auto` lets them scroll
+            if even that row is too narrow (~360px), so Scoreboard (the tour's
+            `nav-scoreboard` target) stays reachable. At md:+ it's the desktop row. */}
+        <ul className="order-last flex w-full items-center gap-1 overflow-x-auto md:order-none md:w-auto md:overflow-visible">
           {NAV_ITEMS.map((item) => {
             const active = item.isActive(pathname);
             return (
-              <li key={item.href}>
+              // shrink-0: on the scrollable mobile row the links keep their size and
+              // scroll rather than squishing; inert on the roomy desktop bar.
+              <li key={item.href} className="shrink-0">
                 <Link
                   href={item.href}
                   data-tour={item.dataTour}

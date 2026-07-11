@@ -84,6 +84,19 @@ export function RevopsTour() {
   // truth (not the estimate) or a tall card's controls get clipped off the bottom.
   const cardRef = useRef<HTMLDivElement>(null);
   const [cardH, setCardH] = useState(CARD_H_EST);
+  // sm:+ floats the card beside its target (the placement math below assumes a
+  // floating card); under sm the StepCard is a full-width bottom sheet, so we skip
+  // that math and let its own sheet styles pin it to the bottom of the viewport.
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   const currentPage = pageForPath(pathname);
   const step = steps.find((s) => s.order === state.step) ?? null;
@@ -252,8 +265,12 @@ export function RevopsTour() {
       <SpotlightOverlay rect={rect} />
       <div
         ref={cardRef}
-        className="fixed z-[70] transition-[top,left] duration-300 ease-out"
-        style={{ top: pos.top, left: pos.left }}
+        className={`fixed z-[70] ${
+          isDesktop
+            ? "transition-[top,left] duration-300 ease-out"
+            : "inset-x-0 bottom-0"
+        }`}
+        style={isDesktop ? { top: pos.top, left: pos.left } : undefined}
       >
         <StepCard
           step={step}

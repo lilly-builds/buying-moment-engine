@@ -163,7 +163,7 @@ export function ScoreboardView({ data }: { data: ScoreboardData }) {
         <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
           <SectionHeader
             eyebrow="ROI Scoreboard"
-            title={<>The impact of a buying&nbsp;moment GTM engine</>}
+            title="The impact of a buying moment GTM engine"
             tone="dark"
             size="h2"
             as="h1"

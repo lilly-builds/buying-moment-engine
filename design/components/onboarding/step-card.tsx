@@ -97,20 +97,31 @@ export function StepCard({
         // A landscape rectangle, matching the reference card's proportions. Wide
         // enough that the longest step (the slide-1 welcome) wraps in few enough
         // lines to keep its Next/Skip controls on-screen.
-        "flex w-[40rem] max-w-[calc(100vw-2rem)] flex-col gap-4 rounded-media bg-surface px-8 py-7 shadow-card",
+        //
+        // On a phone that floating card is a wall of text that buries the dashboard it
+        // points at, so on mobile it becomes a BOTTOM SHEET: full-width, pinned to the
+        // bottom in thumb reach, with tighter padding/gaps/orb/type (see below). The
+        // read-me content scrolls only if the wordiest step overruns; the Skip/Next
+        // footer stays pinned, so what you read and what you tap are always visible
+        // without scrolling. Bottom padding clears the phone's home indicator, and
+        // `sm:` restores the verified-live desktop card exactly.
+        "flex max-h-[85dvh] w-full flex-col gap-3 rounded-t-media bg-surface px-5 pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-card sm:max-h-none sm:w-[40rem] sm:max-w-[calc(100vw-2rem)] sm:gap-4 sm:rounded-media sm:px-8 sm:py-7",
         className,
       )}
     >
+      {/* The read-me content — a scrollable region on the mobile sheet; transparent
+          (`display:contents`) at sm:+ so the desktop card lays out exactly as before. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto sm:contents">
       {/* 1 · the gradient orb, holding this step's icon */}
       <span
-        className="flex h-14 w-14 items-center justify-center rounded-pill text-white shadow-soft"
+        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-pill text-white shadow-soft sm:h-14 sm:w-14"
         style={{ backgroundImage: gradients.orb }}
       >
         <StepIcon icon={step.icon} />
       </span>
 
       {/* 2 · the one-instruction line — the key part(s) bold + dark, the rest muted */}
-      <p className="font-display text-h5 leading-snug tracking-brand text-ink-muted text-balance">
+      <p className="font-display text-lg leading-snug tracking-brand text-ink-muted text-balance sm:text-h5">
         {step.line.map((seg, i) =>
           seg.bold ? (
             <span key={i} className="font-semibold text-ink">
@@ -124,7 +135,7 @@ export function StepCard({
 
       {/* 2b · optional supporting sentence — makes the step's VALUE obvious */}
       {step.detail ? (
-        <p className="font-sans text-base leading-relaxed text-ink-body">
+        <p className="font-sans text-sm leading-relaxed text-ink-body sm:text-base">
           {step.detail.map((seg, i) =>
             seg.em ? (
               <em key={i}>{seg.text}</em>
@@ -145,7 +156,7 @@ export function StepCard({
           {step.bullets.map((b, i) => (
             <li
               key={i}
-              className="flex gap-2.5 font-sans text-base leading-relaxed text-ink-body"
+              className="flex gap-2.5 font-sans text-sm leading-relaxed text-ink-body sm:text-base"
             >
               <span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-pill bg-health" />
               <span>
@@ -161,9 +172,10 @@ export function StepCard({
         <Sparkle />
         {step.chip}
       </span>
+      </div>
 
-      {/* progress + controls */}
-      <div className="mt-1 flex items-center justify-between">
+      {/* progress + controls — a pinned footer on the mobile sheet, always visible */}
+      <div className="mt-1 flex shrink-0 items-center justify-between">
         <ProgressDots current={current} total={total} />
         <div className="flex items-center gap-4">
           <button
