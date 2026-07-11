@@ -19,12 +19,13 @@ import {
   subtractFilled,
   type Gaps,
 } from "./gaps";
-import { runPdlPersonEnrich } from "./pdl";
+import { runPdlPersonDiscover, runPdlPersonEnrich } from "./pdl";
 import { isEmptyFindings } from "./research-schema";
 import type { ScrapeResult } from "./scrape";
 import type {
   ExtractClient,
   PdlClient,
+  PdlPersonDiscoveryResult,
   PdlPersonResult,
   ResearchClient,
   ResearchFindings,
@@ -43,11 +44,11 @@ import type {
  * every fact whose snippet is not verbatim on the page it cites. **Only verified facts
  * are persisted.** D2/R5 is enforced between the model and the database, by code.
  *
- * COST DISCIPLINE — unchanged, and load-bearing: PDL is called ONLY for the fields the
- * extractor left as gaps AND the stored contact does not already fill. A practice whose
- * staff page publishes the manager's name, email and LinkedIn makes ZERO PDL calls; so
- * does a re-run. The decisions are `computeGaps` + `subtractFilled` in `./gaps.ts` —
- * pure, and tested without a database.
+ * COST DISCIPLINE — load-bearing: PDL enrich is called ONLY for the fields the
+ * extractor left as gaps AND the stored contact does not already fill. If the free path
+ * found only a role, one capped Person Search may discover the person first. A practice
+ * whose staff page publishes the manager's name, email and LinkedIn makes ZERO PDL
+ * calls; so does a re-run with an already stored discovered contact.
  *
  * ESCALATION runs the OLD agentic mechanism, once, only when the free path failed for a
  * reason browsing could fix — and only against a run-wide spend budget. `escalationTrigger`
@@ -138,6 +139,35 @@ export interface WaterfallResult {
 
 function defaultLogger(event: string, meta?: Record<string, unknown>): void {
   console.warn(event, meta ?? {});
+}
+
+const DEFAULT_DISCOVERY_ROLE = "Practice Administrator";
+
+const CONTACT_DISCOVERY_ROLES = [
+  "practice administrator",
+  "practice manager",
+  "office manager",
+  "operations manager",
+  "director of operations",
+  "revenue cycle manager",
+  "practice owner",
+] as const;
+
+interface DiscoveredContact {
+  name: string;
+  role: string;
+  email: string | null;
+  linkedinUrl: string | null;
+  confidence: number;
+}
+
+function websiteDomain(websiteUrl: string | null | undefined): string | null {
+  if (!websiteUrl) return null;
+  try {
+    return new URL(websiteUrl).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }
 
 interface FailureContext {
@@ -293,9 +323,10 @@ export async function enrichPractice(
     await tagVertical(deps.db, practice.id, classification.vertical);
   }
 
-  // Stage 2 — PDL, for the gaps ONLY, and only the gaps the DB cannot already fill.
-  // A re-run must not re-buy an email `upsertContact` would then refuse to write. The
-  // stored row is read on (practice, role), the same key it is written on.
+  // Stage 2 — PDL. Named contacts go straight to gap-fill; role-only contacts get one
+  // capped discovery search, then reuse the same enrich/persist path. A re-run must not
+  // re-buy an email `upsertContact` would then refuse to write. The stored row is read
+  // on (practice, role), the same key it is written on.
   const decisionMaker = verified.decisionMaker;
   const claudeGaps = computeGaps(verified);
   const gaps =
@@ -305,7 +336,14 @@ export async function enrichPractice(
           await getContact(deps.db, practice.id, decisionMaker.role.value),
         )
       : claudeGaps;
-  const { pdlCalls, pdlResult } = await fillGaps(deps, practice, verified, gaps, log);
+  const { pdlCalls, pdlResult, discoveredContact } = await fillGaps(
+    deps,
+    practice,
+    verified,
+    gaps,
+    factsDropped === 0,
+    log,
+  );
 
   const contactVariant = await persistContact(
     deps.db,
@@ -313,6 +351,8 @@ export async function enrichPractice(
     verified,
     gaps,
     pdlResult,
+    discoveredContact,
+    practice.websiteUrl ?? null,
   );
 
   await setEnrichmentStatus(deps.db, practice.id, "enriched");
@@ -343,7 +383,12 @@ async function runPrimaryPath(
   practice: PracticeToEnrich,
   log: (event: string, meta?: Record<string, unknown>) => void,
 ): Promise<PrimaryOutcome> {
-  const none = { findings: null, pages: new Map<string, string>(), pagesHeld: 0, factsDropped: 0 };
+  const none = {
+    findings: null,
+    pages: new Map<string, string>(),
+    pagesHeld: 0,
+    factsDropped: 0,
+  };
 
   // Without a URL there is nothing to read. The agentic path can still search by name.
   if (!practice.websiteUrl) {
@@ -391,7 +436,13 @@ async function runPrimaryPath(
     };
   }
 
-  return { ...held, findings: verified, factsDropped: dropped.length, trigger: null, reason: "" };
+  return {
+    ...held,
+    findings: verified,
+    factsDropped: dropped.length,
+    trigger: null,
+    reason: "",
+  };
 }
 
 type GuardedExtract =
@@ -459,23 +510,144 @@ async function fillGaps(
   practice: PracticeToEnrich,
   findings: ResearchFindings,
   gaps: Gaps,
+  allowNoRoleDiscovery: boolean,
   log: (event: string, meta?: Record<string, unknown>) => void,
-): Promise<{ pdlCalls: number; pdlResult: PdlPersonResult | null }> {
+): Promise<{
+  pdlCalls: number;
+  pdlResult: PdlPersonResult | null;
+  discoveredContact: DiscoveredContact | null;
+}> {
   const dm = findings.decisionMaker;
-  // `hasGap` is only ever true when a NAMED decision-maker exists; this narrows
-  // the type for the compiler and states the invariant for the reader.
-  if (!hasGap(gaps) || !dm?.name) return { pdlCalls: 0, pdlResult: null };
+  if (!dm) {
+    if (!allowNoRoleDiscovery) {
+      return { pdlCalls: 0, pdlResult: null, discoveredContact: null };
+    }
+    return discoverThenEnrichContact(
+      deps,
+      practice,
+      DEFAULT_DISCOVERY_ROLE,
+      log,
+    );
+  }
 
+  if (!dm.name) {
+    const existing = await getContact(deps.db, practice.id, dm.role.value);
+    if (existing?.name) {
+      const discoveredContact = {
+        name: existing.name,
+        role: dm.role.value,
+        email: existing.email,
+        linkedinUrl: existing.linkedinUrl,
+        confidence: 1,
+      };
+      if (existing.email && existing.linkedinUrl) {
+        return { pdlCalls: 0, pdlResult: null, discoveredContact };
+      }
+      const pdlResult = await enrichNamedContact(
+        deps,
+        practice,
+        existing.name,
+        dm.role.value,
+        log,
+      );
+      return { pdlCalls: 1, pdlResult, discoveredContact };
+    }
+    return discoverThenEnrichContact(deps, practice, dm.role.value, log);
+  }
+
+  if (!hasGap(gaps)) {
+    return { pdlCalls: 0, pdlResult: null, discoveredContact: null };
+  }
+
+  const pdlResult = await enrichNamedContact(
+    deps,
+    practice,
+    dm.name.value,
+    dm.role.value,
+    log,
+  );
+  return {
+    pdlCalls: 1,
+    pdlResult,
+    discoveredContact: null,
+  };
+}
+
+async function discoverThenEnrichContact(
+  deps: WaterfallDeps,
+  practice: PracticeToEnrich,
+  fallbackRole: string,
+  log: (event: string, meta?: Record<string, unknown>) => void,
+): Promise<{
+  pdlCalls: number;
+  pdlResult: PdlPersonResult | null;
+  discoveredContact: DiscoveredContact | null;
+}> {
+  let discovery: PdlPersonDiscoveryResult | null = null;
   try {
-    const pdlResult = await runPdlPersonEnrich(
+    discovery = await runPdlPersonDiscover(
       { client: deps.pdl, meter: deps.meter, practiceId: practice.id },
       {
-        fullName: dm.name.value,
         companyName: practice.name,
-        role: dm.role.value,
+        city: practice.city,
+        state: practice.state,
+        websiteDomain: websiteDomain(practice.websiteUrl),
+        targetRoles: CONTACT_DISCOVERY_ROLES,
       },
     );
-    return { pdlCalls: 1, pdlResult };
+  } catch (err) {
+    log("enrich.pdl_discovery_failed", {
+      practice: practice.name,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { pdlCalls: 1, pdlResult: null, discoveredContact: null };
+  }
+
+  if (!discovery.matched || !discovery.fullName) {
+    log("enrich.pdl_discovery_no_match", {
+      practice: practice.name,
+      confidence: discovery.confidence,
+      total: discovery.total,
+      billedRecords: discovery.billedRecords,
+    });
+    return { pdlCalls: 1, pdlResult: null, discoveredContact: null };
+  }
+
+  const discoveredRole = discovery.role ?? fallbackRole;
+  const pdlResult = await enrichNamedContact(
+    deps,
+    practice,
+    discovery.fullName,
+    discoveredRole,
+    log,
+  );
+
+  return {
+    pdlCalls: 2,
+    pdlResult,
+    discoveredContact: {
+      name: discovery.fullName,
+      role:
+        fallbackRole === DEFAULT_DISCOVERY_ROLE ? discoveredRole : fallbackRole,
+      email: discovery.workEmail,
+      linkedinUrl: discovery.linkedinUrl,
+      confidence: discovery.confidence ?? 0,
+    },
+  };
+}
+
+async function enrichNamedContact(
+  deps: WaterfallDeps,
+  practice: PracticeToEnrich,
+  fullName: string,
+  role: string,
+  log: (event: string, meta?: Record<string, unknown>) => void,
+): Promise<PdlPersonResult | null> {
+  try {
+    return await runPdlPersonEnrich(
+      { client: deps.pdl, meter: deps.meter, practiceId: practice.id },
+      { fullName, companyName: practice.name, role },
+    );
   } catch (err) {
     // A 429 / timeout must not sink an otherwise-good enrichment. The contact
     // simply keeps the gap; the brief renders what it can actually cite.
@@ -483,7 +655,7 @@ async function fillGaps(
       practice: practice.name,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { pdlCalls: 1, pdlResult: null };
+    return null;
   }
 }
 
@@ -493,32 +665,48 @@ async function persistContact(
   findings: ResearchFindings,
   gaps: Gaps,
   pdlResult: PdlPersonResult | null,
+  discoveredContact: DiscoveredContact | null,
+  fallbackSourceUrl: string | null,
 ): Promise<WaterfallResult["contactVariant"]> {
   const dm = findings.decisionMaker;
-  if (!dm) return "none";
+  if (!dm && !discoveredContact) return "none";
 
   // PDL may fill ONLY the fields Claude left blank. A Claude-cited value always
-  // wins: it has a source URL, PDL's does not.
-  const email = dm.email?.value ?? (gaps.email ? pdlResult?.workEmail : null);
+  // wins: it has a source URL, PDL's does not. Discovered contacts start from a
+  // role-only Claude finding, so both email/linkedin are still PDL-owned gaps.
+  const pdlEmail = discoveredContact
+    ? (pdlResult?.workEmail ?? discoveredContact.email)
+    : gaps.email
+      ? pdlResult?.workEmail
+      : null;
+  const email = dm?.email?.value ?? pdlEmail ?? null;
+  const pdlLinkedinUrl = discoveredContact
+    ? (pdlResult?.linkedinUrl ?? discoveredContact.linkedinUrl)
+    : gaps.linkedinUrl
+      ? pdlResult?.linkedinUrl
+      : null;
   // PDL's LinkedIn URL arrives scheme-less: normalize so U9's `href` is never broken.
   const linkedinUrl = normalizeLinkedinUrl(
-    dm.linkedinUrl?.value ?? (gaps.linkedinUrl ? pdlResult?.linkedinUrl : null),
+    dm?.linkedinUrl?.value ?? pdlLinkedinUrl ?? null,
   );
+  const name = dm?.name?.value ?? discoveredContact?.name ?? null;
+  const role =
+    discoveredContact?.role ?? dm?.role.value ?? DEFAULT_DISCOVERY_ROLE;
 
   await upsertContact(db, {
     practiceId,
-    role: dm.role.value,
-    name: dm.name?.value ?? null,
+    role,
+    name,
     email: email ?? null,
-    emailProvider: email ? (dm.email ? "claude_research" : "pdl") : null,
+    emailProvider: email ? (dm?.email ? "claude_research" : "pdl") : null,
     linkedinUrl,
     linkedinProvider: linkedinUrl
-      ? dm.linkedinUrl
+      ? dm?.linkedinUrl
         ? "claude_research"
         : "pdl"
       : null,
-    sourceUrl: dm.role.sourceUrl,
+    sourceUrl: dm?.role.sourceUrl ?? fallbackSourceUrl,
   });
 
-  return dm.name ? "named" : "role_only";
+  return name ? "named" : "role_only";
 }

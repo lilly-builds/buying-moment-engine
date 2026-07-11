@@ -168,6 +168,14 @@ export interface PdlPersonRequest {
   role?: string | null;
 }
 
+export interface PdlPersonDiscoveryRequest {
+  companyName: string;
+  city?: string | null;
+  state?: string | null;
+  websiteDomain?: string | null;
+  targetRoles: readonly string[];
+}
+
 /**
  * PDL fills ONLY the verified work email + LinkedIn URL (spec § Stack). It is a
  * black-box vendor with no page to cite, so nothing it returns may ever become a
@@ -210,6 +218,21 @@ export interface PdlPersonResult {
   linkedinWithheldByPlan: boolean;
 }
 
+export interface PdlPersonDiscoveryResult {
+  /** Search bills per person object returned in `data`, including rejected candidates. */
+  billedRecords: number;
+  matched: boolean;
+  unparseable: boolean;
+  parseError: string | null;
+  total: number | null;
+  confidence: number | null;
+  fullName: string | null;
+  role: string | null;
+  companyName: string | null;
+  workEmail: string | null;
+  linkedinUrl: string | null;
+}
+
 export interface PdlCompanyRequest {
   companyName: string;
   website?: string | null;
@@ -235,6 +258,9 @@ export interface PdlCompanyResult {
 
 export interface PdlClient {
   enrichPerson(request: PdlPersonRequest): Promise<PdlPersonResult>;
+  discoverPerson(
+    request: PdlPersonDiscoveryRequest,
+  ): Promise<PdlPersonDiscoveryResult>;
   enrichCompany(request: PdlCompanyRequest): Promise<PdlCompanyResult>;
 }
 

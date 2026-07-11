@@ -20,11 +20,12 @@ import { runVoice, type VoiceClient } from "./voice";
  *   2. CLOSURE — `citationClosure`. Every evidence id the prose names was in its input.
  *   3. TRUTH   — `lintVoice`. No digit the evidence never contained. No AI house style.
  *
- * A brief that fails any gate is REGENERATED ONCE, with the specific failures handed back
- * as an edit list. A second failure is not retried: the evidence cannot support the brief,
- * and a third identical roll of the dice is not a strategy. Nothing is persisted, the
- * practice keeps no brief, and the caller is told why. That is the same line D2 draws for
- * facts, applied to prose — a brief that states an unprovable number must not ship.
+ * A brief that fails any gate is REGENERATED, with the specific failures handed back as an
+ * edit list, for up to `VOICE_MAX_ATTEMPTS - 1` retries. Once those are spent it is not
+ * retried further: the evidence cannot support the brief, and another identical roll of the
+ * dice is not a strategy. Nothing is persisted, the practice keeps no brief, and the caller
+ * is told why. That is the same line D2 draws for facts, applied to prose — a brief that
+ * states an unprovable number must not ship.
  *
  * ON THE RETRY BEING A FRESH REQUEST, not a conversation turn: a multi-turn retry would
  * have to echo the assistant's thinking blocks back unchanged (adaptive thinking is on),

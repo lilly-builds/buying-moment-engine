@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { getActiveConnection } from "@/db/crm";
 import { hasProviderCredential } from "@/db/integrations";
-import { resolveTarget, type RevOpsOwner } from "@/src/target/config";
 import {
   IntegrationsView,
   type ConnectBanner,
@@ -18,7 +17,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Integrations · GTM Maestro",
   description:
-    "Connect HubSpot and the rest of your stack: surfaced leads push, tag, and track where your team already works.",
+    "Connect HubSpot and the rest of your stack — surfaced leads push, tag, and track where your team already works.",
 };
 
 /** Resolve the live HubSpot connection, degrading to disconnected on any failure.
@@ -99,16 +98,5 @@ export default async function IntegrationsPage({
   // EliseAI's own OAuth — stays the one gate left to turn on.
   const engineKeys = await loadEngineKeys();
 
-  // The RevOps owner the Send handoff routes to — a per-org config value (D14),
-  // never a hardcoded name. Resolved server-side so an env override applies.
-  const owner: RevOpsOwner = resolveTarget(process.env).revOpsOwner;
-
-  return (
-    <IntegrationsView
-      hubspot={hubspot}
-      engineKeys={engineKeys}
-      banner={banner}
-      owner={owner}
-    />
-  );
+  return <IntegrationsView hubspot={hubspot} engineKeys={engineKeys} banner={banner} />;
 }

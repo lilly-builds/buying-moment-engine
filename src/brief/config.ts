@@ -83,14 +83,25 @@ export const VOICE_FETCH_TIMEOUT_MS = 120_000;
 export const PIPELINE_STEP_BRIEF = "brief.voice";
 
 /**
- * How many times a brief may be re-generated inside ONE `synthesizeBrief` call
- * when the lint rejects the model's prose (an ungrounded number, a banned
- * phrase). One retry, never a loop: the retry carries the specific violations
- * back to the model, so a second failure means the evidence cannot support the
- * brief — not that a third identical roll would land. Each attempt is a separate
- * billed call and each writes its own `cost_events` row.
+ * How many times a brief may be generated inside ONE `synthesizeBrief` call when
+ * the lint rejects the model's prose (an ungrounded number, a banned phrase): the
+ * first attempt plus up to three retries. Each retry carries the specific violations
+ * back to the model as an edit list.
+ *
+ * Bumped 2 -> 4 (2026-07-10) after the thin-practice yield investigation. On a real
+ * practice with one weak signal and no numbers of its own, the model reaches for the
+ * pack's numbers, so the truth gate rejects the first draft: a cohort test saw 2 of 5
+ * real briefs fail the old 2-attempt limit, and observed recoveries took several swings.
+ * The generalized "no pack number outside a rebuttal" prompt rule cut how often it
+ * happens; the extra retries clear the rest. Crucially this buys YIELD, never laxity —
+ * the truth gate runs on EVERY attempt, so a brief that lands on the fourth try is
+ * exactly as grounded as one that lands first; nothing unprovable ships either way.
+ * The cost is negligible: briefs are generated once at seeding and persisted, so the
+ * extra Opus call fires ONLY on the briefs still failing. Four failures in a row means
+ * the evidence genuinely cannot support the brief. Each attempt is a separate billed
+ * call and each writes its own `cost_events` row.
  */
-export const VOICE_MAX_ATTEMPTS = 2;
+export const VOICE_MAX_ATTEMPTS = 4;
 
 /** The brief JSON shape version, stamped on every persisted row (`briefs.schema_version`). */
 export const BRIEF_SCHEMA_VERSION = 1;

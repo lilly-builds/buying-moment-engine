@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Badge,
@@ -14,16 +15,6 @@ import {
   TopNav,
 } from "@/design/components";
 import { gradients } from "@/design/tokens";
-import { DEFAULT_TARGET, type RevOpsOwner } from "@/src/target/config";
-import { ConnectionRow } from "@/design/components/onboarding/connection-row";
-import {
-  CONNECTIONS,
-  deriveConnectionStatus,
-  deriveGoLive,
-  type ConnectionId,
-} from "@/src/connect/connections";
-import { SequenceSetupHelp } from "./sequence-setup-help";
-import { EngineKeyCard, ENGINE_KEYS } from "./engine-key-card";
 
 /**
  * Integrations / Connections (U17) — where the tool binds to the stack the JD
@@ -55,6 +46,22 @@ function HubSpotMark({ className }: { className?: string }) {
   );
 }
 
+/** The engine-key logo tile — the provider's real logo, sized + rounded like the
+ *  HubSpot mark so all three integration tiles read as one system. Each logo is a
+ *  colored app-icon (coral for Claude, purple for PDL), so it IS the tile; the
+ *  shared `rounded-2xl` clips both to the same corner, so PDL matches Claude. */
+function ProviderLogo({ src, name }: { src: string; name: string }) {
+  return (
+    <Image
+      src={src}
+      alt={`${name} logo`}
+      width={80}
+      height={80}
+      className="size-20 shrink-0 rounded-2xl object-cover"
+    />
+  );
+}
+
 export type HubSpotStatus =
   // The per-connection sequence id (null until the user pastes it after sequence
   // setup) drives the "finish setup" field below the connect card.
@@ -69,7 +76,7 @@ export type ConnectBanner =
 
 const ERROR_COPY: Record<string, string> = {
   not_configured:
-    "HubSpot isn't set up on this environment yet. The connection keys are still to come.",
+    "HubSpot isn't set up on this environment yet — the connection keys are still to come.",
   connect_failed:
     "That HubSpot connection didn't go through. Please try connecting again.",
 };
@@ -123,32 +130,57 @@ function ConnectResultBanner({ banner }: { banner: ConnectBanner }) {
   );
 }
 
-// ── The HubSpot connect action (step 1 inside the HubSpot ConnectionRow) ──────
+// ── The HubSpot connect card ───────────────────────────────────────────────────
 
-/** Flat connect content — no Card of its own, since the ConnectionRow is the card. */
-function HubSpotConnectAction({ status }: { status: HubSpotStatus }) {
+function HubSpotCard({ status }: { status: HubSpotStatus }) {
   const connected = status.state === "connected";
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <span className="font-sans text-sm font-medium uppercase tracking-eyebrow text-ink-faint">
-          Step 1
-        </span>
-        <h4 className="font-display text-lg font-book text-ink">Connect your HubSpot</h4>
+    <Card variant="elevated" padding="lg">
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <span className="flex size-20 shrink-0 items-center justify-center rounded-panel bg-surface-subtle">
+            <HubSpotMark className="size-12" />
+          </span>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <h3 className="font-display text-h5 font-book text-ink">HubSpot</h3>
+              {connected ? (
+                <Badge tone="success" size="sm">
+                  Connected
+                </Badge>
+              ) : null}
+            </div>
+
+            <p className="max-w-md font-sans text-base text-ink-body">
+              Track prospects that GTM Maestro finds in your HubSpot. Send
+              AI-customized outreach emails.
+            </p>
+          </div>
+        </div>
+
+        <div className="shrink-0 sm:pl-4">
+          {connected ? (
+            <ButtonLink
+              href="/api/hubspot/oauth/start"
+              variant="secondary"
+              className="w-full sm:w-auto"
+            >
+              Reconnect
+            </ButtonLink>
+          ) : (
+            // A real top-level navigation (not fetch) — OAuth must leave the app.
+            <ButtonLink
+              href="/api/hubspot/oauth/start"
+              variant="primary"
+              className="w-full sm:w-auto"
+            >
+              Connect HubSpot
+            </ButtonLink>
+          )}
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-4">
-        <span className="flex size-12 shrink-0 items-center justify-center rounded-panel bg-surface-subtle">
-          <HubSpotMark className="size-7" />
-        </span>
-        {/* A real top-level navigation (not fetch) — OAuth must leave the app. */}
-        <ButtonLink
-          href="/api/hubspot/oauth/start"
-          variant={connected ? "secondary" : "primary"}
-        >
-          {connected ? "Reconnect" : "Connect HubSpot"}
-        </ButtonLink>
-      </div>
-    </div>
+    </Card>
   );
 }
 
@@ -286,6 +318,202 @@ export interface EngineKeyStatus {
   pdl: boolean;
 }
 
+type KeyProviderId = "anthropic" | "pdl";
+
+interface EngineKeyMeta {
+  id: KeyProviderId;
+  name: string;
+  /** What this key powers, in one plain line. */
+  blurb: string;
+  /** The provider's real logo (in /public/logos). */
+  logoSrc: string;
+  /** The verified, direct page where the key lives. */
+  href: string;
+  /** Short label for that link. */
+  linkLabel: string;
+  /** Placeholder that hints the real key shape without leaking one. */
+  placeholder: string;
+}
+
+const ENGINE_KEYS: EngineKeyMeta[] = [
+  {
+    id: "anthropic",
+    name: "Anthropic (Claude)",
+    blurb: "Researches each practice and writes the brief.",
+    logoSrc: "/logos/claude.png",
+    href: "https://platform.claude.com/settings/keys",
+    linkLabel: "Claude Console",
+    placeholder: "sk-ant-…",
+  },
+  {
+    id: "pdl",
+    name: "People Data Labs",
+    blurb: "Finds the decision-maker's verified email + LinkedIn.",
+    logoSrc: "/logos/peopledatalabs.jpg",
+    href: "https://dashboard.peopledatalabs.com",
+    linkLabel: "PDL dashboard",
+    placeholder: "Paste your PDL key",
+  },
+];
+
+type KeySubmitState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved" }
+  | { kind: "error"; message: string };
+
+/**
+ * One engine-key row: a masked paste field that saves the key to the encrypted,
+ * server-only store (`POST /api/provider-keys`). The key is `type="password"` so
+ * it's never shoulder-surfable, and the field CLEARS on save — the browser never
+ * holds or re-displays the secret. The pill reflects whether a key is set (stored
+ * or env); a fresh save flips it to "Set" without a reload.
+ */
+function EngineKeyCard({
+  meta,
+  initiallySet,
+}: {
+  meta: EngineKeyMeta;
+  initiallySet: boolean;
+}) {
+  const [key, setKey] = useState("");
+  const [set, setSet] = useState(initiallySet);
+  const [status, setStatus] = useState<KeySubmitState>({ kind: "idle" });
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = key.trim();
+    if (trimmed.length === 0) {
+      setStatus({ kind: "error", message: "Paste a key first." });
+      return;
+    }
+    setStatus({ kind: "saving" });
+    try {
+      const res = await fetch("/api/provider-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: meta.id, key: trimmed }),
+        // Don't FOLLOW the session gate's redirect to /login — a followed 307
+        // lands on a 200 HTML page that would masquerade as a saved key. `manual`
+        // surfaces the redirect as an opaque response instead.
+        redirect: "manual",
+      });
+
+      if (res.type === "opaqueredirect" || res.status === 0) {
+        setStatus({
+          kind: "error",
+          message: "Your session expired. Please refresh the page and try again.",
+        });
+        return;
+      }
+
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        present?: boolean;
+        error?: string;
+      } | null;
+
+      // Success requires a real `{ ok: true }` — never just a 200.
+      if (!res.ok || body?.ok !== true) {
+        setStatus({
+          kind: "error",
+          message: body?.error ?? "Couldn't save your key. Please try again.",
+        });
+        return;
+      }
+
+      setSet(true);
+      setKey(""); // never keep the secret in the field
+      setStatus({ kind: "saved" });
+    } catch {
+      setStatus({
+        kind: "error",
+        message: "Couldn't reach the server. Please try again.",
+      });
+    }
+  }
+
+  const inputId = `key-${meta.id}`;
+  return (
+    <Card variant="outlined" padding="lg">
+      <form onSubmit={onSubmit} className="flex flex-col gap-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <ProviderLogo src={meta.logoSrc} name={meta.name} />
+            <div className="flex flex-col gap-1.5">
+              <h3 className="font-display text-h5 font-book text-ink">{meta.name}</h3>
+              <p className="max-w-md font-sans text-base text-ink-body">{meta.blurb}</p>
+            </div>
+          </div>
+          {/* Status pill (top-right, over Save key) — same shape/brand font as the
+              "find your key" pill: brand color, not gray, matched padding. */}
+          <span
+            className={`inline-flex items-center rounded-pill px-4 py-1.5 font-sans text-xs font-semibold uppercase tracking-eyebrow ${
+              set ? "bg-success text-success-ink" : "bg-brand-50 text-brand"
+            }`}
+          >
+            {set ? "Set" : "Add key"}
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {/* The paste label + the "find your key" pill sit together on one row. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <label
+              htmlFor={inputId}
+              className="font-sans text-lg font-semibold uppercase tracking-eyebrow text-ink-strong"
+            >
+              {set ? "Replace key" : "Paste key here"}
+            </label>
+            <a
+              href={meta.href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-pill bg-brand-50 px-4 py-1.5 text-brand transition-colors hover:bg-brand-100"
+            >
+              <span className="font-sans text-xs font-semibold uppercase tracking-eyebrow">
+                Find your key:
+              </span>
+              <span className="font-sans text-sm font-medium">{meta.linkLabel} ↗</span>
+            </a>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              id={inputId}
+              name={inputId}
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder={meta.placeholder}
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={512}
+            />
+            <Button
+              type="submit"
+              variant={set ? "secondary" : "primary"}
+              disabled={status.kind === "saving"}
+              className="shrink-0"
+            >
+              {status.kind === "saving" ? "Saving…" : set ? "Replace" : "Save key"}
+            </Button>
+          </div>
+          {status.kind === "saved" ? (
+            <p role="status" className="font-sans text-sm text-success-ink">
+              Saved. {meta.name} is set.
+            </p>
+          ) : null}
+          {status.kind === "error" ? (
+            <p role="alert" className="font-sans text-sm text-danger">
+              {status.message}
+            </p>
+          ) : null}
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 // ── Request-an-integration form ────────────────────────────────────────────────
 
 type SubmitState =
@@ -416,139 +644,6 @@ function RequestIntegrationCard() {
   );
 }
 
-// ── Connections checklist (the RevOps onboarding) ────────────────────────────
-
-const CONNECTION_META = Object.fromEntries(
-  CONNECTIONS.map((c) => [c.id, c]),
-) as Record<ConnectionId, (typeof CONNECTIONS)[number]>;
-
-/** The honest go-live line — keyed on the real send-ready signal (connected AND a
- *  sequence id), so "You're live" means the tool can genuinely send. */
-function GoLiveSummary({
-  hubspot,
-  owner,
-}: {
-  hubspot: HubSpotStatus;
-  owner: RevOpsOwner;
-}) {
-  const go = deriveGoLive(hubspot);
-  const message = go.live
-    ? "You're live. Sending and CRM tracking are on."
-    : go.sequencePending
-      ? "Almost there. Finish setting up your sequence to go live."
-      : `One step left: ${owner.firstName} connects HubSpot to go live.`;
-  return (
-    <div
-      className={
-        go.live
-          ? "flex items-center gap-3 rounded-panel bg-success-surface px-4 py-3"
-          : "flex items-center gap-3 rounded-panel bg-white/10 px-4 py-3"
-      }
-    >
-      <span
-        aria-hidden
-        className={
-          go.live
-            ? "size-2 shrink-0 rounded-pill bg-success-ink"
-            : "size-2 shrink-0 rounded-pill border border-white/50"
-        }
-      />
-      <p
-        className={
-          go.live
-            ? "font-sans text-base text-success-ink"
-            : "font-sans text-base text-white/90"
-        }
-      >
-        {message}
-      </p>
-    </div>
-  );
-}
-
-/**
- * The Connections checklist: HubSpot + the two BYOK keys as StepCard-style rows
- * with status pills (design §C). The HubSpot row is a 3-step flow — connect → set
- * up your sequence → sequence saved (the shipped SequenceSetupCard) — wrapping the
- * PR #21 pieces, not rebuilding them.
- */
-function ConnectionsChecklist({
-  hubspot,
-  engineKeys,
-  owner,
-}: {
-  hubspot: HubSpotStatus;
-  engineKeys: EngineKeyStatus;
-  owner: RevOpsOwner;
-}) {
-  const ctx = { hubspot, engineKeys };
-  const hub = CONNECTION_META.hubspot;
-  return (
-    <section className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
-          Connections
-        </h2>
-        <p className="max-w-2xl font-sans text-base text-white/80">
-          One OAuth connect turns sending on; two keys run the engine on your own
-          account. Keys are encrypted and never shown again.
-        </p>
-      </div>
-
-      <GoLiveSummary hubspot={hubspot} owner={owner} />
-
-      {/* HubSpot — connect → set up your sequence → sequence saved */}
-      <ConnectionRow
-        icon={hub.icon}
-        line={hub.line}
-        detail={hub.detail}
-        chip={hub.chip}
-        status={deriveConnectionStatus("hubspot", ctx)}
-        required={hub.required}
-        dataTour="connect-hubspot"
-      >
-        <HubSpotConnectAction status={hubspot} />
-        {hubspot.state === "connected" ? (
-          <>
-            <SequenceSetupHelp />
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3">
-                <span className="font-sans text-sm font-medium uppercase tracking-eyebrow text-ink-faint">
-                  Step 3
-                </span>
-                <h4 className="font-display text-lg font-book text-ink">
-                  Add your sequence ID
-                </h4>
-              </div>
-              <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
-            </div>
-          </>
-        ) : null}
-      </ConnectionRow>
-
-      {/* The two BYOK engine keys */}
-      {(["anthropic", "pdl"] as const).map((id) => {
-        const meta = CONNECTION_META[id];
-        const keyMeta = ENGINE_KEYS.find((k) => k.id === id);
-        if (!keyMeta) return null;
-        return (
-          <ConnectionRow
-            key={id}
-            icon={meta.icon}
-            line={meta.line}
-            detail={meta.detail}
-            chip={meta.chip}
-            status={deriveConnectionStatus(id, ctx)}
-            dataTour={`key-${id}`}
-          >
-            <EngineKeyCard meta={keyMeta} initiallySet={engineKeys[id]} />
-          </ConnectionRow>
-        );
-      })}
-    </section>
-  );
-}
-
 // ── The page ────────────────────────────────────────────────────────────────
 
 export interface IntegrationsViewProps {
@@ -556,16 +651,12 @@ export interface IntegrationsViewProps {
   /** Which engine keys are present. Defaults to none so the styleguide preview renders. */
   engineKeys?: EngineKeyStatus;
   banner?: ConnectBanner | null;
-  /** The RevOps owner the Send handoff routes to — dynamic (D14), never hardcoded.
-   *  Defaults so the styleguide preview renders without wiring. */
-  owner?: RevOpsOwner;
 }
 
 export function IntegrationsView({
   hubspot,
   engineKeys = { anthropic: false, pdl: false },
   banner,
-  owner = DEFAULT_TARGET.revOpsOwner,
 }: IntegrationsViewProps) {
   return (
     <div
@@ -583,11 +674,33 @@ export function IntegrationsView({
             description="Connect the tools your team already runs. Leads the engine surfaces get pushed, tagged, and tracked where you work."
           />
 
-          <ConnectionsChecklist
-            hubspot={hubspot}
-            engineKeys={engineKeys}
-            owner={owner}
-          />
+          <section className="flex flex-col gap-4">
+            <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
+              CRM
+            </h2>
+            {/* data-tour hook: the RevOps onboarding spotlights this card (connect-hubspot). */}
+            <div data-tour="connect-hubspot">
+              <HubSpotCard status={hubspot} />
+            </div>
+            {hubspot.state === "connected" ? (
+              <SequenceSetupCard initialSequenceId={hubspot.sequenceId} />
+            ) : null}
+          </section>
+
+          <section className="flex flex-col gap-4">
+            <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
+              Engine keys
+            </h2>
+            <p className="max-w-2xl font-sans text-base text-white/80">
+              These run the tool on your own account. Keys are encrypted and never shown again.
+            </p>
+            {/* data-tour hooks: the RevOps onboarding spotlights each key card (key-anthropic / key-pdl). */}
+            {ENGINE_KEYS.map((k) => (
+              <div key={k.id} data-tour={`key-${k.id}`}>
+                <EngineKeyCard meta={k} initiallySet={engineKeys[k.id]} />
+              </div>
+            ))}
+          </section>
 
           <section className="flex flex-col gap-4">
             <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">

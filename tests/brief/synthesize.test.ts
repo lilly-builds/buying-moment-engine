@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getBrief } from "@/db/brief";
-import { PIPELINE_STEP_BRIEF } from "@/src/brief/config";
+import { PIPELINE_STEP_BRIEF, VOICE_MAX_ATTEMPTS } from "@/src/brief/config";
 import { citationClosure, headlineCitesASignal, synthesizeBrief } from "@/src/brief/synthesize";
 import type { VoiceRequest } from "@/src/brief/prompts/voice";
 import { renderBrief } from "@/src/brief/render";
@@ -113,9 +113,9 @@ describe("synthesizeBrief", () => {
     const { deps: d, rows } = deps(t, FakeVoiceClient.always(twoTouches));
 
     const result = await synthesizeBrief(d, ids.practiceId);
-    expect(result).toMatchObject({ status: "failed", gate: "shape", attempts: 2 });
-    // Both attempts were billed. A shape failure does not un-spend the money.
-    expect(rows).toHaveLength(2);
+    expect(result).toMatchObject({ status: "failed", gate: "shape", attempts: VOICE_MAX_ATTEMPTS });
+    // Every attempt was billed. A shape failure does not un-spend the money.
+    expect(rows).toHaveLength(VOICE_MAX_ATTEMPTS);
   });
 
   it("rejects touches numbered out of order, which a bare length check would pass", async () => {
@@ -189,7 +189,7 @@ describe("synthesizeBrief", () => {
     const { deps: d } = deps(t, FakeVoiceClient.always(invented));
 
     const result = await synthesizeBrief(d, ids.practiceId);
-    expect(result).toMatchObject({ status: "failed", gate: "closure", attempts: 2 });
+    expect(result).toMatchObject({ status: "failed", gate: "closure", attempts: VOICE_MAX_ATTEMPTS });
     expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
   });
 
@@ -206,7 +206,7 @@ describe("synthesizeBrief", () => {
     const { deps: d } = deps(t, FakeVoiceClient.always(invented));
 
     const result = await synthesizeBrief(d, ids.practiceId);
-    expect(result).toMatchObject({ status: "failed", gate: "closure", attempts: 2 });
+    expect(result).toMatchObject({ status: "failed", gate: "closure", attempts: VOICE_MAX_ATTEMPTS });
     expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
   });
 
@@ -249,7 +249,7 @@ describe("synthesizeBrief", () => {
     const { deps: d } = deps(t, FakeVoiceClient.always(fabricated));
 
     const result = await synthesizeBrief(d, ids.practiceId);
-    expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: 2 });
+    expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: VOICE_MAX_ATTEMPTS });
     expect(result.status === "failed" && result.reason).toContain("ungrounded-number");
   });
 
@@ -276,7 +276,7 @@ describe("synthesizeBrief", () => {
     const { deps: d } = deps(t, FakeVoiceClient.always(packNumbers));
 
     const result = await synthesizeBrief(d, ids.practiceId);
-    expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: 2 });
+    expect(result).toMatchObject({ status: "failed", gate: "truth", attempts: VOICE_MAX_ATTEMPTS });
     expect(result.status === "failed" && result.reason).toContain("ungrounded-number");
     expect(await getBrief(t.db, ids.practiceId)).toMatchObject({ status: "missing" });
   });
@@ -336,7 +336,7 @@ describe("synthesizeBrief", () => {
 
     const result = await synthesizeBrief(d, ids.practiceId);
     expect(result).toMatchObject({ status: "failed", gate: "shape" });
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(VOICE_MAX_ATTEMPTS);
     expect(rows.every((r) => r.costUsd > 0)).toBe(true);
   });
 

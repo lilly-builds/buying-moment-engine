@@ -16,7 +16,8 @@ import { voiceProseFields, type VoiceBrief } from "./schema";
  * pretending a regex measures warmth.
  *
  * Pure: no I/O, no clock. A violation is a RESULT, not a throw — `synthesize.ts` feeds
- * the violations back into exactly one retry, and a second failure kills the brief.
+ * the violations back into the model as an edit list on retry, and a brief that keeps
+ * failing after its retries are spent is killed.
  * A brief that states an unprovable number must not ship; that is the same line D2
  * draws, applied to prose instead of facts.
  */
@@ -54,12 +55,14 @@ export interface LintResult {
 export const MAX_SENTENCE_WORDS = 32;
 
 /**
- * Em dashes per field. Two is generous prose; three in one paragraph reads as machine
- * writing to anyone who has skimmed a generated email this year. The cap is on the
- * FIELD, not the whole brief, so a long touch body and a short subject are judged the
- * same way.
+ * Em dashes per field. ZERO (Lilly, 2026-07-10): an em dash is the single clearest
+ * machine-written tell, so a real AE's email ships none. The voice prompt bans them too
+ * (rule 7 + the HOW TO SELL bullet), so prompt and lint AGREE — a check stricter than
+ * the prompt would reject good briefs; a looser one would let the tell through. The cap
+ * is on the FIELD, not the whole brief, so a long touch body and a short subject are
+ * judged the same way.
  */
-export const MAX_EM_DASHES_PER_FIELD = 2;
+export const MAX_EM_DASHES_PER_FIELD = 0;
 
 /**
  * Phrases that mark copy as machine-written or as generic cold-email filler.
@@ -428,7 +431,10 @@ export function lintVoice(voice: VoiceBrief, corpus: GroundingCorpus): LintResul
       violations.push({
         kind: "em-dash-overuse",
         field,
-        detail: `${dashes} em dashes; use at most ${MAX_EM_DASHES_PER_FIELD} and prefer a full stop`,
+        detail:
+          MAX_EM_DASHES_PER_FIELD === 0
+            ? `${dashes} em dash${dashes === 1 ? "" : "es"}; em dashes are banned, use a period or a comma`
+            : `${dashes} em dashes; use at most ${MAX_EM_DASHES_PER_FIELD} and prefer a full stop`,
       });
     }
     if (QUANTIFIER_SCOPED_FIELDS.has(field)) {

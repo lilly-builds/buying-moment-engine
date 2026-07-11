@@ -1,6 +1,9 @@
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
 import { EXTRACT_MODEL } from "@/src/enrich/config";
-import { normalizeCompanyResponse, normalizePersonResponse } from "@/src/enrich/pdl-client";
+import {
+  normalizeCompanyResponse,
+  normalizePersonResponse,
+} from "@/src/enrich/pdl-client";
 import type { ScrapeFailure } from "@/src/enrich/scrape";
 import type { Scraper } from "@/src/enrich/waterfall";
 import type {
@@ -8,6 +11,8 @@ import type {
   ExtractRequest,
   PdlClient,
   PdlCompanyResult,
+  PdlPersonDiscoveryRequest,
+  PdlPersonDiscoveryResult,
   PdlPersonRequest,
   PdlPersonResult,
   ResearchClient,
@@ -30,7 +35,10 @@ export interface RecordingMeter {
 
 export function recordingMeter(): RecordingMeter {
   const rows: CostEventRecord[] = [];
-  return { meter: createMeter({ record: async (row) => void rows.push(row) }), rows };
+  return {
+    meter: createMeter({ record: async (row) => void rows.push(row) }),
+    rows,
+  };
 }
 
 export class FakeResearchClient implements ResearchClient {
@@ -45,7 +53,7 @@ export class FakeResearchClient implements ResearchClient {
   /** A 200 whose body is NOT valid JSON — the call was billed, the output is junk. */
   static malformed(): FakeResearchClient {
     return new FakeResearchClient(async () => ({
-      text: "Here is what I found: { \"firmographics\": { oops",
+      text: 'Here is what I found: { "firmographics": { oops',
       usage: {
         inputTokens: 1200,
         outputTokens: 90,
@@ -87,14 +95,19 @@ export function fakeScraper(pages: Map<string, string>): FakeScraper {
     calls,
     scrape: async (websiteUrl: string) => {
       calls.push(websiteUrl);
-      const totalChars = [...pages.values()].reduce((n, text) => n + text.length, 0);
+      const totalChars = [...pages.values()].reduce(
+        (n, text) => n + text.length,
+        0,
+      );
       return { pages, pagesHeld: pages.size, totalChars };
     },
   };
 }
 
 /** A site that gave us nothing — a 403, a dead host, or a JS shell with no text. */
-export function emptyScraper(reason: ScrapeFailure = "unreachable"): FakeScraper {
+export function emptyScraper(
+  reason: ScrapeFailure = "unreachable",
+): FakeScraper {
   const calls: string[] = [];
   return {
     calls,
@@ -111,7 +124,9 @@ export class FakeExtractClient implements ExtractClient {
   constructor(private readonly behaviour: () => Promise<ResearchResponse>) {}
 
   static fromFixture(fixture: unknown): FakeExtractClient {
-    return new FakeExtractClient(async () => parseMessagesResponse(fixture, EXTRACT_MODEL));
+    return new FakeExtractClient(async () =>
+      parseMessagesResponse(fixture, EXTRACT_MODEL),
+    );
   }
 
   /** A billed 200 whose body is not the JSON the schema promised. */
@@ -154,17 +169,46 @@ export function fixtureHttpStatus(fixture: unknown): number {
 
 export class FakePdlClient implements PdlClient {
   personCalls: PdlPersonRequest[] = [];
+  searchCalls: PdlPersonDiscoveryRequest[] = [];
   companyCalls: number = 0;
 
   constructor(
     private readonly person: () => Promise<PdlPersonResult>,
     private readonly company: () => Promise<PdlCompanyResult> = async () =>
       normalizeCompanyResponse({ status: 404 }, 404),
+    private readonly search: () => Promise<PdlPersonDiscoveryResult> = async () => ({
+      billedRecords: 0,
+      matched: false,
+      unparseable: false,
+      parseError: null,
+      total: 0,
+      confidence: null,
+      fullName: null,
+      role: null,
+      companyName: null,
+      workEmail: null,
+      linkedinUrl: null,
+    }),
   ) {}
 
   static fromFixture(fixture: unknown): FakePdlClient {
     return new FakePdlClient(async () =>
       normalizePersonResponse(fixture, fixtureHttpStatus(fixture)),
+    );
+  }
+
+  static withDiscovery(
+    discovery: PdlPersonDiscoveryResult,
+    personFixture: unknown,
+  ): FakePdlClient {
+    return new FakePdlClient(
+      async () =>
+        normalizePersonResponse(
+          personFixture,
+          fixtureHttpStatus(personFixture),
+        ),
+      async () => normalizeCompanyResponse({ status: 404 }, 404),
+      async () => discovery,
     );
   }
 
@@ -177,12 +221,22 @@ export class FakePdlClient implements PdlClient {
       async () => {
         throw error;
       },
+      async () => {
+        throw error;
+      },
     );
   }
 
   async enrichPerson(request: PdlPersonRequest): Promise<PdlPersonResult> {
     this.personCalls.push(request);
     return this.person();
+  }
+
+  async discoverPerson(
+    request: PdlPersonDiscoveryRequest,
+  ): Promise<PdlPersonDiscoveryResult> {
+    this.searchCalls.push(request);
+    return this.search();
   }
 
   async enrichCompany(): Promise<PdlCompanyResult> {

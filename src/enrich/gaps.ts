@@ -15,11 +15,9 @@ export interface Gaps {
 }
 
 /**
- * Does PDL have anything to do? PDL's Person Enrichment keys on a person's NAME +
- * company; it cannot answer "who runs this practice?" from the company alone. So:
- *  - no decision-maker, or a role with no name -> no gap, ZERO PDL calls, and the
- *    contact degrades to D9's role-only variant.
- *  - a named contact -> PDL fills only the fields Claude did not cite.
+ * Does PDL Person Enrichment have anything to do? It keys on a person's NAME +
+ * company, so this gap calculator only covers already named contacts. Role-only
+ * contacts use the separate Person Search discovery guard in `waterfall.ts`.
  */
 export function computeGaps(findings: ResearchFindings): Gaps {
   const dm = findings.decisionMaker;

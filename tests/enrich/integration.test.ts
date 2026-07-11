@@ -21,9 +21,18 @@ import {
   recordingMeter,
 } from "./doubles";
 import { parseMessagesResponse } from "@/src/enrich/anthropic-client";
-import { createEscalationBudget, noEscalationBudget } from "@/src/enrich/escalation";
+import {
+  createEscalationBudget,
+  noEscalationBudget,
+} from "@/src/enrich/escalation";
 import { drizzleCostRecorder } from "@/db/cost-recorder";
-import { contacts, costEvents, evidence, practiceFacts, practices } from "@/db/schema";
+import {
+  contacts,
+  costEvents,
+  evidence,
+  practiceFacts,
+  practices,
+} from "@/db/schema";
 import { upsertContact, upsertPracticeFact } from "@/db/enrich";
 import { resolvePractice } from "@/src/engine/resolver";
 import { enrichPractice, type WaterfallDeps } from "@/src/enrich/waterfall";
@@ -87,7 +96,11 @@ describe("enrichment waterfall (integration)", () => {
   it("SCENARIO 3: PDL fills the verified email + LinkedIn gap and persists them", async () => {
     const practiceId = await seedPractice(SUNSHINE.name, SUNSHINE.geoKey);
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d } = deps(SUNSHINE_PAGES, FakeExtractClient.fromFixture(researchFixture), pdl);
+    const { deps: d } = deps(
+      SUNSHINE_PAGES,
+      FakeExtractClient.fromFixture(researchFixture),
+      pdl,
+    );
 
     const result = await enrichPractice(d, {
       id: practiceId,
@@ -126,7 +139,11 @@ describe("enrichment waterfall (integration)", () => {
   it("SCENARIO 4 (COST GUARD): a fully-Claude-resolved practice makes ZERO PDL calls", async () => {
     const practiceId = await seedPractice("Metro Ortho Group", "denver-co");
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d, rows } = deps(METRO_PAGES, FakeExtractClient.fromFixture(fullyResolved), pdl);
+    const { deps: d, rows } = deps(
+      METRO_PAGES,
+      FakeExtractClient.fromFixture(fullyResolved),
+      pdl,
+    );
 
     const result = await enrichPractice(d, {
       id: practiceId,
@@ -151,20 +168,30 @@ describe("enrichment waterfall (integration)", () => {
     expect(contact.linkedinProvider).toBe("claude_research");
   });
 
-  it("SCENARIO 5: no findable contact degrades to the role-only variant, never fails", async () => {
-    const practiceId = await seedPractice("Harbor Vision Eye Care", "portland-or");
+  it("SCENARIO 5: no confident PDL discovery degrades to role-only, never fakes a person", async () => {
+    const practiceId = await seedPractice(
+      "Harbor Vision Eye Care",
+      "portland-or",
+    );
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d } = deps(HARBOR_PAGES, FakeExtractClient.fromFixture(roleOnly), pdl);
+    const { deps: d } = deps(
+      HARBOR_PAGES,
+      FakeExtractClient.fromFixture(roleOnly),
+      pdl,
+    );
 
     const result = await enrichPractice(d, {
       id: practiceId,
       name: "Harbor Vision Eye Care",
+      city: "Portland",
+      state: "OR",
       websiteUrl: "https://harborvision.example",
     });
 
     expect(result.status).toBe("enriched");
     expect(result.contactVariant).toBe("role_only");
-    expect(result.pdlCalls).toBe(0);
+    expect(result.pdlCalls).toBe(1);
+    expect(pdl.searchCalls).toHaveLength(1);
     expect(pdl.personCalls).toEqual([]);
     // The specialty fact cites `https://harborvision.example/` while the page map is
     // keyed without the slash. The URL is an identifier we handed the model; tolerating
@@ -178,6 +205,143 @@ describe("enrichment waterfall (integration)", () => {
     expect(contact.name).toBeNull();
     expect(contact.role).toBe("Office Manager");
     expect(contact.email).toBeNull();
+  });
+
+  it("discovers a named contact when the website only gave a role", async () => {
+    const practiceId = await seedPractice(
+      "Harbor Vision Eye Care",
+      "portland-or",
+    );
+    const pdl = FakePdlClient.withDiscovery(
+      {
+        billedRecords: 1,
+        matched: true,
+        unparseable: false,
+        parseError: null,
+        total: 1,
+        confidence: 0.9,
+        fullName: "Dana Whitfield",
+        role: "Practice Administrator",
+        companyName: "Harbor Vision Eye Care",
+        workEmail: null,
+        linkedinUrl: null,
+      },
+      personMatch,
+    );
+    const { deps: d, rows } = deps(
+      HARBOR_PAGES,
+      FakeExtractClient.fromFixture(roleOnly),
+      pdl,
+    );
+
+    const result = await enrichPractice(d, {
+      id: practiceId,
+      name: "Harbor Vision Eye Care",
+      city: "Portland",
+      state: "OR",
+      websiteUrl: "https://harborvision.example",
+    });
+
+    expect(result.status).toBe("enriched");
+    expect(result.contactVariant).toBe("named");
+    expect(result.pdlCalls).toBe(2);
+    expect(pdl.searchCalls).toHaveLength(1);
+    expect(pdl.personCalls).toEqual([
+      {
+        fullName: "Dana Whitfield",
+        companyName: "Harbor Vision Eye Care",
+        role: "Practice Administrator",
+      },
+    ]);
+
+    const [contact] = await t.db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.practiceId, practiceId));
+    expect(contact.name).toBe("Dana Whitfield");
+    // Persist under the website-cited role so re-runs find the same contact row.
+    expect(contact.role).toBe("Office Manager");
+    expect(contact.email).toBe("dana.whitfield@sunshinederm.example");
+    expect(contact.emailProvider).toBe("pdl");
+    expect(contact.linkedinProvider).toBe("pdl");
+    expect(
+      rows.filter((r) => r.provider === "pdl").map((r) => r.operation),
+    ).toEqual(["person.search", "person.enrich"]);
+  });
+
+  it("discovers a contact even when the website produced no role at all", async () => {
+    const practiceId = await seedPractice("Sanova Dermatology", "austin-tx");
+    const noContactFixture = {
+      id: "msg-no-contact",
+      type: "message",
+      role: "assistant",
+      model: "claude-haiku-4-5",
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            firmographics: {
+              specialty: {
+                value: "Dermatology",
+                sourceUrl: "https://harborvision.example/",
+                snippet:
+                  "Harbor Vision Eye Care has served Portland since 1998.",
+              },
+            },
+            ehr: null,
+            incumbentTooling: [],
+            decisionMaker: null,
+            buyingMomentContext: [],
+          }),
+        },
+      ],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 100, output_tokens: 50 },
+    };
+    const pdl = FakePdlClient.withDiscovery(
+      {
+        billedRecords: 1,
+        matched: true,
+        unparseable: false,
+        parseError: null,
+        total: 1,
+        confidence: 0.85,
+        fullName: "Loretta Maddox",
+        role: "Practice Manager",
+        companyName: "Sanova Dermatology",
+        workEmail: null,
+        linkedinUrl: "linkedin.com/in/loretta-maddox-a4452891",
+      },
+      personNotFound,
+    );
+    const { deps: d } = deps(
+      HARBOR_PAGES,
+      FakeExtractClient.fromFixture(noContactFixture),
+      pdl,
+    );
+
+    const result = await enrichPractice(d, {
+      id: practiceId,
+      name: "Sanova Dermatology",
+      city: "Austin",
+      state: "TX",
+      websiteUrl: "https://www.sanovadermatology.com/locations/north-austin/",
+    });
+
+    expect(result.status).toBe("enriched");
+    expect(result.contactVariant).toBe("named");
+    expect(result.pdlCalls).toBe(2);
+
+    const [contact] = await t.db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.practiceId, practiceId));
+    expect(contact.name).toBe("Loretta Maddox");
+    expect(contact.role).toBe("Practice Manager");
+    expect(contact.linkedinUrl).toBe(
+      "https://linkedin.com/in/loretta-maddox-a4452891",
+    );
+    expect(contact.linkedinProvider).toBe("pdl");
   });
 
   it("SCENARIO 8: every enrichment call writes a metered cost_events row", async () => {
@@ -315,7 +479,9 @@ describe("enrichment waterfall (integration)", () => {
     expect(result.factsDropped).toBe(1);
     expect(result.factsWritten).toBe(4); // was 5
 
-    const fields = (await t.db.select().from(practiceFacts)).map((f) => f.field);
+    const fields = (await t.db.select().from(practiceFacts)).map(
+      (f) => f.field,
+    );
     expect(fields).not.toContain("ehr");
     expect(fields.sort()).toEqual([
       "buying_moment_1",
@@ -425,7 +591,11 @@ describe("enrichment waterfall (integration)", () => {
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Silent Practice", websiteUrl: "https://silent.example" },
+      {
+        id: practiceId,
+        name: "Silent Practice",
+        websiteUrl: "https://silent.example",
+      },
     );
 
     expect(result.status).toBe("failed");
@@ -436,7 +606,10 @@ describe("enrichment waterfall (integration)", () => {
     expect(extract.calls).toEqual([]);
     expect(rows).toEqual([]);
 
-    const [row] = await t.db.select().from(practices).where(eq(practices.id, practiceId));
+    const [row] = await t.db
+      .select()
+      .from(practices)
+      .where(eq(practices.id, practiceId));
     expect(row.enrichmentStatus).toBe("failed");
   });
 
@@ -468,7 +641,11 @@ describe("enrichment waterfall (integration)", () => {
   it("ERROR PATH: a malformed (but BILLED) extract body fails the practice and is still metered", async () => {
     const practiceId = await seedPractice("Broken Derm", "austin-tx");
     const pdl = FakePdlClient.fromFixture(personMatch);
-    const { deps: d, rows } = deps(SUNSHINE_PAGES, FakeExtractClient.malformed(), pdl);
+    const { deps: d, rows } = deps(
+      SUNSHINE_PAGES,
+      FakeExtractClient.malformed(),
+      pdl,
+    );
 
     const result = await enrichPractice(d, {
       id: practiceId,
@@ -485,7 +662,10 @@ describe("enrichment waterfall (integration)", () => {
 
     expect(await t.db.select().from(practiceFacts)).toHaveLength(0);
     expect(await t.db.select().from(contacts)).toHaveLength(0);
-    const [row] = await t.db.select().from(practices).where(eq(practices.id, practiceId));
+    const [row] = await t.db
+      .select()
+      .from(practices)
+      .where(eq(practices.id, practiceId));
     expect(row.enrichmentStatus).toBe("failed");
   });
 
@@ -495,7 +675,9 @@ describe("enrichment waterfall (integration)", () => {
     const practiceId = await seedPractice("Rate Limited Derm", "tampa-fl");
     const { deps: d, rows } = deps(
       SUNSHINE_PAGES,
-      FakeExtractClient.throwing(new AnthropicRequestError(429, "rate limited")),
+      FakeExtractClient.throwing(
+        new AnthropicRequestError(429, "rate limited"),
+      ),
       FakePdlClient.fromFixture(personMatch),
     );
 
@@ -534,7 +716,11 @@ describe("enrichment waterfall (integration)", () => {
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Fabulist Derm", websiteUrl: SUNSHINE.websiteUrl },
+      {
+        id: practiceId,
+        name: "Fabulist Derm",
+        websiteUrl: SUNSHINE.websiteUrl,
+      },
     );
 
     expect(result.status).toBe("failed");
@@ -562,7 +748,11 @@ describe("enrichment waterfall (integration)", () => {
       },
       model: "claude-haiku-4-5",
     }));
-    const { deps: d, rows } = deps(SUNSHINE_PAGES, empty, FakePdlClient.fromFixture(personMatch));
+    const { deps: d, rows } = deps(
+      SUNSHINE_PAGES,
+      empty,
+      FakePdlClient.fromFixture(personMatch),
+    );
 
     const result = await enrichPractice(d, {
       id: practiceId,
@@ -596,7 +786,11 @@ describe("enrichment waterfall (integration)", () => {
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Blocked Derm", websiteUrl: "https://blocked.example" },
+      {
+        id: practiceId,
+        name: "Blocked Derm",
+        websiteUrl: "https://blocked.example",
+      },
     );
 
     expect(result.status).toBe("enriched");
@@ -615,8 +809,12 @@ describe("enrichment waterfall (integration)", () => {
     expect(result.factsWritten).toBe(5);
     expect(result.factsDropped).toBe(0);
     // The Haiku extractor was never called: there was nothing to hand it.
-    expect(rows.filter((r) => r.pipelineStep === "enrich.extract")).toHaveLength(0);
-    expect(rows.filter((r) => r.pipelineStep === "enrich.research")).toHaveLength(1);
+    expect(
+      rows.filter((r) => r.pipelineStep === "enrich.extract"),
+    ).toHaveLength(0);
+    expect(
+      rows.filter((r) => r.pipelineStep === "enrich.research"),
+    ).toHaveLength(1);
   });
 
   it("zero verified facts ESCALATES — extraction succeeded and nothing threw", async () => {
@@ -625,7 +823,10 @@ describe("enrichment waterfall (integration)", () => {
     const base = parseMessagesResponse(researchFixture);
     const allFake = new FakeExtractClient(async () => ({
       ...base,
-      text: base.text.replaceAll(/"snippet": "[^"]*"/g, '"snippet": "Nothing on any page says this."'),
+      text: base.text.replaceAll(
+        /"snippet": "[^"]*"/g,
+        '"snippet": "Nothing on any page says this."',
+      ),
     }));
     const budget = createEscalationBudget(3);
 
@@ -636,11 +837,18 @@ describe("enrichment waterfall (integration)", () => {
         extract: allFake,
         pdl: FakePdlClient.fromFixture(personNotFound),
         meter: recordingMeter().meter,
-        escalation: { client: FakeResearchClient.fromFixture(researchFixture), budget },
+        escalation: {
+          client: FakeResearchClient.fromFixture(researchFixture),
+          budget,
+        },
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Fabulist Derm", websiteUrl: SUNSHINE.websiteUrl },
+      {
+        id: practiceId,
+        name: "Fabulist Derm",
+        websiteUrl: SUNSHINE.websiteUrl,
+      },
     );
 
     expect(result.escalationTrigger).toBe("no-verified-facts");
@@ -669,13 +877,19 @@ describe("enrichment waterfall (integration)", () => {
         pdl: FakePdlClient.fromFixture(personNotFound),
         meter,
         escalation: {
-          client: FakeResearchClient.throwing(new AnthropicRequestError(429, "rate limited")),
+          client: FakeResearchClient.throwing(
+            new AnthropicRequestError(429, "rate limited"),
+          ),
           budget,
         },
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Blocked Derm", websiteUrl: "https://blocked.example" },
+      {
+        id: practiceId,
+        name: "Blocked Derm",
+        websiteUrl: "https://blocked.example",
+      },
     );
 
     expect(result.status).toBe("failed");
@@ -718,14 +932,20 @@ describe("enrichment waterfall (integration)", () => {
       {
         db: t.db,
         scrape: fakeScraper(SUNSHINE_PAGES).scrape,
-        extract: FakeExtractClient.throwing(new AnthropicRequestError(429, "rate limited")),
+        extract: FakeExtractClient.throwing(
+          new AnthropicRequestError(429, "rate limited"),
+        ),
         pdl: FakePdlClient.fromFixture(personNotFound),
         meter: recordingMeter().meter,
         escalation: { client: agentic, budget: createEscalationBudget(3) },
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Rate Limited Derm", websiteUrl: SUNSHINE.websiteUrl },
+      {
+        id: practiceId,
+        name: "Rate Limited Derm",
+        websiteUrl: SUNSHINE.websiteUrl,
+      },
     );
 
     expect(result.status).toBe("failed");
@@ -750,7 +970,11 @@ describe("enrichment waterfall (integration)", () => {
         now: () => NOW,
         logger: SILENT,
       },
-      { id: practiceId, name: "Blocked Derm", websiteUrl: "https://blocked.example" },
+      {
+        id: practiceId,
+        name: "Blocked Derm",
+        websiteUrl: "https://blocked.example",
+      },
     );
 
     // This is how U8 measures the escalation rate across a real cohort for $0.
@@ -825,7 +1049,11 @@ describe("enrichment waterfall (integration)", () => {
           FakeExtractClient.fromFixture(researchFixture),
           FakePdlClient.fromFixture(personMatch),
         ).deps,
-        { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl },
+        {
+          id: practiceId,
+          name: SUNSHINE.name,
+          websiteUrl: SUNSHINE.websiteUrl,
+        },
       );
 
     const first = await run();
@@ -852,7 +1080,11 @@ describe("enrichment waterfall (integration)", () => {
       now: () => NOW,
       logger: SILENT,
     };
-    const practice = { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl };
+    const practice = {
+      id: practiceId,
+      name: SUNSHINE.name,
+      websiteUrl: SUNSHINE.websiteUrl,
+    };
 
     const first = await enrichPractice(d, practice);
     const second = await enrichPractice(d, practice);
@@ -887,7 +1119,11 @@ describe("enrichment waterfall (integration)", () => {
       now: () => NOW,
       logger: SILENT,
     });
-    const practice = { id: practiceId, name: SUNSHINE.name, websiteUrl: SUNSHINE.websiteUrl };
+    const practice = {
+      id: practiceId,
+      name: SUNSHINE.name,
+      websiteUrl: SUNSHINE.websiteUrl,
+    };
 
     // Dana was RE-TITLED, so the PAGE drifts and the model quotes the new page. Drifting
     // only the model's `value` would leave "Practice Manager" cited to a page that still
@@ -897,14 +1133,20 @@ describe("enrichment waterfall (integration)", () => {
     const drifted = new FakeExtractClient(async () => ({
       ...base,
       text: base.text
-        .replaceAll('"value": "Practice Administrator"', '"value": "Practice Manager"')
+        .replaceAll(
+          '"value": "Practice Administrator"',
+          '"value": "Practice Manager"',
+        )
         .replaceAll(
           '"snippet": "Dana Whitfield, Practice Administrator"',
           '"snippet": "Dana Whitfield, Practice Manager"',
         ),
     }));
 
-    await enrichPractice(withExtract(FakeExtractClient.fromFixture(researchFixture)), practice);
+    await enrichPractice(
+      withExtract(FakeExtractClient.fromFixture(researchFixture)),
+      practice,
+    );
     const second = await enrichPractice(
       withExtract(drifted, SUNSHINE_PAGES_ROLE_DRIFTED),
       practice,
