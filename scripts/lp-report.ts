@@ -69,7 +69,9 @@ async function main() {
   console.log("");
 }
 
-main().catch((e) => {
-  console.error("report failed:", e.message);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error("report failed:", e.message);
+    process.exit(1);
+  });
