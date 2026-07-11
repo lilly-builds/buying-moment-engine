@@ -31,6 +31,31 @@ Plan: `docs/plans/2026-07-11-adapt-it-saas-plan.md` · North star: `docs/plans/a
 - Real per-tenant auth (a signup that issues a tenant session) = documented roadmap, not tonight.
 - Dev server: MUST run `npx next dev --webpack` (the node_modules symlink crashes Turbopack). Never `next build` (disk).
 
+## FINAL STATUS — shipped 2026-07-11
+- **SHIPPED** to `origin/adapt-it` (5 commits, based on origin/main 440191c). Never touched main.
+- SCOPE -> BUILD -> VERIFY -> REVIEW -> SHIP all complete.
+- **Verified e2e in a real browser** as a brand-new non-healthcare tenant ("Northbeam", an HR onboarding
+  platform): welcome -> AI onboarding (real Claude, HR-tailored signals, zero healthcare bleed) -> reveal
+  -> branded feed -> brief in their voice -> Customize teal re-skin (whole app repainted) -> honest scoreboard.
+  Zero console errors. 13 screenshots in the session scratchpad `e2e/`.
+- **Full test suite green: 1104 passed, 0 failed** (+ the pre-existing PDL env-leak flake only if you
+  source .env.local into the shell before vitest). tsc clean. Token parity green.
+- **Fresh-eyes review passed**, security model confirmed sound (no forged-cookie path to EliseAI real data).
+  Two confirmed bugs fixed (signal-rename on removal; getActiveWorkspace DB-error fallback) + em-dash scrub.
+- **Run it:** `cd /Users/love/Developer/bme-adapt-it && npx next dev --webpack` then open
+  http://localhost:3000/welcome (Turbopack crashes on the symlinked node_modules; use --webpack).
+
+## Roadmap (intentionally OUT of scope tonight, documented honestly)
+- **True multi-tenant isolation (RLS + tenant_id on every entity table).** Tonight is config-level tenancy:
+  a tenant's own sample data is safe to expose by cookie; EliseAI real data stays allowlist-gated. A forged
+  cookie could see another tenant's *synthetic sample* rows (not real data). Production needs per-row RLS.
+- **Real signup auth** that issues a per-tenant session (today the tenant path is cookie-based, no account).
+- **Live signal detection for arbitrary industries.** The sample feed is Claude-generated; the detector
+  seams already accept injected queries, so wiring real Adzuna/GDELT/Places queries per industry is the next step.
+- **Rate-limit /adapt + /api/adapt** (public, they spend Claude) before any public deploy.
+- **Signal identity by stable id** (not denormalized name) so renames/removes never risk feed label drift.
+- **Per-tenant BYOK key vault + per-tenant HubSpot connect** (today the single-instance connect stays).
+
 ## Discipline
 - Phases run SEQUENTIALLY to avoid silent file collisions (autonomous, no human to catch a bad merge).
 - Every phase: additive + reversible, EliseAI default path stays green, tsc passes, no `next build` (disk), no em dashes, no hidden errors.
