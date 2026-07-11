@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { getDb } from "@/db/client";
 import { getActiveConnection } from "@/db/crm";
 import { hasProviderCredential } from "@/db/integrations";
-import { feedPractices } from "@/db/queries";
-import { firstBriefHref } from "@/src/connect/connections";
 import { resolveTarget, type RevOpsOwner } from "@/src/target/config";
 import {
   IntegrationsView,
@@ -62,25 +60,6 @@ async function loadEngineKeys(): Promise<EngineKeyStatus> {
   return { anthropic, pdl };
 }
 
-/**
- * The value-first opener's REAL numbers (onboarding-design §1 "full value before
- * a single key"): how many hot leads the team already has, and the first live
- * brief to open. Both come from the SAME feed query `app/page.tsx` uses, so the
- * count is honest — never a hardcoded string. Degrades to 0 / no-link on any DB
- * failure so a keyless clone still renders the (softened) opener.
- */
-async function loadFeedValue(): Promise<{
-  leadCount: number;
-  firstBriefHref: string | null;
-}> {
-  try {
-    const rows = await feedPractices(getDb());
-    return { leadCount: rows.length, firstBriefHref: firstBriefHref(rows) };
-  } catch {
-    return { leadCount: 0, firstBriefHref: null };
-  }
-}
-
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -123,7 +102,6 @@ export default async function IntegrationsPage({
   // The RevOps owner the Send handoff routes to — a per-org config value (D14),
   // never a hardcoded name. Resolved server-side so an env override applies.
   const owner: RevOpsOwner = resolveTarget(process.env).revOpsOwner;
-  const { leadCount, firstBriefHref: briefHref } = await loadFeedValue();
 
   return (
     <IntegrationsView
@@ -131,8 +109,6 @@ export default async function IntegrationsPage({
       engineKeys={engineKeys}
       banner={banner}
       owner={owner}
-      leadCount={leadCount}
-      firstBriefHref={briefHref}
     />
   );
 }

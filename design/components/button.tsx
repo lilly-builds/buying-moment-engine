@@ -22,7 +22,7 @@ export type ButtonVariant =
   | "tertiary"
   | "primary-dark";
 
-export type ButtonSize = "sm" | "md";
+export type ButtonSize = "sm" | "md" | "lg";
 
 const BASE =
   "inline-flex items-center justify-center gap-2.5 rounded-control font-sans " +
@@ -47,6 +47,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
 const SIZES: Record<ButtonSize, string> = {
   sm: "px-4 py-2.5 text-base", // 16x10 — the nav variant
   md: "px-6 py-3 text-base", // 24x12 — the page variant
+  lg: "px-10 py-5 text-lg", // 40x20 — an oversized hero CTA (the tour finale)
 };
 
 /** `tertiary` is a text link, so it drops horizontal padding at every size. Note
@@ -56,6 +57,7 @@ const SIZES: Record<ButtonSize, string> = {
 const TERTIARY_SIZES: Record<ButtonSize, string> = {
   sm: "px-0 py-2.5 text-base",
   md: "px-0 py-3 text-base",
+  lg: "px-0 py-5 text-lg",
 };
 
 function buttonClasses(

@@ -22,7 +22,6 @@ import {
   deriveGoLive,
   type ConnectionId,
 } from "@/src/connect/connections";
-import { ValueOpener } from "./value-opener";
 import { SequenceSetupHelp } from "./sequence-setup-help";
 import { EngineKeyCard, ENGINE_KEYS } from "./engine-key-card";
 
@@ -560,10 +559,6 @@ export interface IntegrationsViewProps {
   /** The RevOps owner the Send handoff routes to — dynamic (D14), never hardcoded.
    *  Defaults so the styleguide preview renders without wiring. */
   owner?: RevOpsOwner;
-  /** Real hot-lead count for the value opener; 0 degrades the copy (no fake number). */
-  leadCount?: number;
-  /** The first live brief to open from the opener; null → link to the feed. */
-  firstBriefHref?: string | null;
 }
 
 export function IntegrationsView({
@@ -571,8 +566,6 @@ export function IntegrationsView({
   engineKeys = { anthropic: false, pdl: false },
   banner,
   owner = DEFAULT_TARGET.revOpsOwner,
-  leadCount = 0,
-  firstBriefHref = null,
 }: IntegrationsViewProps) {
   return (
     <div
@@ -583,8 +576,6 @@ export function IntegrationsView({
       <main className="flex flex-1 flex-col">
         <PageContainer className="flex flex-col gap-8 py-8">
           {banner ? <ConnectResultBanner banner={banner} /> : null}
-
-          <ValueOpener leadCount={leadCount} firstBriefHref={firstBriefHref} />
 
           <SectionHeader
             tone="dark"

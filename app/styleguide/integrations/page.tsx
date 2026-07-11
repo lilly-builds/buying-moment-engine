@@ -17,10 +17,9 @@ export const metadata: Metadata = {
  * via the `/styleguide/` prefix; reads no database.
  *
  * Toggle the fixtures from the URL so every state is reviewable:
- *   /styleguide/integrations                       -> disconnected (Connect CTA; opener with real N)
- *   ?state=connected                               -> connected, no sequence yet ("Almost — set up your sequence")
+ *   /styleguide/integrations                       -> disconnected (Connect CTA)
+ *   ?state=connected                               -> connected, no sequence yet ("Almost there, set up your sequence")
  *   ?state=connected&seq=1                          -> connected + sequence set ("You're live", all green)
- *   ?leads=0                                        -> the degraded opener (no hot leads → feed link)
  *   ?banner=connected                              -> the post-OAuth success banner
  *   ?banner=error                                  -> a failed-connect banner
  */
@@ -56,22 +55,7 @@ export default async function IntegrationsPreviewPage({
         ? { kind: "error", code: "connect_failed" }
         : null;
 
-  // Opener fixtures: `?leads=0` previews the honest degraded copy (no number),
-  // otherwise a representative real count + a sample first-brief link. The link
-  // points at the PUBLIC brief preview so this design-review page is fully
-  // walkable without auth (the live /integrations uses a real practice id).
-  const noLeads = firstParam(params.leads) === "0";
-  const leadCount = noLeads ? 0 : 12;
-  const firstBriefHref = noLeads ? null : "/styleguide/brief";
   const owner = resolveTarget(process.env).revOpsOwner;
 
-  return (
-    <IntegrationsView
-      hubspot={hubspot}
-      banner={banner}
-      owner={owner}
-      leadCount={leadCount}
-      firstBriefHref={firstBriefHref}
-    />
-  );
+  return <IntegrationsView hubspot={hubspot} banner={banner} owner={owner} />;
 }

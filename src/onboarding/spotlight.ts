@@ -17,12 +17,15 @@
 /** Padding around the spotlit element, and the gap between it and the card. */
 export const SPOTLIGHT_PAD = 12;
 export const CARD_GAP = 16;
-/** The card is a fixed width (`w-[32rem]`); an estimate of its height suffices
+/** The card is a fixed width (`w-[40rem]`); an estimate of its height suffices
  *  (generous, so the taller cards that carry a supporting sentence still clear). */
-export const CARD_W = 512;
+export const CARD_W = 640;
 export const CARD_H_EST = 300;
 /** Keep the sticky nav clear when scrolling a target into place. */
 export const NAV_OFFSET = 88;
+/** The sticky top nav's rendered height (content + 1px border). The dim backdrop
+ *  starts BELOW this so the nav is never overlaid — matches TopNav's `h-[69px]`. */
+export const NAV_BAR_HEIGHT = 70;
 /** How long to keep looking for a step's target before falling back to a centred card. */
 export const TARGET_RETRY_MS = 2500;
 
@@ -38,27 +41,38 @@ export function rectOf(el: Element): Rect {
   return { top: r.top, left: r.left, width: r.width, height: r.height };
 }
 
-/** Place the card centred under (or, if it won't fit, above / centred on) the target. */
-export function placeCard(rect: Rect | null): { top: number; left: number } {
+/**
+ * Place the card centred under (or, if it won't fit, above / centred on) the target.
+ *
+ * `cardH` is the card's REAL measured height when the caller has it (the controller
+ * measures the rendered card and passes it); it falls back to the estimate before the
+ * first measurement. Using the real height is what keeps a tall card (the welcome
+ * slide, the ROI slide) from running its Next/Skip controls off the bottom of the
+ * screen — the checks below only choose a placement the whole card actually fits in.
+ */
+export function placeCard(
+  rect: Rect | null,
+  cardH: number = CARD_H_EST,
+): { top: number; left: number } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(v, max));
 
   if (!rect) {
     return {
-      top: clamp((vh - CARD_H_EST) / 2, 8, vh - CARD_H_EST - 8),
+      top: clamp((vh - cardH) / 2, 8, vh - cardH - 8),
       left: clamp((vw - CARD_W) / 2, 8, vw - CARD_W - 8),
     };
   }
 
   const below = rect.top + rect.height + SPOTLIGHT_PAD + CARD_GAP;
-  const above = rect.top - SPOTLIGHT_PAD - CARD_GAP - CARD_H_EST;
+  const above = rect.top - SPOTLIGHT_PAD - CARD_GAP - cardH;
   let top: number;
-  if (below + CARD_H_EST <= vh - 8) top = below;
+  if (below + cardH <= vh - 8) top = below;
   else if (above >= 8) top = above;
-  // Target taller than the viewport can hold: pin the card to the bottom so the
-  // top of the target stays visible rather than being covered.
-  else top = Math.max(8, vh - CARD_H_EST - 16);
+  // Won't fit above or below: pin so the card's BOTTOM sits just inside the
+  // viewport, so its controls are always reachable (even if it overlaps the target).
+  else top = Math.max(8, vh - cardH - 16);
 
   const left = clamp(rect.left + rect.width / 2 - CARD_W / 2, 8, vw - CARD_W - 8);
   return { top, left };
