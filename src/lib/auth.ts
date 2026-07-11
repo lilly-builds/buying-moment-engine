@@ -12,6 +12,24 @@ export function parseAllowlist(raw: string | null | undefined): string[] {
     .filter((e) => e.length > 0);
 }
 
+/**
+ * True when `entry` is a domain rule — an allowlist entry of the form `@domain`
+ * that admits every address at that domain. It exists for the case where the
+ * exact addresses we need to allow are unprovable format-guesses on a catch-all
+ * domain (a wrong guess is silently accepted, no bounce), so pairing exact-match
+ * auth with a guessed address risks silently locking a legitimate person out. A
+ * domain rule admits anyone at that domain regardless of the exact local-part
+ * spelling — the specific domain to trust is configured via env, never hardcoded.
+ *
+ * The guard is deliberately strict so a domain rule can never become an
+ * accidental "allow everyone": the entry must start with `@`, be longer than the
+ * bare `@`, AND contain a dot after it. A stray `@` or `@ ` therefore matches
+ * NOTHING (handled by the exact-match branch, which no email equals).
+ */
+function isDomainRule(entry: string): boolean {
+  return entry.startsWith("@") && entry.length > 1 && entry.includes(".", 1);
+}
+
 export function isAllowlisted(
   email: string | null | undefined,
   allowlist: string[],
@@ -19,7 +37,15 @@ export function isAllowlisted(
   if (!email) return false;
   const normalized = email.trim().toLowerCase();
   if (normalized.length === 0) return false;
-  return allowlist.includes(normalized);
+  return allowlist.some((entry) =>
+    isDomainRule(entry)
+      ? // Anchor on the full `@domain` so `@example.com` admits
+        // `first.last@example.com` but NOT `user@example.com.evil.com`.
+        normalized.endsWith(entry)
+      : // A non-`@` entry (and a bare `@`, which is not a domain rule) stays an
+        // exact match — unchanged behavior.
+        normalized === entry,
+  );
 }
 
 /**
