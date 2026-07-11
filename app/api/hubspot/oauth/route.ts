@@ -26,7 +26,14 @@ function backToConnections(
   request: NextRequest,
   status: "connected" | { error: string },
 ): NextResponse {
-  const url = new URL("/integrations", request.nextUrl.origin);
+  // Use the configured callback origin as the canonical app host. In production,
+  // Vercel can serve the same route from multiple aliases, and HubSpot may briefly
+  // bounce through its own post-install pages. The browser should always land back
+  // on the public app URL after the token is saved.
+  const origin = process.env.HUBSPOT_REDIRECT_URI
+    ? new URL(process.env.HUBSPOT_REDIRECT_URI).origin
+    : request.nextUrl.origin;
+  const url = new URL("/integrations", origin);
   if (status === "connected") url.searchParams.set("connected", "hubspot");
   else url.searchParams.set("error", status.error);
   return NextResponse.redirect(url);
@@ -55,6 +62,16 @@ export async function GET(request: NextRequest) {
     encryptionKey,
     signingKey: deriveSigningKey(encryptionKey),
   });
+
+  if (!result.ok) {
+    console.warn("HubSpot OAuth callback returned a failed result", {
+      status: result.status,
+      error: result.error,
+      hasCode: Boolean(params.get("code")),
+      hasState: Boolean(params.get("state")),
+      hasStateCookie: Boolean(request.cookies.get(STATE_COOKIE)?.value),
+    });
+  }
 
   const res = result.ok
     ? backToConnections(request, "connected")

@@ -81,8 +81,14 @@ export async function handleHubSpotCallback(
       now: args.now,
     });
     return { ok: true, portalId, scopes };
-  } catch {
-    // Never surface the underlying error — it can echo tokens/secrets (D9).
+  } catch (error) {
+    // Never surface the underlying error to the browser — it can echo tokens/secrets
+    // (D9). Drizzle can include bound params in Error.message, so do not log the
+    // message here; the coarse class is enough to distinguish expected Error
+    // failures from unexpected throwables.
+    console.error("HubSpot OAuth callback failed during connect completion", {
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
     return { ok: false, status: 502, error: "HubSpot connect failed" };
   }
 }
