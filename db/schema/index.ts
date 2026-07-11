@@ -17,3 +17,4 @@ export * from "./crm";
 export * from "./roi";
 export * from "./integrations";
 export * from "./discovery";
+export * from "./workspaces";
