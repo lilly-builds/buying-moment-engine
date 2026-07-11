@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { isAllowlisted, isPublicPath, parseAllowlist } from "@/src/lib/auth";
+import {
+  isAllowlisted,
+  isPublicPath,
+  isTenantAppPath,
+  isTenantWorkspaceCookieValue,
+  parseAllowlist,
+} from "@/src/lib/auth";
 
 /**
  * Session refresh + route gate (R18), called from the root `proxy.ts`.
@@ -68,7 +74,17 @@ export async function updateSession(
   const authorized = isAllowlisted(user?.email, allowlist);
 
   if (!authorized && !isPublic(request.nextUrl.pathname)) {
-    return redirectToLogin(request);
+    // Adapt-It self-serve: a tenant's `active_workspace` cookie (set at the end
+    // of /adapt onboarding) grants access to the tenant-app route trees ONLY —
+    // never to /practice or anything else — and only when its value is a real
+    // tenant slug, not "default"/"eliseai" (see isTenantWorkspaceCookieValue).
+    // This is the ONLY branch that gets this allowance: the fail-closed branch
+    // above (Supabase Auth env missing) stays strict, isPublic-only.
+    const wsCookie = request.cookies.get("active_workspace")?.value;
+    const tenantAllowed =
+      isTenantAppPath(request.nextUrl.pathname) &&
+      isTenantWorkspaceCookieValue(wsCookie);
+    if (!tenantAllowed) return redirectToLogin(request);
   }
 
   return response;

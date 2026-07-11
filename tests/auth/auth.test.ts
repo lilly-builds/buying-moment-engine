@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   isAllowlisted,
   isPublicPath,
+  isTenantAppPath,
+  isTenantWorkspaceCookieValue,
   parseAllowlist,
   requireSession,
 } from "@/src/lib/auth";
@@ -17,6 +19,15 @@ describe("isPublicPath (R18)", () => {
       // allowlist itself — it must be reachable without a session because it is
       // how you get one. Public in prod too, where real logins happen.
       expect(isPublicPath("/auth/callback", env)).toBe(true);
+    }
+  });
+
+  it("opens the /welcome marketing front door in every environment", () => {
+    // The SaaS shell's public landing (Adapt-It P5). It reads no database data, so
+    // it is safe to serve to an anonymous visitor in production too — unlike the
+    // dev-only visual surfaces below. Its CTAs still route through the gate.
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/welcome", env)).toBe(true);
     }
   });
 
@@ -55,6 +66,46 @@ describe("isPublicPath (R18)", () => {
     expect(isPublicPath("/loginsomething", PROD)).toBe(false);
     expect(isPublicPath("/auth/callbackevil", PROD)).toBe(false);
     expect(isPublicPath("/styleguide-secrets", DEV)).toBe(false);
+  });
+
+  it("opens /adapt and /api/adapt (onboarding + generate/finalize) in every environment", () => {
+    // Onboarding precedes any session, so it — and the routes it calls to spend
+    // Claude generating a workspace — must be reachable pre-auth.
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/adapt", env)).toBe(true);
+      expect(isPublicPath("/adapt/anything", env)).toBe(true);
+      expect(isPublicPath("/api/adapt", env)).toBe(true);
+      expect(isPublicPath("/api/adapt/generate", env)).toBe(true);
+    }
+  });
+});
+
+describe("isTenantAppPath", () => {
+  it("opens exactly the tenant-app route trees", () => {
+    expect(isTenantAppPath("/")).toBe(true);
+    expect(isTenantAppPath("/prospect/x")).toBe(true);
+    expect(isTenantAppPath("/customize")).toBe(true);
+    expect(isTenantAppPath("/scoreboard")).toBe(true);
+    expect(isTenantAppPath("/api/workspace/update")).toBe(true);
+  });
+
+  it("excludes /practice (real data) and unrelated routes", () => {
+    expect(isTenantAppPath("/practice/x")).toBe(false);
+    expect(isTenantAppPath("/integrations")).toBe(false);
+    expect(isTenantAppPath("/random")).toBe(false);
+  });
+});
+
+describe("isTenantWorkspaceCookieValue", () => {
+  it("accepts a genuine tenant slug", () => {
+    expect(isTenantWorkspaceCookieValue("acme-corp")).toBe(true);
+  });
+
+  it("rejects missing/empty values and the two default-workspace slugs", () => {
+    expect(isTenantWorkspaceCookieValue(undefined)).toBe(false);
+    expect(isTenantWorkspaceCookieValue("")).toBe(false);
+    expect(isTenantWorkspaceCookieValue("default")).toBe(false);
+    expect(isTenantWorkspaceCookieValue("eliseai")).toBe(false);
   });
 });
 
