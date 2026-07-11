@@ -1,5 +1,5 @@
 import { cn } from "@/design/lib/cn";
-import { signalGradients, type SignalKind } from "@/design/tokens";
+import { type SignalKind } from "@/design/tokens";
 
 /**
  * SignalPill (U2 / R15) — one pill per fired signal, colour-coded by kind.
@@ -9,8 +9,8 @@ import { signalGradients, type SignalKind } from "@/design/tokens";
  *
  * Shape is EliseAI's `.tag`: fully rounded, `px-5 py-2`, 6px inner gap, Inter.
  * The FILL is ours — a saturated gradient with white text, following their grammar
- * (94deg, saturated, never a pastel wash). See `signalGradients` in tokens.ts for
- * the honest provenance note.
+ * (94deg, saturated, never a pastel wash). See the gradient tokens in tokens.ts
+ * for the honest provenance note.
  *
  * Showing the signals *is* showing the count: three pills means three signals
  * firing (D8). A separate "3 signals" badge would state twice what the row already
@@ -21,6 +21,19 @@ const LABELS: Record<SignalKind, string> = {
   "staffing-spike": "Staffing spike",
   "phone-complaints": "Phone complaints",
   "growth-events": "Growth event",
+};
+
+/**
+ * The `.gradient-signal-<kind>` class per kind (defined in app/globals.css). A
+ * static lookup, not `gradient-signal-${kind}` interpolation, because Tailwind
+ * only emits classes it can literally read in the source — and because the class
+ * reads the `--gradient-signal-<kind>` CSS var, so a per-tenant BrandProvider
+ * override re-skins the pill with no change here.
+ */
+const KIND_GRADIENT: Record<SignalKind, string> = {
+  "staffing-spike": "gradient-signal-staffing-spike",
+  "phone-complaints": "gradient-signal-phone-complaints",
+  "growth-events": "gradient-signal-growth-events",
 };
 
 export type SignalPillSize = "sm" | "md";
@@ -53,11 +66,9 @@ export function SignalPill({ kind, size = "sm", className }: SignalPillProps) {
         // feed); `md` matches `Tag` where the signal IS the subject (the brief).
         "inline-flex w-fit items-center gap-1.5 rounded-pill font-sans leading-none text-white",
         SIZES[size],
+        KIND_GRADIENT[kind],
         className,
       )}
-      // Inline, not a Tailwind class: the gradient is a data-driven token, and
-      // Tailwind only emits classes it can literally read in the source.
-      style={{ backgroundImage: signalGradients[kind] }}
     >
       {LABELS[kind]}
     </span>

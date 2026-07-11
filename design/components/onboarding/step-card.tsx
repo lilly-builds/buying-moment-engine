@@ -1,4 +1,3 @@
-import { gradients } from "@/design/tokens";
 import { cn } from "@/design/lib/cn";
 import type { StepIconKey } from "@/src/onboarding/steps";
 import { StepIcon } from "./step-icon";
@@ -22,7 +21,7 @@ export interface StepCardContent {
  *
  * A faithful build of `onboarding-flow-steps-ui-design.png` + the design's
  * "guided-step card — UI direction", top → bottom:
- *   1. gradient ORB (purple→health-blue, `gradients.orb`) holding a STEP icon,
+ *   1. gradient ORB (purple→health-blue, the `.gradient-orb` class) holding a STEP icon,
  *   2. one-instruction line, TWO weights — the single key word bold + dark ink,
  *      the rest muted slate (the reference's "…just a **reminder** that…"),
  *   3. a ✦ context chip — an outlined health-blue pill.
@@ -102,10 +101,7 @@ export function StepCard({
       )}
     >
       {/* 1 · the gradient orb, holding this step's icon */}
-      <span
-        className="flex h-14 w-14 items-center justify-center rounded-pill text-white shadow-soft"
-        style={{ backgroundImage: gradients.orb }}
-      >
+      <span className="gradient-orb flex h-14 w-14 items-center justify-center rounded-pill text-white shadow-soft">
         <StepIcon icon={step.icon} />
       </span>
 

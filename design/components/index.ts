@@ -69,6 +69,12 @@ export type {
 export { TopNav } from "./top-nav";
 export type { TopNavProps, TopNavTone } from "./top-nav";
 
+export { LogoMark } from "./logo-mark";
+export type { LogoMarkProps } from "./logo-mark";
+
+export { Reveal } from "./reveal";
+export type { RevealProps } from "./reveal";
+
 export { SegmentedControl } from "./segmented-control";
 export type { SegmentedControlProps, SegmentedOption } from "./segmented-control";
 

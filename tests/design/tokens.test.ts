@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { themeVars } from "@/design/tokens";
+import { gradientTokens, themeVars } from "@/design/tokens";
+
+/**
+ * The full set of shared design tokens mirrored into `@theme`. `gradientTokens`
+ * (the four hero/orb/brand/signal gradients promoted in Adapt-It P2) lives in a
+ * separate object from `themeVars` so the styleguide's colour-swatch iteration
+ * over `themeVars` stays hex-only, but both are declared in the SAME `@theme`
+ * block and must hold parity, so the checks below run over the union.
+ */
+const SHARED_TOKENS = { ...themeVars, ...gradientTokens } as const;
 
 /**
  * U2 / R15 — the design tokens are only real if Tailwind actually resolves them.
@@ -56,20 +65,20 @@ const DECLARED = declaredVars(THEME);
 
 describe("design tokens ↔ Tailwind @theme parity", () => {
   it("declares every token from design/tokens.ts in app/globals.css", () => {
-    const missing = Object.keys(themeVars).filter((v) => !DECLARED.has(v));
+    const missing = Object.keys(SHARED_TOKENS).filter((v) => !DECLARED.has(v));
     expect(missing, `tokens.ts declares these, globals.css does not: ${missing.join(", ")}`).toEqual([]);
   });
 
   it("declares no design token in app/globals.css that tokens.ts does not define", () => {
     const orphans = [...DECLARED.keys()].filter(
-      (v) => !(v in themeVars),
+      (v) => !(v in SHARED_TOKENS),
     );
     expect(orphans, `globals.css declares these, tokens.ts does not: ${orphans.join(", ")}`).toEqual([]);
   });
 
   it("agrees on every token value", () => {
     const mismatches: string[] = [];
-    for (const [name, value] of Object.entries(themeVars)) {
+    for (const [name, value] of Object.entries(SHARED_TOKENS)) {
       const css = DECLARED.get(name);
       // Normalize whitespace so multi-value shadows compare cleanly.
       const want = value.trim().replace(/\s+/g, " ");

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { gradients } from "@/design/tokens";
 import { cn } from "@/design/lib/cn";
 import { StepIcon } from "./step-icon";
 import type { StepIconKey } from "@/src/onboarding/steps";
@@ -84,10 +83,7 @@ export function ConnectionRow({
       className="flex w-full flex-col gap-5 rounded-media bg-surface px-8 py-7 shadow-card"
     >
       <div className="flex items-start justify-between gap-4">
-        <span
-          className="flex size-14 shrink-0 items-center justify-center rounded-pill text-white shadow-soft"
-          style={{ backgroundImage: gradients.orb }}
-        >
+        <span className="gradient-orb flex size-14 shrink-0 items-center justify-center rounded-pill text-white shadow-soft">
           <StepIcon icon={icon} />
         </span>
         <StatusPill status={status} />

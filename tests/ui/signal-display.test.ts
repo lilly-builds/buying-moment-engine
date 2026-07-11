@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { signalGradients } from "@/design/tokens";
+import { gradientTokens } from "@/design/tokens";
 import { DETECTOR_KINDS } from "@/src/ingest/validate";
 import { PACK_VERTICALS } from "@/src/packs";
 import {
@@ -14,20 +14,20 @@ describe("DB enum -> design kit vocabulary", () => {
     for (const kind of ["staffing_spike", "phone_complaints", "growth_events"] as const) {
       const pill = toSignalKind(kind);
       expect(pill).not.toBeNull();
-      // The real assertion: the mapped value indexes a REAL gradient. A kind that maps
-      // to a string with no gradient renders `backgroundImage: undefined` — a white
-      // pill on a white card.
-      expect(signalGradients[pill!]).toBeTruthy();
+      // The real assertion: the mapped value indexes a REAL gradient token. A kind
+      // that maps to a string with no gradient renders `background: var(--…)` with an
+      // undefined var — a white pill on a white card.
+      expect(gradientTokens[`--gradient-signal-${pill!}`]).toBeTruthy();
     }
   });
 
   it("maps `regulation` to null rather than a gradient-less pill", () => {
     // spec D3: regulation is research-gated and has no detector built, so it has no
-    // colour in the vocabulary. `signalGradients.regulation` does not exist. If this
+    // colour in the vocabulary. `--gradient-signal-regulation` does not exist. If this
     // ever returns a string, SignalPill paints white-on-white and the AE loses the one
     // element that says WHY to call.
     expect(toSignalKind("regulation")).toBeNull();
-    expect(signalGradients).not.toHaveProperty("regulation");
+    expect(gradientTokens).not.toHaveProperty("--gradient-signal-regulation");
   });
 
   it("is total over DetectorKind — a new kind cannot silently fall through", () => {
@@ -37,7 +37,8 @@ describe("DB enum -> design kit vocabulary", () => {
       // a missing Record entry returns and what a `?.` would swallow.
       expect(pill === null || typeof pill === "string").toBe(true);
       expect(pill).not.toBeUndefined();
-      if (pill !== null) expect(signalGradients[pill]).toBeTruthy();
+      if (pill !== null)
+        expect(gradientTokens[`--gradient-signal-${pill}`]).toBeTruthy();
     }
   });
 

@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useBrand } from "@/design/brand-provider";
 import { cn } from "@/design/lib/cn";
 import { PageContainer } from "./layout";
+import { LogoMark } from "./logo-mark";
 
 /**
  * TopNav (U2 / R15) — the persistent chrome every page mounts: U8's feed,
@@ -59,6 +61,14 @@ const NAV_ITEMS: readonly NavItem[] = [
     label: "Integrations",
     isActive: (p) => p.startsWith("/integrations"),
   },
+  {
+    // The Customization Studio (Adapt-It P4). Only editable for a tenant workspace;
+    // the demo default shows a read-only "adapt first" state, so it's safe to always
+    // show. Kept lit on the sample brief route too (a prospect opened from the feed).
+    href: "/customize",
+    label: "Customize",
+    isActive: (p) => p.startsWith("/customize"),
+  },
 ];
 
 export type TopNavTone = "light" | "dark";
@@ -73,7 +83,13 @@ export interface TopNavProps {
 
 export function TopNav({ tone = "light", actions, className }: TopNavProps) {
   const pathname = usePathname();
+  // Wordmark + product pill come from the active workspace, so the whole nav
+  // re-brands per tenant. The default workspace yields "EliseAI" + "GTM Maestro".
+  const { companyName, productName, isDefault } = useBrand();
   const dark = tone === "dark";
+  // In the demo/anonymous state the logo is the brand's front door — the marketing
+  // landing. Once a tenant is adapted, it's home to their feed.
+  const homeHref = isDefault ? "/welcome" : "/";
 
   return (
     <header
@@ -89,14 +105,19 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
         className="flex h-[69px] items-center gap-8"
       >
         <Link
-          href="/"
+          href={homeHref}
+          aria-label={`${companyName} home`}
           className={cn(
             "flex items-center gap-2.5 rounded-control",
             dark ? "text-white" : "text-ink",
           )}
         >
+          {/* The brand mark — a per-tenant gradient tile that re-skins with the theme,
+              beside the wordmark. When the workspace config carries a `logoDataUrl`,
+              render an <img> here instead; the mark + product pill stay. */}
+          <LogoMark size={26} />
           <span className="font-display text-xl font-book tracking-brand">
-            EliseAI
+            {companyName}
           </span>
           <span
             className={cn(
@@ -104,7 +125,7 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
               dark ? "bg-white/15 text-white" : "bg-surface-chip text-ink-strong",
             )}
           >
-            GTM Maestro
+            {productName}
           </span>
         </Link>
 

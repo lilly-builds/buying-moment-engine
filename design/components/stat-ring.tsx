@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { cn } from "@/design/lib/cn";
-import { themeVars } from "@/design/tokens";
 
 /**
  * StatRing (U12) — one headline ratio as a radial gauge. A single value against its
@@ -17,10 +16,14 @@ import { themeVars } from "@/design/tokens";
 
 export type RingAccent = "brand" | "health" | "ink";
 
-const ACCENT_HEX: Record<RingAccent, string> = {
-  brand: themeVars["--color-brand"],
-  health: themeVars["--color-health"],
-  ink: themeVars["--color-ink"],
+/**
+ * The arc reads the accent as a CSS var, not a JS hex, so a per-tenant
+ * BrandProvider override re-skins the ring (brand/health re-tint per workspace).
+ */
+const ACCENT_VAR: Record<RingAccent, string> = {
+  brand: "var(--color-brand)",
+  health: "var(--color-health)",
+  ink: "var(--color-ink)",
 };
 
 export interface StatRingProps {
@@ -59,7 +62,7 @@ export function StatRing({
             cy="50"
             r={R}
             fill="none"
-            stroke={themeVars["--color-surface-subtle"]}
+            stroke="var(--color-surface-subtle)"
             strokeWidth="8"
           />
           <circle
@@ -67,7 +70,7 @@ export function StatRing({
             cy="50"
             r={R}
             fill="none"
-            stroke={ACCENT_HEX[accent]}
+            stroke={ACCENT_VAR[accent]}
             strokeWidth="8"
             strokeLinecap="round"
             strokeDasharray={CIRC}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Input } from "@/design/components";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 
 type Status = "idle" | "sending" | "sent" | "error";
@@ -41,35 +42,44 @@ export function LoginForm() {
 
   if (status === "sent") {
     return (
-      <p className="text-sm text-zinc-600 dark:text-zinc-300">
-        Check your email for a sign-in link.
-      </p>
+      <div className="flex flex-col items-center gap-1 rounded-panel border border-success bg-success-surface px-4 py-4 text-center">
+        <p className="font-sans text-sm font-medium text-success-ink">
+          Check your email
+        </p>
+        <p className="font-sans text-sm text-ink-muted">
+          We sent a sign-in link to {email}.
+        </p>
+      </div>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex w-full max-w-sm flex-col gap-3">
-      <label htmlFor="email" className="text-sm font-medium">
-        Work email
-      </label>
-      <input
-        id="email"
-        type="email"
-        required
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@company.com"
-        className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-      />
-      <button
+    <form onSubmit={onSubmit} className="flex w-full flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="email" className="font-sans text-sm font-medium text-ink">
+          Work email
+        </label>
+        <Input
+          id="email"
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@company.com"
+        />
+      </div>
+      <Button
         type="submit"
+        variant="primary"
+        size="md"
         disabled={status === "sending"}
-        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-white dark:text-zinc-900"
+        className="w-full"
       >
         {status === "sending" ? "Sending…" : "Send sign-in link"}
-      </button>
+      </Button>
       {status === "error" && (
-        <p className="text-sm text-red-600 dark:text-red-400">{message}</p>
+        <p className="font-sans text-sm text-danger">{message}</p>
       )}
     </form>
   );

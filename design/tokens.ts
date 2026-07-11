@@ -183,66 +183,89 @@ export const themeVars = {
 export type ThemeVar = keyof typeof themeVars;
 
 /**
- * Gradients. Values VERIFIED-CSS. Placement now VERIFIED-LIVE: EliseAI paints
- * these as *hero backgrounds*, nowhere else.
+ * Gradient tokens — promoted to CSS custom properties (Adapt-It P2).
  *
- * Caveat worth knowing: the /healthai hero is a raster (`Hero-Block.png`), not
- * a CSS gradient. `health-hero` below is our CSS approximation of it, built
- * from the confirmed health-blue ramp — it is INFERRED, and the one token most
- * worth eyeballing side-by-side. Kept out of `@theme` because Tailwind v4's
- * `--background-image-*` namespace would generate utilities we don't want to
- * encourage; import these explicitly where a hero needs one.
+ * These six gradients used to be read as JS strings straight out of the grouped
+ * `gradients` / per-signal objects, which meant they BYPASSED the theme:
+ * a per-tenant CSS-variable override could re-skin ~90% of the surface but never
+ * reach a gradient. They now live as `--gradient-*` custom properties, mirrored
+ * VERBATIM into the `@theme` block in `app/globals.css` — the same
+ * source-of-truth contract as `themeVars`, covered by the same parity test
+ * (`tests/design/tokens.test.ts` checks `{ ...themeVars, ...gradientTokens }`).
+ *
+ * A component reads one via `var(--gradient-hero)` — a `.gradient-*` class in
+ * globals.css, or an inline style — so the runtime override in `design/brand.ts`
+ * re-skins every gradient from ONE place. globals.css declares a `.gradient-*`
+ * rule per token so Tailwind always emits the var to `:root` (gradients have no
+ * Tailwind utility namespace, and `var()` in JS is invisible to its scanner).
+ *
+ * Values are the CURRENT EliseAI values, unchanged. Provenance:
+ *   hero  — INFERRED CSS stand-in for the /healthai raster (`Hero-Block.png`).
+ *   brand — VERIFIED-CSS.
+ *   orb   — DERIVED (U17 step orb): a lavender highlight (brand-400 #ad88fc)
+ *           melts through brand-purple (#7638fa) into health-blue (#146ef4).
+ *   signal-* — DERIVED (D3). EliseAI has no signal taxonomy, so these follow only
+ *           the STRUCTURE of the real `brand` gradient: one 94deg angle, two
+ *           stops OFFSET at 30%/73% (not 0%/100%, which spreads the ramp across a
+ *           small pill so the eye reads one flat fill) with real lightness travel.
+ *           staffing = purple, phone = blue, growth = deep indigo. Every stop is a
+ *           verified EliseAI token; only the pairing is ours.
+ */
+export const gradientTokens = {
+  "--gradient-hero":
+    "linear-gradient(180deg, #4a86e8 0%, #6f9fee 55%, #c9d8f5 100%)",
+  // The CALM working surface (P5 surface differentiation). The full `--gradient-hero`
+  // is reserved for arrival/focus moments (landing, onboarding, the brief, login); the
+  // sustained working screens (feed, scoreboard, customize, integrations) wear this
+  // instead, so five screens no longer read as the identical full-bleed blue. Same
+  // top stop as the hero (a dark-enough blue keeps the white dark-tone nav legible),
+  // then it settles into a contained blue rather than the hero's dramatic fade to
+  // near-white — calmer, and white cards keep contrast the whole way down. Re-skinned
+  // per tenant by `brandVars` exactly like the hero.
+  "--gradient-hero-calm":
+    "linear-gradient(180deg, #4a86e8 0%, #6f9fee 60%, #93b7f0 100%)",
+  "--gradient-brand": "linear-gradient(94deg, #a093fd, #83c0ef 80%, #1a87f0)",
+  "--gradient-orb":
+    "radial-gradient(circle at 32% 28%, #ad88fc, #7638fa 46%, #146ef4 100%)",
+  "--gradient-signal-staffing-spike":
+    "linear-gradient(94deg, #7638fa 30%, #8c6cff 73%)",
+  "--gradient-signal-phone-complaints":
+    "linear-gradient(94deg, #0053ff 30%, #1a87f0 73%)",
+  "--gradient-signal-growth-events":
+    "linear-gradient(94deg, #350da6 30%, #7f4ae5 73%)",
+} as const;
+
+export type GradientToken = keyof typeof gradientTokens;
+
+/**
+ * The legacy grouped view. `brand` / `healthHero` / `orb` REFERENCE the promoted
+ * `gradientTokens` (one source of truth, cannot drift); `brandSoft` and `wash`
+ * stay plain values — they are never re-skinned, so they were not promoted.
+ * Kept because `src/workspace/default.ts` derives the default hero stops from
+ * the promoted hero token. Prefer `var(--gradient-*)` in components.
  */
 export const gradients = {
-  brand: "linear-gradient(94deg, #a093fd, #83c0ef 80%, #1a87f0)", // VERIFIED-CSS
+  brand: gradientTokens["--gradient-brand"],
   brandSoft: "linear-gradient(75deg, #c1b8ff 30%, #649dfb 73%)", // VERIFIED-CSS
   wash: "linear-gradient(146deg, #f2f1ff99, #e8f2ff99)", // VERIFIED-CSS (hero wash)
-  healthHero: "linear-gradient(180deg, #4a86e8 0%, #6f9fee 55%, #c9d8f5 100%)", // INFERRED
-  // The onboarding step-card orb (U17). DERIVED — the reference card
-  // (`onboarding-flow-steps-ui-design.png`) shows a soft purple→blue sphere lit
-  // from the top-left. Built ONLY from verified brand tokens: a lavender highlight
-  // (brand-400 #ad88fc) melts through brand-purple (#7638fa, the action colour)
-  // into health-blue (#146ef4, the healthcare surface) — the exact purple→blue
-  // travel the design direction calls for, with real lightness change so it reads
-  // as a lit orb rather than a flat disc.
-  orb: "radial-gradient(circle at 32% 28%, #ad88fc, #7638fa 46%, #146ef4 100%)",
+  healthHero: gradientTokens["--gradient-hero"],
+  orb: gradientTokens["--gradient-orb"],
 } as const;
 
 /**
- * Signal identity — one gradient per built signal kind (D3).
- *
- * DERIVED, not verified: EliseAI has no signal taxonomy, so no source rule exists.
- * These follow the STRUCTURE of their real gradients above, and nothing else:
- *
- *   `brandSoft` = linear-gradient(75deg, #c1b8ff 30%, #649dfb 73%)
- *                 -> ONE angle, TWO stops, and — the part that matters on a small
- *                    element — the stops are OFFSET (30% / 73%), not 0% / 100%.
- *
- * Offset stops are why theirs reads as a gradient and a naive one doesn't. With
- * stops at 0%/100% the ramp is spread across the whole element, so on something as
- * small as a pill every pixel is a slightly different colour and the eye resolves it
- * as one flat fill. Pinning the stops at 30% and 73% holds each end at its true
- * colour and concentrates the whole transition into the middle third, where it is
- * actually visible.
- *
- * So: two stops, one angle (94deg, from their `brand` gradient), offset 30%/73% (from
- * `brandSoft`). No three-stop multi-colour ramps — that is not a move EliseAI makes.
- * Every stop is a verified EliseAI token; only the pairing is ours.
- *
- * Each pair also needs real LIGHTNESS travel. Two adjacent shades (#146ef4 ->
- * #0053ff) read as a flat fill no matter where the stops sit.
- *
- *   staffing = purple           (purple-5   -> purple-btn-primary)
- *   phone    = blue             (blue-5     -> #1a87f0, a stop from `brand`)
- *   growth   = deep indigo      (deep-blue  -> blue-violet)
+ * The built signal kinds (D3), in the design kit's kebab-case vocabulary. Each
+ * kind's identity gradient is the `--gradient-signal-<kind>` token above; a
+ * component paints it with the `.gradient-signal-<kind>` class or
+ * `var(--gradient-signal-<kind>)`. `regulation` is deliberately absent — it is
+ * research-gated and unbuilt, so it has no colour (see `src/ui/signal-display.ts`).
  */
-export const signalGradients = {
-  "staffing-spike": "linear-gradient(94deg, #7638fa 30%, #8c6cff 73%)",
-  "phone-complaints": "linear-gradient(94deg, #0053ff 30%, #1a87f0 73%)",
-  "growth-events": "linear-gradient(94deg, #350da6 30%, #7f4ae5 73%)",
-} as const;
+export const SIGNAL_KINDS = [
+  "staffing-spike",
+  "phone-complaints",
+  "growth-events",
+] as const;
 
-export type SignalKind = keyof typeof signalGradients;
+export type SignalKind = (typeof SIGNAL_KINDS)[number];
 
 /**
  * Grouped, human-readable view. Values are *referenced* from `themeVars`, never
@@ -338,6 +361,6 @@ export default eliseTokens;
  *     the verified pill system.
  *   - `--color-warn` / `--color-warn-surface` / `--color-success-ink`: no
  *     EliseAI token exists. Chosen for contrast, not pulled.
- *   - `gradients.healthHero`: a CSS stand-in for a raster hero.
+ *   - the hero gradient token: a CSS stand-in for a raster hero.
  *   - Section vertical rhythm (the 4px-base / 8px-step spacing scale).
  */

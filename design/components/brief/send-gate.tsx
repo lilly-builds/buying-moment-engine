@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, ButtonLink } from "@/design/components";
-import { gradients } from "@/design/tokens";
 import { StepIcon } from "@/design/components/onboarding/step-icon";
 import { DEFAULT_TARGET } from "@/src/target/config";
 
@@ -134,10 +133,7 @@ export function SendGate({ ctaLabel, tourId }: { ctaLabel: string; tourId?: stri
             </button>
 
             {/* orb + key icon — ties the gate to the tour's "Ready to send" step */}
-            <span
-              className="flex h-14 w-14 items-center justify-center rounded-pill text-white shadow-soft"
-              style={{ backgroundImage: gradients.orb }}
-            >
+            <span className="gradient-orb flex h-14 w-14 items-center justify-center rounded-pill text-white shadow-soft">
               <StepIcon icon="key" />
             </span>
 

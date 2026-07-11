@@ -134,6 +134,20 @@
   --shadow-card: 0 12px 16px -6px #18181914, 0 4px 6px -4px #18181908;
   --shadow-ring: 0 0 1px #a9a8a6, 0 2px 4px #0000000a;
 
+  /* Gradients — MIRRORED VERBATIM from design/tokens.ts -> `gradientTokens`, and
+     covered by the same parity test. These are the DEFAULT (EliseAI) values; the
+     per-tenant runtime override lives in design/brand.ts + design/brand-provider.tsx
+     and sets these same vars on a wrapper so one override re-skins every gradient.
+     Gradients have no Tailwind utility namespace, so the `.gradient-*` rules in
+     @layer components below force Tailwind to emit these vars to :root. */
+  --gradient-hero: linear-gradient(180deg, #4a86e8 0%, #6f9fee 55%, #c9d8f5 100%);
+  --gradient-hero-calm: linear-gradient(180deg, #4a86e8 0%, #6f9fee 60%, #93b7f0 100%);
+  --gradient-brand: linear-gradient(94deg, #a093fd, #83c0ef 80%, #1a87f0);
+  --gradient-orb: radial-gradient(circle at 32% 28%, #ad88fc, #7638fa 46%, #146ef4 100%);
+  --gradient-signal-staffing-spike: linear-gradient(94deg, #7638fa 30%, #8c6cff 73%);
+  --gradient-signal-phone-complaints: linear-gradient(94deg, #0053ff 30%, #1a87f0 73%);
+  --gradient-signal-growth-events: linear-gradient(94deg, #350da6 30%, #7f4ae5 73%);
+
   /* Motion — the /signals connectors carry a pulse of "signal" from each source
      card into the data store. pathLength is normalised to 100 on the paths, so the
      offset travels one full length regardless of the (stretched) viewBox. */
@@ -229,5 +243,35 @@
   :focus-visible {
     outline: 2px solid var(--color-brand);
     outline-offset: 2px;
+  }
+}
+
+/* Gradient background classes. Declared here (not as @theme utilities) for two
+   reasons: gradients have no Tailwind utility namespace, and referencing each
+   `var(--gradient-*)` in a real rule forces Tailwind to always emit those theme
+   vars to :root — the runtime BrandProvider override sets the same vars on a
+   wrapper, so `background-image: var(--gradient-*)` re-skins per tenant with no
+   change here. See design/tokens.ts `gradientTokens` and design/brand.ts. */
+@layer components {
+  .gradient-hero {
+    background-image: var(--gradient-hero);
+  }
+  .gradient-hero-calm {
+    background-image: var(--gradient-hero-calm);
+  }
+  .gradient-brand {
+    background-image: var(--gradient-brand);
+  }
+  .gradient-orb {
+    background-image: var(--gradient-orb);
+  }
+  .gradient-signal-staffing-spike {
+    background-image: var(--gradient-signal-staffing-spike);
+  }
+  .gradient-signal-phone-complaints {
+    background-image: var(--gradient-signal-phone-complaints);
+  }
+  .gradient-signal-growth-events {
+    background-image: var(--gradient-signal-growth-events);
   }
 }

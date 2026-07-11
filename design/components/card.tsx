@@ -11,11 +11,25 @@ import { cn } from "@/design/lib/cn";
  * tier-2 panel wants and what a plain feed row does not.
  */
 
-export type CardVariant = "flat" | "elevated" | "outlined" | "dark" | "glass";
+export type CardVariant =
+  | "flat"
+  | "raised"
+  | "elevated"
+  | "outlined"
+  | "dark"
+  | "glass";
 export type CardPadding = "none" | "sm" | "md" | "lg";
 
 const VARIANTS: Record<CardVariant, string> = {
   flat: "bg-surface-card",
+  // The flat fill WITH quiet depth (P5 materiality). A `flat` card is edgeless on
+  // purpose so a list of them stacks calmly on white — but the same off-white fill
+  // laid straight on the health-blue hero reads as a flat rectangle with no material.
+  // `raised` keeps the exact flat fill and adds one considered layer — a refined soft
+  // shadow plus a near-invisible ink hairline — so a row floating on colour gains
+  // depth without an edge loud enough to compete in a list. Use it for repeated rows
+  // that sit directly on a gradient surface (the feed); keep `flat` on white.
+  raised: "bg-surface-card shadow-soft ring-1 ring-ink/[0.06]",
   elevated: "bg-surface shadow-card",
   outlined: "bg-surface border border-line-soft",
   // Dark section fill — `--new-dark-purple`. Pair with light-tone children.
