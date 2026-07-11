@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, notLike, or, sql } from "drizzle-orm";
 import type { Database } from "./types";
 import {
   briefs,
@@ -15,6 +15,48 @@ import { isFresh } from "@/src/engine/freshness";
 import type { DetectorKind } from "@/src/ingest/validate";
 import { PACK_VERTICALS, type PackVertical } from "@/src/packs";
 import type { SignalRow } from "@/src/brief/inputs";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seed/demo exclusion (D9 · the ROI-honesty rule)
+//
+// Every SEEDED practice carries a `demo:` geo-key prefix — the enterprise seed and
+// the sandbox seed (`db/seed-demo.ts`, `db/seed-sandbox.ts`) both write `demo:${key}`,
+// and the real discovery pipeline never does. So the prefix cleanly separates
+// fabricated rows from the real cohort and NEVER matches a real practice.
+//
+// This is the SINGLE source of truth for that split. The live `/feed` and
+// `/scoreboard` must reflect ONLY the real pipeline — fabricated seed ROI rendered as
+// real would violate D9. Every real-facing aggregate that reads `practices` filters
+// through `excludeDemoPractices` below; applying it in one place keeps the rule from
+// being copy-pasted and forgotten in one query. The onboarding/styleguide walkthrough
+// reads its OWN in-memory fixtures (`app/styleguide/demo-fixtures.ts`), not these
+// queries, so it keeps showing its illustrative numbers untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The geo-key prefix every seeded/demo practice carries; the real pipeline never uses it. */
+export const DEMO_GEO_KEY_PREFIX = "demo:";
+
+/**
+ * Pure predicate — true iff a geo key marks a seeded/demo practice. Unit-testable
+ * without a DB, and the semantic twin of the `excludeDemoPractices` SQL fragment.
+ */
+export function isDemoGeoKey(geoKey: string | null | undefined): boolean {
+  return typeof geoKey === "string" && geoKey.startsWith(DEMO_GEO_KEY_PREFIX);
+}
+
+/**
+ * Shared WHERE fragment: KEEP real practices, DROP `demo:` ones. Written to also pass a
+ * NULL `geo_key`: `practices.geo_key` is NOT NULL, so an inner-joined practice always
+ * has one and this reduces to plain `NOT LIKE 'demo:%'`; but a LEFT JOIN miss (e.g. an
+ * unattributed `cost_events` infra row with no practice) yields NULL, and that row MUST
+ * still count. So the fragment reads "no practice, or a non-demo practice" and drops
+ * safely into any query that reads `practices`, inner- or left-joined. Combine with an
+ * existing predicate via `and(existing, excludeDemoPractices)`.
+ */
+export const excludeDemoPractices = or(
+  isNull(practices.geoKey),
+  notLike(practices.geoKey, `${DEMO_GEO_KEY_PREFIX}%`),
+);
 
 /**
  * Derived read helpers. Signal count is DERIVED — distinct fired signal kinds,
@@ -128,12 +170,16 @@ export async function roiEventRows(db: Database): Promise<RoiEventRow[]> {
     .from(roiEvents)
     .innerJoin(practices, eq(practices.id, roiEvents.practiceId))
     .where(
-      inArray(roiEvents.eventType, [
-        "lead_pushed",
-        "meeting_booked",
-        "deal_won",
-        "time_saved_estimate",
-      ]),
+      and(
+        inArray(roiEvents.eventType, [
+          "lead_pushed",
+          "meeting_booked",
+          "deal_won",
+          "time_saved_estimate",
+        ]),
+        // Real-facing: seeded funnel rows never count toward the live scoreboard (D9).
+        excludeDemoPractices,
+      ),
     );
 }
 
@@ -152,6 +198,8 @@ export async function costByVertical(db: Database): Promise<CostByVerticalRow[]>
     })
     .from(costEvents)
     .leftJoin(practices, eq(practices.id, costEvents.practiceId))
+    // Drop seeded practices' spend; KEEP unattributed infra spend (null practice).
+    .where(excludeDemoPractices)
     .groupBy(practices.vertical);
   return rows.map((row) => ({ vertical: row.vertical, costUsd: Number(row.total) }));
 }
@@ -171,7 +219,8 @@ export async function feedbackRows(db: Database): Promise<FeedbackRow[]> {
       reason: feedback.reason,
     })
     .from(feedback)
-    .innerJoin(practices, eq(practices.id, feedback.practiceId));
+    .innerJoin(practices, eq(practices.id, feedback.practiceId))
+    .where(excludeDemoPractices);
 }
 
 /** A deal's cycle time (`crm_links.cycle_time_days`), tagged with the practice's vertical. */
@@ -187,7 +236,8 @@ export async function cycleRows(db: Database): Promise<CycleRow[]> {
       cycle: crmLinks.cycleTimeDays,
     })
     .from(crmLinks)
-    .innerJoin(practices, eq(practices.id, crmLinks.practiceId));
+    .innerJoin(practices, eq(practices.id, crmLinks.practiceId))
+    .where(excludeDemoPractices);
   return rows.map((row) => ({
     vertical: row.vertical,
     cycleTimeDays: numericToNumber(row.cycle),
@@ -201,7 +251,13 @@ export interface PracticeKindRow {
 }
 
 export async function practiceSignalKinds(db: Database): Promise<PracticeKindRow[]> {
-  return db.select({ practiceId: signals.practiceId, kind: signals.kind }).from(signals);
+  // Joined to `practices` solely to apply the demo exclusion: seeded practices' signal
+  // kinds must not feed the scoreboard's "which signals convert" attribution (D9).
+  return db
+    .select({ practiceId: signals.practiceId, kind: signals.kind })
+    .from(signals)
+    .innerJoin(practices, eq(practices.id, signals.practiceId))
+    .where(excludeDemoPractices);
 }
 
 /** Touch count per stored sequence (one brief's outreach), tagged with the vertical. */
@@ -221,6 +277,7 @@ export async function sequenceTouchRows(db: Database): Promise<SequenceTouchRow[
     .from(sequences)
     .innerJoin(briefs, eq(briefs.id, sequences.briefId))
     .innerJoin(practices, eq(practices.id, briefs.practiceId))
+    .where(excludeDemoPractices)
     .groupBy(practices.vertical, sequences.briefId);
   return rows.map((row) => ({
     vertical: row.vertical,
@@ -316,7 +373,9 @@ export async function feedPractices(
     // INNER, not LEFT: a practice with no signal row cannot be at a buying moment,
     // so it should never enter the grouping in the first place (exclusion 2).
     .innerJoin(signals, eq(signals.practiceId, practices.id))
-    .where(ne(practices.vertical, "unclassified"))
+    // `unclassified` is exclusion #1 (below); the demo filter is the integrity guard —
+    // the live push feed shows ONLY the real pipeline, never seeded practices (D9).
+    .where(and(ne(practices.vertical, "unclassified"), excludeDemoPractices))
     // Stable order in, stable order out — two runs over the same rows rank alike.
     .orderBy(asc(practices.id), asc(signals.kind), asc(signals.detectedAt));
 
