@@ -1,0 +1,65 @@
+{
+  "_comment": "Target list for the champagne outbound channel. Copy this to targets.json and replace with REAL prospects before you run for real. Every row is a company you believe is at a buying moment for what you sell, with the PUBLIC source that proves it. These example rows use fictional companies on purpose, so nothing false about a real business is ever staged. signalPlain is a plain-English one-liner that drops straight into the email. sourceLabel/sourceUrl are the receipt. firstName/title/email are the person you'd reach.",
+  "targets": [
+    {
+      "company": "Northwind Logistics",
+      "firstName": "Dana",
+      "title": "VP of Operations",
+      "email": "dana@example-northwind.test",
+      "signalLabel": "VENDOR SUNSET",
+      "signalPlain": "Acme is sunsetting its TMS API at the end of March and you're already hiring two engineers for the migration",
+      "sourceLabel": "Acme end-of-life notice + 2 migration job posts",
+      "sourceUrl": "acme.com/eol-2026"
+    },
+    {
+      "company": "Sunbelt Dental Group",
+      "firstName": "Marcus",
+      "title": "Operations Director",
+      "email": "marcus@example-sunbelt.test",
+      "signalLabel": "OPENING #4",
+      "signalPlain": "Sunbelt is opening a fourth location in June and posted six new front-desk and hygienist roles this month",
+      "sourceLabel": "Location announcement + 6 job posts",
+      "sourceUrl": "facebook.com/sunbeltdental"
+    },
+    {
+      "company": "Ridgeline HR",
+      "firstName": "Priya",
+      "title": "Head of Revenue Operations",
+      "email": "priya@example-ridgeline.test",
+      "signalLabel": "NEW DECISION-MAKER",
+      "signalPlain": "you just stepped into a brand-new RevOps role, and the first 90 days are when the tool stack gets decided",
+      "sourceLabel": "New-role announcement",
+      "sourceUrl": "linkedin.com/in/example-priya"
+    },
+    {
+      "company": "Aperture Data",
+      "firstName": "Sam",
+      "title": "VP of Sales",
+      "email": "sam@example-aperture.test",
+      "signalLabel": "NEW VP SALES",
+      "signalPlain": "you just took over sales at Aperture, and new sales leaders rebuild the outbound motion in month one",
+      "sourceLabel": "New-role announcement",
+      "sourceUrl": "linkedin.com/in/example-sam"
+    },
+    {
+      "company": "Harbor & Co Accounting",
+      "firstName": "Lena",
+      "title": "Managing Partner",
+      "email": "lena@example-harbor.test",
+      "signalLabel": "HIRING FAST",
+      "signalPlain": "Harbor posted five new roles this quarter, which is usually when the back office starts creaking",
+      "sourceLabel": "5 new job posts",
+      "sourceUrl": "indeed.com/cmp/example-harbor"
+    },
+    {
+      "company": "Camber Health",
+      "firstName": "Theo",
+      "title": "Founder and CEO",
+      "email": "theo@example-camber.test",
+      "signalLabel": "SWITCHING TOOLS",
+      "signalPlain": "Camber's team page just dropped its old analytics tool and added a data hire, so a switch is underway",
+      "sourceLabel": "Team-page change + new data hire",
+      "sourceUrl": "camber.example/team"
+    }
+  ]
+}

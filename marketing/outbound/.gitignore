@@ -1,0 +1,4 @@
+# Real prospect data and generated queues never go in git (they hold real emails).
+targets.json
+queue.csv
+queue.md

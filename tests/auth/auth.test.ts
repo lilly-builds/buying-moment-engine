@@ -56,6 +56,30 @@ describe("isPublicPath (R18)", () => {
     expect(isPublicPath("/auth/callbackevil", PROD)).toBe(false);
     expect(isPublicPath("/styleguide-secrets", DEV)).toBe(false);
   });
+
+  it("opens the GTM landing pages and their capture routes publicly, in prod too", () => {
+    // These are the product's front door — public by design (see MARKETING_PUBLIC
+    // in src/lib/auth.ts). They must be reachable in production, where real
+    // visitors land, and they read no product data.
+    for (const env of [PROD, DEV]) {
+      expect(isPublicPath("/for", env)).toBe(true);
+      expect(isPublicPath("/for/saas", env)).toBe(true);
+      expect(isPublicPath("/for/outbound", env)).toBe(true);
+      expect(isPublicPath("/for/founders", env)).toBe(true);
+      expect(isPublicPath("/api/waitlist", env)).toBe(true);
+      expect(isPublicPath("/api/track", env)).toBe(true);
+      expect(isPublicPath("/tools/buying-moment-check", env)).toBe(true);
+      expect(isPublicPath("/moments/dental", env)).toBe(true);
+    }
+  });
+
+  it("does not open product routes just because a marketing prefix looks similar", () => {
+    // A lookalike must NOT inherit the marketing exemption.
+    expect(isPublicPath("/format", PROD)).toBe(false);
+    expect(isPublicPath("/forever", PROD)).toBe(false);
+    expect(isPublicPath("/api/waitlistx", PROD)).toBe(false);
+    expect(isPublicPath("/api/trackers", PROD)).toBe(false);
+  });
 });
 
 describe("parseAllowlist / isAllowlisted", () => {

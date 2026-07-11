@@ -49,10 +49,35 @@ export function isAllowlisted(
  * it from this list.
  */
 export function publicPaths(isProduction: boolean): string[] {
-  const paths = ["/login", "/auth/callback"];
+  const paths = ["/login", "/auth/callback", ...MARKETING_PUBLIC_PATHS];
   if (!isProduction) paths.push("/styleguide", "/signals");
   return paths;
 }
+
+/**
+ * The GTM landing experiments and their capture endpoints are PUBLIC by design,
+ * in production too — they are the front door of the product, meant for the whole
+ * internet. This is a deliberate, contained exception to R18 (which otherwise
+ * says the deployed app serves no page to a non-allowlisted visitor):
+ *
+ *   /for/*         the three landing pages (/for/saas | /for/outbound | /for/founders).
+ *                  Static marketing copy only — they read NO lead/contact/signal
+ *                  from the database. The only DB touch is the visitor's own
+ *                  signup/track write below.
+ *   /api/waitlist  public "get my 3 free briefs" capture. Write-only, validated,
+ *                  honeypot-guarded, and it only ever writes the two RLS-locked
+ *                  marketing tables (never product data).
+ *   /api/track     public page-view beacon. Write-only, PII-free.
+ *   /tools/*       the free lead-magnet tool (buying-moment playbook). Static +
+ *                  client-only; reads NO product data. Funnels to /for/*.
+ *   /moments/*     programmatic SEO pages (buying moments by industry). Static
+ *                  marketing content; reads NO product data. Funnels to /for/*.
+ *
+ * Nothing here can read product data, so opening these does not widen R18's real
+ * blast radius (the real-contact feed stays gated). If any of these ever starts
+ * reading product data, drop it from this list.
+ */
+const MARKETING_PUBLIC_PATHS = ["/for", "/tools", "/moments", "/api/waitlist", "/api/track"];
 
 export function isPublicPath(pathname: string, isProduction: boolean): boolean {
   return publicPaths(isProduction).some(
