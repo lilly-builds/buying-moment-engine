@@ -1,4 +1,4 @@
-import { index, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { index, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt } from "./columns";
 
 /**
@@ -49,7 +49,13 @@ export const waitlistSignups = pgTable(
     referrer: text("referrer"),
     createdAt: createdAt(),
   },
-  (t) => [index("waitlist_signups_variant_idx").on(t.variant)],
+  (t) => [
+    index("waitlist_signups_variant_idx").on(t.variant),
+    // One row per email per landing variant. Makes a repeat submit (or a bot
+    // replaying the same email) idempotent instead of a duplicate lead, so the
+    // lead list and the conversion count stay clean.
+    unique("waitlist_signups_email_variant_uq").on(t.email, t.variant),
+  ],
 ).enableRLS();
 
 /**

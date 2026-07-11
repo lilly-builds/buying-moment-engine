@@ -95,19 +95,23 @@ export async function POST(request: NextRequest) {
   const v = parsed.value;
   try {
     const db = getDb();
-    const { id } = await recordWaitlistSignup(db, v);
-    // Best-effort funnel event; never fail the signup if the event write hiccups.
-    try {
-      await recordMarketingEvent(db, {
-        eventType: "signup",
-        variant: v.variant,
-        path: `/for/${v.variant}`,
-        utmSource: v.utmSource,
-        utmMedium: v.utmMedium,
-        utmCampaign: v.utmCampaign,
-      });
-    } catch {
-      // swallow: the lead is already saved, the event is analytics-only
+    const { id, isNew } = await recordWaitlistSignup(db, v);
+    // Only count a conversion the first time this email+variant signs up, so a
+    // repeat submit does not inflate the funnel. Best-effort: never fail the
+    // signup if the event write hiccups.
+    if (isNew) {
+      try {
+        await recordMarketingEvent(db, {
+          eventType: "signup",
+          variant: v.variant,
+          path: `/for/${v.variant}`,
+          utmSource: v.utmSource,
+          utmMedium: v.utmMedium,
+          utmCampaign: v.utmCampaign,
+        });
+      } catch {
+        // swallow: the lead is already saved, the event is analytics-only
+      }
     }
     return NextResponse.json({ ok: true, id });
   } catch (err) {

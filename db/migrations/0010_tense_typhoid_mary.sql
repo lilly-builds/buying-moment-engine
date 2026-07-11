@@ -1,0 +1,1 @@
+ALTER TABLE "waitlist_signups" ADD CONSTRAINT "waitlist_signups_email_variant_uq" UNIQUE("email","variant");

@@ -60,6 +60,17 @@ async function main() {
     console.log("waitlist_signups exists:", after[0].w !== null);
     console.log("marketing_events exists:", after[0].m !== null);
 
+    // 0010: unique (email, variant) on waitlist_signups. Idempotent: add only if
+    // the named constraint is not already present. Table is small/empty at launch,
+    // so ADD CONSTRAINT will not trip over pre-existing duplicates.
+    const uq = await sql`SELECT 1 FROM pg_constraint WHERE conname = 'waitlist_signups_email_variant_uq'`;
+    if (uq.length === 0) {
+      await sql`ALTER TABLE "waitlist_signups" ADD CONSTRAINT "waitlist_signups_email_variant_uq" UNIQUE ("email","variant")`;
+      console.log("added unique constraint waitlist_signups_email_variant_uq");
+    } else {
+      console.log("unique constraint waitlist_signups_email_variant_uq already present");
+    }
+
     if (doVerify) {
       const marker = "verify-delete-me@example.invalid";
       console.log("\n[verify] inserting a test signup + event, reading back, then deleting...");

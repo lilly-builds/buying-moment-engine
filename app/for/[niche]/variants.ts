@@ -602,5 +602,8 @@ export const VARIANTS: Record<VariantKey, VariantConfig> = {
 export const VARIANT_KEYS = Object.keys(VARIANTS) as VariantKey[];
 
 export function isVariantKey(v: string): v is VariantKey {
-  return v in VARIANTS;
+  // Own-property check only: `v in VARIANTS` would also match inherited keys like
+  // "constructor" / "toString". Guarded today by dynamicParams=false, but correct
+  // regardless of how the route is configured later.
+  return Object.prototype.hasOwnProperty.call(VARIANTS, v);
 }

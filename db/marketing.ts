@@ -19,11 +19,16 @@ export interface RecordSignupArgs {
   referrer?: string | null;
 }
 
+/**
+ * Idempotent by (email, variant): a repeat submit or a replayed email does not
+ * create a second lead. `isNew` is false when the row already existed, so the
+ * caller can avoid double-counting a conversion.
+ */
 export async function recordWaitlistSignup(
   db: Database,
   args: RecordSignupArgs,
-): Promise<{ id: string }> {
-  const [row] = await db
+): Promise<{ id: string; isNew: boolean }> {
+  const inserted = await db
     .insert(waitlistSignups)
     .values({
       email: args.email,
@@ -34,8 +39,20 @@ export async function recordWaitlistSignup(
       utmCampaign: args.utmCampaign ?? null,
       referrer: args.referrer ?? null,
     })
+    .onConflictDoNothing({
+      target: [waitlistSignups.email, waitlistSignups.variant],
+    })
     .returning({ id: waitlistSignups.id });
-  return { id: row.id };
+
+  if (inserted[0]) return { id: inserted[0].id, isNew: true };
+
+  // Conflict: the (email, variant) already exists. Return its id, no new lead.
+  const [existing] = await db
+    .select({ id: waitlistSignups.id })
+    .from(waitlistSignups)
+    .where(and(eq(waitlistSignups.email, args.email), eq(waitlistSignups.variant, args.variant)))
+    .limit(1);
+  return { id: existing?.id ?? "", isNew: false };
 }
 
 export interface RecordEventArgs {
