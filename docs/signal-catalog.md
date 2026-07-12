@@ -6,8 +6,10 @@ right now, and how do we know?" Every signal below is a public, defensible reaso
 practice is hitting a buying moment for front-desk and patient-communication tooling.
 
 This is the living map of what the engine detects today, what is built but parked, and where the
-signal layer is going next. It draws a deliberate, honest line between the two, because a
-documented gap is worth more than an overstated capability.
+signal layer is going next. The implementation-level walkthrough lives in
+[`docs/data-signal-system.md`](data-signal-system.md). The catalog draws a deliberate, honest line
+between shipped behavior and planned behavior, because a documented gap is worth more than an
+overstated capability.
 
 ---
 
@@ -36,16 +38,13 @@ it was detected, per the data-layer contract), and its own recon doc under `src/
 |---|--------|------|---------------|----------------------|--------|
 | 1 | **Front-desk staffing spike** | Hiring | Adzuna job-posts ("patient coordinator," "front desk," "call center") | They cannot staff the phones. That is EliseAI's exact wedge. | **Live** |
 | 2 | **Growth events** | Expansion | GDELT news (PE deals, acquisitions, new locations, new provider bios) | New patient volume outstrips the front desk; consolidation drives tooling standardization. | **Live** |
-| 3 | **Phone-complaint reviews** | Voice-of-customer | Google Places / Maps reviews ("can't get through," "on hold forever") | Acute, self-reported phone pain, in the patient's own words. | **Built, dark** |
+| 3 | **Phone-complaint reviews** | Voice-of-customer | Google Places / Maps reviews ("can't get through," "on hold forever") | Acute, self-reported phone pain, in the patient's own words. | **Live** |
 
-**The honest line on signal #3.** The Google Places review reader is fully built and tested, and
-it appears as a named data source in the in-app Data Sources view. It runs **dark** in the live
-pipeline because it is a *lookup*, not a *discoverer*: it needs a billed Google Places API key, a
-name-to-`place_id` resolution step, and a starting list of practices to check. Signals #1 and #2
-both *find* practices from scratch; #3 corroborates phone pain on practices you already have.
-Lighting it up is a credential-and-lookup step, not a rewrite. Until then, the README and the
-feed only claim what actually fires: staffing spikes and growth events discover the leads, and
-the review reader waits behind its key.
+**The honest line on signal #3.** Phone complaints fire in the live demo through the Google Places
+discovery path: the engine enumerates practices by metro/category, classifies review text in memory,
+and persists only the derived phone-complaint signal plus the Maps URL. The standalone Google Places
+review detector also exists as a targeted lookup for known `place_id`s; it is useful for cross-checking
+practices found by Adzuna or GDELT.
 
 Every detected signal carries a **freshness stamp**, because a stale trigger kills the "why now."
 A **signal count** on each practice drives the feed's ranking: three signals firing outrank one,
