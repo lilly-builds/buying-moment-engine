@@ -59,6 +59,19 @@ function readNumericAsText(source: unknown, key: string): string | null {
   return null;
 }
 
+function readVertical(source: unknown): UpsertPracticeArgs["vertical"] | undefined {
+  const value = readString(source, "vertical");
+  if (
+    value === "dermatology" ||
+    value === "womens_health" ||
+    value === "ophthalmology" ||
+    value === "orthopedics"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
 /**
  * Canonical JSON: object keys sorted at EVERY depth, arrays left in order (their
  * order is data). Two payloads that differ only in key order therefore hash
@@ -149,6 +162,7 @@ export async function ingestRawSignal(
       name: data.practiceHint,
       geoKey: data.geoKey ?? "unknown",
       websiteUrl: readString(data.payload, "website"),
+      vertical: readVertical(data.payload),
     });
     const [ev] = await tx
       .insert(evidence)

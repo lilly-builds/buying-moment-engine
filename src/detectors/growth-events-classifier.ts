@@ -44,16 +44,26 @@ const GROWTH_EVENT_PHRASES: GrowthEventPhrase[] = [
   { phrase: "private equity", confidence: 0.85 },
   { phrase: "pe-backed", confidence: 0.8 },
   { phrase: "merges with", confidence: 0.8 },
+  { phrase: "merge to form", confidence: 0.8 },
   { phrase: "merger with", confidence: 0.78 },
   { phrase: "opens second location", confidence: 0.78 },
   { phrase: "opens new location", confidence: 0.75 },
+  { phrase: "opens new facility", confidence: 0.75 },
+  { phrase: "opened a new facility", confidence: 0.75 },
+  { phrase: "opened its new location", confidence: 0.75 },
   { phrase: "announces expansion", confidence: 0.75 },
   { phrase: "backed by", confidence: 0.7 },
   { phrase: "expansion into", confidence: 0.7 },
   { phrase: "expands to", confidence: 0.7 },
+  { phrase: "expands dermatology services", confidence: 0.72 },
+  { phrase: "expands dermatology", confidence: 0.7 },
+  { phrase: "expands services", confidence: 0.7 },
+  { phrase: "expanding services", confidence: 0.7 },
+  { phrase: "expanding access", confidence: 0.7 },
   { phrase: "growth capital", confidence: 0.68 },
   { phrase: "welcomes new provider", confidence: 0.65 },
   { phrase: "adds new provider", confidence: 0.65 },
+  { phrase: "adds dermatology", confidence: 0.65 },
   { phrase: "raises funding", confidence: 0.65 },
 ];
 
@@ -69,6 +79,7 @@ const PRACTICE_TYPE_SUFFIXES = [
   "Physical Therapy",
   "Medical Group",
   "Veterinary Clinic",
+  "Veterinary Network",
   "Women’s Health",
   "Womens Health",
   "Women's Health",
@@ -76,6 +87,8 @@ const PRACTICE_TYPE_SUFFIXES = [
   "Orthopaedics",
   "Ophthalmology",
   "Retina",
+  "Vet",
+  "Health",
   "Dermatology",
   "Dentistry",
   "Dental",
@@ -136,7 +149,11 @@ export function extractPracticeName(title: string): string | undefined {
   let guard = 0;
   while (j >= 0 && guard < 3) {
     const word = tokens[j];
-    if (!isCapitalized(word) || STOPWORDS.has(lowerTokens[j])) break;
+    if (
+      !isCapitalized(word) ||
+      STOPWORDS.has(lowerTokens[j]) ||
+      lowerTokens[j].endsWith("-based")
+    ) break;
     nameWords.unshift(word);
     j--;
     guard++;

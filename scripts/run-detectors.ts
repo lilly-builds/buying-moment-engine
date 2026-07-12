@@ -77,6 +77,7 @@ async function main(): Promise<void> {
   const growthQueries = metros.map((metro) => ({
     query: `(${metro.replace(",", "")} OR ${JSON.stringify(metro)}) (dermatology OR orthopedics OR ophthalmology OR OBGYN OR clinic OR "medical group") (acquired OR acquisition OR "private equity" OR merger OR "opens new location" OR "opens second location" OR expansion OR "adds new provider" OR "welcomes new provider")`,
     maxRecords: 75,
+    recentGkgFiles: 400,
   }));
 
   console.log("── detector run (Thread 17) ───────────────────────────────────");
