@@ -8,7 +8,9 @@ import {
   firedSignalCount,
   isSameEntity,
   nameSimilarity,
+  normalizeGeoKey,
   resolvePractice,
+  stripLocationTail,
   tagVertical,
 } from "@/src/engine/resolver";
 
@@ -26,6 +28,22 @@ describe("name canonicalization + similarity (pure, no DB)", () => {
       "orthopedics",
       "group",
     ]);
+  });
+
+  it("strips location tails before scoring names", () => {
+    expect(stripLocationTail("Sanova Dermatology | Austin - North Austin")).toBe(
+      "Sanova Dermatology",
+    );
+    expect(stripLocationTail("Austin Retina Associates - Central")).toBe(
+      "Austin Retina Associates",
+    );
+    expect(nameSimilarity("Sanova Dermatology", "Sanova Dermatology | Austin - North Austin")).toBe(1);
+    expect(nameSimilarity("Austin Retina Associates", "Austin Retina Associates - Central")).toBe(1);
+  });
+
+  it("normalizes source-specific metro keys onto the discovery metro slug", () => {
+    expect(normalizeGeoKey("Austin, Travis County")).toBe("austin-tx");
+    expect(normalizeGeoKey("Houston, Harris County")).toBe("houston-tx");
   });
 
   it("scores different spellings of the same practice above threshold", () => {
@@ -113,6 +131,19 @@ describe("practice resolution + derived signal count", () => {
     const rows = await t.db.select().from(practices);
     expect(rows).toHaveLength(1);
     expect(await firedSignalCount(t.db, first.practiceId)).toBe(2);
+  });
+
+  it("merges source-specific county geo keys into the canonical metro", async () => {
+    const discovery = await resolvePractice(t.db, {
+      name: "Texas Orthopedics",
+      geoKey: "austin-tx",
+    });
+    const adzuna = await resolvePractice(t.db, {
+      name: "Texas Orthopedics - South Austin",
+      geoKey: "austin-travis-county",
+    });
+    expect(adzuna.merged).toBe(true);
+    expect(adzuna.practiceId).toBe(discovery.practiceId);
   });
 
   it("does NOT merge a similarly-named practice in another geo", async () => {

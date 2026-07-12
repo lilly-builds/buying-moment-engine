@@ -34,6 +34,7 @@ const DEFAULT_QUERIES: GrowthEventsQuery[] = [
     query:
       '(acquires OR "acquired by" OR "private equity" OR merger OR "opens new location" OR "opens second location" OR expansion) (dental OR dermatology OR veterinary OR orthodontics OR "medical group" OR clinic OR "urgent care" OR "family practice")',
     maxRecords: 75,
+    recentGkgFiles: 96,
   },
 ];
 

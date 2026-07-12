@@ -23,6 +23,7 @@ import { getDb } from "@/db/client";
 import { drizzleCostRecorder } from "@/db/cost-recorder";
 import { practicesNeedingBriefs } from "@/db/queries";
 import { anthropicVoiceClient } from "@/src/brief/voice";
+import { crossCheckSignals } from "@/src/engine/cross-check";
 import { runPipelineBatch } from "@/src/engine/pipeline-batch";
 import type { Lead, PipelineDeps } from "@/src/engine/pipeline";
 import { anthropicExtractClient } from "@/src/enrich/extract";
@@ -126,6 +127,7 @@ async function main(): Promise<void> {
     voice: anthropicVoiceClient(anthropicKey),
     // Plan B: bound with the shared meter so its Places spend attributes per practice.
     resolveWebsite: (p) => resolvePracticeWebsite({ meter, practiceId: p.id }, p),
+    crossCheck: (practiceId) => crossCheckSignals({ db, meter, now: new Date() }, practiceId),
     force: args.force,
     // escalation intentionally OFF — cost discipline (see file header).
   };

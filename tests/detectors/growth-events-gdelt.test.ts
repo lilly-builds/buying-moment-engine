@@ -91,3 +91,40 @@ describe("gdeltSearchResponseSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("GDELT growth examples from live fallback", () => {
+  it("normalizes a GDELT-returned dermatology expansion into a feed-eligible growth signal", () => {
+    const candidate = normalizeArticleToCandidate(
+      {
+        url: "https://www.kotatv.com/2026/07/09/sanford-health-expands-dermatology-services-spearfish/",
+        title: "Sanford Health expands dermatology services in Spearfish",
+        description:
+          "Two Sanford Health dermatology providers are now offering weekly outreach services at the Spearfish Clinic, expanding access to skin care in the Northern Hills.",
+        sourcecountry: "United States",
+      },
+      NOW,
+    );
+
+    expect(candidate?.kind).toBe("growth_events");
+    expect(candidate?.practiceHint).toBe("Sanford Health");
+    expect(candidate?.vertical).toBe("dermatology");
+    expect(candidate?.evidence[0].snippet).toContain("expanding access to skin care");
+  });
+
+  it("uses article descriptions when the headline has the growth phrase but not the practice name", () => {
+    const candidate = normalizeArticleToCandidate(
+      {
+        url: "https://hartfordbusiness.com/article/wallingford-based-orthopedic-practice-opens-new-facility-in-southington/",
+        title: "Wallingford-based orthopedic practice opens new facility in Southington",
+        description:
+          "Wallingford-based Comprehensive Orthopaedics & Musculoskeletal Care on Thursday formally opened its new location in Southington.",
+        sourcecountry: "United States",
+      },
+      NOW,
+    );
+
+    expect(candidate?.kind).toBe("growth_events");
+    expect(candidate?.practiceHint).toBe("Comprehensive Orthopaedics");
+    expect(candidate?.vertical).toBe("orthopedics");
+  });
+});

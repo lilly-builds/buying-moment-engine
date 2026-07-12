@@ -22,6 +22,7 @@ import { anthropicExtractClient } from "@/src/enrich/extract";
 import { pdlClient } from "@/src/enrich/pdl-client";
 import { anthropicVoiceClient } from "@/src/brief/voice";
 import { resolvePracticeWebsite } from "@/src/enrich/website";
+import { crossCheckSignals } from "@/src/engine/cross-check";
 
 /**
  * The scheduled engine trigger (Thread 06) — the ONE heartbeat Vercel Cron pings on a schedule
@@ -91,6 +92,9 @@ export async function GET(request: Request): Promise<Response> {
     const pdlKey = process.env.PDL_API_KEY;
     const hasGoogle = Boolean(process.env.GOOGLE_PLACES_API_KEY);
 
+    const crossCheck = (practiceId: string) =>
+      crossCheckSignals({ db, meter, now, logger: console.warn }, practiceId);
+
     // Discovery is the paid Google source. Skip it (don't crash the whole run) when its creds are
     // absent. Its dep assembly is isolated too: a malformed tenant profile (once it becomes
     // DB-editable) must degrade to discovery-off, never sink the free detector sources.
@@ -99,7 +103,15 @@ export async function GET(request: Request): Promise<Response> {
       try {
         const tenant = getTenantProfile(DEFAULT_DISCOVERY_TENANT_ID);
         const metro = selectMetro(tenant, now); // rotation picks this run's single metro (U6)
-        discovery = buildLiveDiscoveryDeps({ db, now, tenant, metro, meter, anthropicApiKey });
+        discovery = buildLiveDiscoveryDeps({
+          db,
+          now,
+          tenant,
+          metro,
+          meter,
+          anthropicApiKey,
+          crossCheck,
+        });
       } catch (err) {
         console.warn("engine.discovery.config_error", {
           error: err instanceof Error ? err.message : String(err),
@@ -120,6 +132,7 @@ export async function GET(request: Request): Promise<Response> {
             resolveWebsite: hasGoogle
               ? (p) => resolvePracticeWebsite({ meter, practiceId: p.id }, p)
               : undefined,
+            crossCheck,
             // agentic escalation OFF — cost discipline (matches scripts/run-pipeline.ts).
           }
         : undefined;

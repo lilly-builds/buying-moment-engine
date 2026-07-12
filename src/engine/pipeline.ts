@@ -25,8 +25,9 @@ import { resolvePractice, type PracticeCandidate } from "./resolver";
  * unit/integration-tests with no hidden globals.
  *
  * IDEMPOTENT + non-destructive (R17/D13): a practice that already has a current brief is
- * SKIPPED, spending nothing; `resolvePractice` never duplicates or clobbers; re-running is
- * a no-op. Error isolation is the BATCH driver's job (U6) — a hard throw here (a dead DB)
+ * SKIPPED for enrichment/brief spend; an optional cross-check may still run first to
+ * stack newly found signals. `resolvePractice` never duplicates or clobbers. Error
+ * isolation is the BATCH driver's job (U6) — a hard throw here (a dead DB)
  * propagates so one practice's failure is logged and skipped without killing the run; the
  * two stages already fold their own soft failures into result objects rather than throwing.
  *
@@ -59,6 +60,8 @@ export interface PipelineDeps {
   voice: VoiceClient;
   /** Plan B: find a website by name when none is on file. Absent → no fallback lookup. */
   resolveWebsite?: WebsiteResolver;
+  /** Optional targeted pass that attaches the other signal kinds before briefing. */
+  crossCheck?: (practiceId: string) => Promise<unknown>;
   /** Regenerate even when a current brief exists (deliberate). Default false → skip. */
   force?: boolean;
   now?: () => Date;
@@ -132,7 +135,14 @@ export async function runLeadToBrief(
   const practiceId = resolved.practiceId;
   const base = { practiceId, practiceName: lead.name, merged: resolved.merged };
 
-  // 2 — IDEMPOTENCY SKIP. A current brief means we are done; spend nothing. An UNREADABLE
+  // 2 — PROACTIVE CROSS-CHECK. Bounded to this already-qualified lead; every
+  // source call is metered inside the injected function. Run before the brief
+  // skip so an already-briefed practice can still gain stacked signal pills.
+  if (deps.crossCheck) {
+    await deps.crossCheck(practiceId);
+  }
+
+  // 3 — IDEMPOTENCY SKIP. A current brief means we are done; spend nothing. An UNREADABLE
   // brief (corrupt JSON) is NOT current — regenerate it (loud), which upsertBrief overwrites.
   if (!deps.force) {
     const existing = await getBrief(deps.db, practiceId);
@@ -144,7 +154,7 @@ export async function runLeadToBrief(
     }
   }
 
-  // 3 — WEBSITE (source-first, search as Plan B). Prefer the site already on file (Plan A
+  // 4 — WEBSITE (source-first, search as Plan B). Prefer the site already on file (Plan A
   // capture) or the one the lead carried; only when there is none do we pay for a search.
   let website = (await getPracticeWebsite(deps.db, practiceId)) ?? lead.websiteUrl ?? null;
   if (!website && deps.resolveWebsite) {
@@ -162,7 +172,7 @@ export async function runLeadToBrief(
     }
   }
 
-  // 4 — ENRICH. Non-fatal: a thin scrape returns status:"failed" without throwing, and the
+  // 5 — ENRICH. Non-fatal: a thin scrape returns status:"failed" without throwing, and the
   // practice keeps whatever it already had. We record it and press on — synthesis self-guards.
   const waterfallDeps: WaterfallDeps = {
     db: deps.db,
@@ -191,7 +201,7 @@ export async function runLeadToBrief(
     reason: enriched.reason,
   };
 
-  // 5 — SYNTHESIZE + PERSIST (one call — synthesizeBrief upserts the brief internally).
+  // 6 — SYNTHESIZE + PERSIST (one call — synthesizeBrief upserts the brief internally).
   const synthDeps: SynthesizeDeps = {
     db: deps.db,
     client: deps.voice,

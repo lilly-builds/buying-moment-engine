@@ -47,7 +47,8 @@ The feed ranks practices by **how many distinct fresh signals are firing** (fres
 so a practice with three live triggers outranks one with a single fading trigger and the AE always
 works the strongest accounts first. The full catalog of what the engine detects today, what is
 built but parked, and where the signal layer is going next lives in
-[`docs/signal-catalog.md`](docs/signal-catalog.md).
+[`docs/signal-catalog.md`](docs/signal-catalog.md). The implementation-level signal-system guide is
+[`docs/data-signal-system.md`](docs/data-signal-system.md).
 
 ---
 
@@ -175,11 +176,11 @@ touches public *business* data. There is zero patient data or PHI, ever.
   ---------------------            --------------------           ----------------
   Adzuna  (staffing spike) ─┐      Claude reads the real     ┐    Cited two-tier brief
   GDELT   (growth events)  ─┼──▶   site + finds the signals  ├─▶  persisted in Postgres
-  Google Places (reviews)* ─┘      PDL fills verified gaps   ┘    Ranked push feed + pull
+  Google Places (reviews)  ─┘      PDL fills verified gaps   ┘    Ranked push feed + pull
                                    (work email, LinkedIn)         ROI scoreboard
 ```
-*\*The Google Places review detector is built and tested but runs dark until a billed key and a
-place lookup list are supplied; see the signal catalog.*
+*Google Places phone complaints are live through the discovery path; the standalone per-place
+review detector is also available for targeted cross-checks when a `place_id` is known.*
 
 - **Stack:** Next.js + TypeScript, Supabase Postgres via Drizzle, Anthropic Claude for research and
   brief synthesis, People Data Labs for verified contact data, HubSpot for CRM and email send on a
@@ -212,7 +213,7 @@ and the docs say so rather than imply more than ships:
 |---|---|---|
 | **Enrichment run** | Runs in the demo, wired into the pipeline, on a **manual** trigger, off the **environment** API keys | An always-on schedule is the Vercel Cron, which is built but dormant until `CRON_SECRET` is set |
 | **Paste-your-own-key** | The `/integrations` key fields store an encrypted, per-tenant key | The manual pipeline reads the environment keys; a pasted key is wired only into the dormant scheduled cron (Anthropic), not the manual run |
-| **Phone-complaint detector** | The Google Places review reader is fully built and tested | Runs dark until a billed Google Places key and a place lookup list are supplied; it is a lookup, not a discoverer |
+| **Phone-complaint signal** | Live through Google Places discovery and stored as `phone_complaints` | The standalone per-place detector is a targeted lookup/cross-check path when a `place_id` is known |
 | **Lead feedback** | The 👍/👎 mark renders; the data model and scoreboard support one-tap reasons and free-text | Live capture of the reasons/free-text and vote persistence is the next step; it is seeded for the demo today |
 | **Send** | The full send path is built and tested (the engine's job is to send outreach and land deals) | Off for this demo only, as a safety gate so no real clinic is contacted; flips on the moment EliseAI connects HubSpot |
 
@@ -254,6 +255,7 @@ connect, needed only for live send and CRM tracking. Everything else runs withou
 
 - [`docs/spec.md`](docs/spec.md) - the full product spec: the user story, the decision log (D1-D15), the signal catalog, and the locked stack
 - [`docs/signal-catalog.md`](docs/signal-catalog.md) - every buying signal: built, parked, and the roadmap
+- [`docs/data-signal-system.md`](docs/data-signal-system.md) - how the live data-signal engine fetches, classifies, resolves, dedupes, meters, and ranks signals
 - [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md) - the exact math and honesty tag behind every scoreboard number
 - [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md) - the one-time admin setup (OAuth + keys)
 - [`docs/hubspot-send-setup.md`](docs/hubspot-send-setup.md) - the HubSpot send configuration

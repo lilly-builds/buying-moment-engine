@@ -36,6 +36,8 @@ export interface SignalCandidate {
   confidence: number; // 0..1
   detectedAt: Date;
   geoKey?: string;
+  /** Optional specialty tag when a source's own text makes it clear. */
+  vertical?: "dermatology" | "womens_health" | "ophthalmology" | "orthopedics";
   /**
    * The practice's own homepage, when the lead SOURCE hands it to us for free
    * (R-W1) — e.g. Google Places Details returns `website` on the call the detector
@@ -98,6 +100,7 @@ export function candidateToRawSignals(
     // so it survives whichever atom promotes the practice first; the ingest rail's
     // ON CONFLICT DO NOTHING then keeps the first-seen value (never clobbers).
     if (candidate.website !== undefined) payload.website = candidate.website;
+    if (candidate.vertical !== undefined) payload.vertical = candidate.vertical;
 
     const raw: RawSignalInput = {
       dedupeHash: candidateDedupeHash(
