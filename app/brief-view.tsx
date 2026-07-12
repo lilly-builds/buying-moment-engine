@@ -719,9 +719,10 @@ export function BriefView({
                 />
               </div>
             </div>
-            {/* The buying-moment spine (D1). text-h3 on a phone so a long headline
-                doesn't tower over the hero; text-h2 is the verified-live desktop size. */}
-            <h1 className="max-w-3xl font-display text-h3 font-book tracking-brand text-balance text-white sm:text-h2">
+            {/* The buying-moment spine (D1). text-h4 on a phone so a long headline
+                sits at a fitting size instead of towering over the hero; text-h2 is
+                the verified-live desktop size. */}
+            <h1 className="max-w-3xl font-display text-h4 font-book tracking-brand text-balance text-white sm:text-h2">
               {brief.headline}
             </h1>
           </div>

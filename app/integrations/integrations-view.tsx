@@ -57,7 +57,9 @@ function ProviderLogo({ src, name }: { src: string; name: string }) {
       alt={`${name} logo`}
       width={80}
       height={80}
-      className="size-20 shrink-0 rounded-2xl object-cover"
+      // 56px on a phone so it doesn't crowd a wrapping name + status pill; the
+      // verified 80px from sm:+.
+      className="size-14 shrink-0 rounded-2xl object-cover sm:size-20"
     />
   );
 }
@@ -138,8 +140,8 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
     <Card variant="elevated" padding="lg">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <span className="flex size-20 shrink-0 items-center justify-center rounded-panel bg-surface-subtle">
-            <HubSpotMark className="size-12" />
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-panel bg-surface-subtle sm:size-20">
+            <HubSpotMark className="size-9 sm:size-12" />
           </span>
 
           <div className="flex flex-col gap-2">
@@ -437,23 +439,27 @@ function EngineKeyCard({
   return (
     <Card variant="outlined" padding="lg">
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-4">
+        {/* Header: logo · name · status on one comfortable row, then the blurb on
+            its own full-width line. On a phone an 80px logo + a wrapping name + a
+            status pill can't share a row without all three squishing — so the logo
+            steps down, the name owns the row (pill parked at its right), and the
+            blurb drops below where it has the whole card width to breathe. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3 sm:gap-4">
             <ProviderLogo src={meta.logoSrc} name={meta.name} />
-            <div className="flex flex-col gap-1.5">
-              <h3 className="font-display text-h5 font-book text-ink">{meta.name}</h3>
-              <p className="max-w-md font-sans text-base text-ink-body">{meta.blurb}</p>
-            </div>
+            <h3 className="min-w-0 flex-1 font-display text-h5 font-book text-ink">
+              {meta.name}
+            </h3>
+            {/* Status pill — same shape/brand font as the "find your key" pill. */}
+            <span
+              className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-pill px-4 py-1.5 font-sans text-xs font-semibold uppercase tracking-eyebrow ${
+                set ? "bg-success text-success-ink" : "bg-brand-50 text-brand"
+              }`}
+            >
+              {set ? "Set" : "Add key"}
+            </span>
           </div>
-          {/* Status pill (top-right, over Save key) — same shape/brand font as the
-              "find your key" pill: brand color, not gray, matched padding. */}
-          <span
-            className={`inline-flex items-center rounded-pill px-4 py-1.5 font-sans text-xs font-semibold uppercase tracking-eyebrow ${
-              set ? "bg-success text-success-ink" : "bg-brand-50 text-brand"
-            }`}
-          >
-            {set ? "Set" : "Add key"}
-          </span>
+          <p className="font-sans text-base text-ink-body">{meta.blurb}</p>
         </div>
 
         <div className="flex flex-col gap-3">
@@ -461,7 +467,7 @@ function EngineKeyCard({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <label
               htmlFor={inputId}
-              className="font-sans text-lg font-semibold uppercase tracking-eyebrow text-ink-strong"
+              className="font-sans text-sm font-semibold uppercase tracking-eyebrow text-ink-strong sm:text-lg"
             >
               {set ? "Replace key" : "Paste key here"}
             </label>

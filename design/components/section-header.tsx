@@ -18,13 +18,14 @@ export type SectionHeaderSize = "display" | "h1" | "h2" | "h3" | "h4" | "h5";
 export type SectionHeaderLevel = "h1" | "h2" | "h3" | "h4";
 
 const SIZES: Record<SectionHeaderSize, string> = {
-  // Hero-scale titles (display/h1/h2) step down one stop on phones so a long
-  // headline wraps to a sane number of lines instead of towering over — or
-  // overflowing — a narrow column. sm:+ is the verified-live desktop scale.
+  // Titles step down one stop on phones so a headline wraps to a sane number of
+  // lines instead of towering over — or overflowing — a narrow column, and so the
+  // many section titles (h3) stop shouting over the content. sm:+ is the
+  // verified-live desktop scale, untouched.
   display: "text-h1 sm:text-display",
   h1: "text-h2 sm:text-h1",
-  h2: "text-h3 sm:text-h2",
-  h3: "text-h3",
+  h2: "text-h4 sm:text-h2",
+  h3: "text-h4 sm:text-h3",
   h4: "text-h4",
   // h5 (24px) — a card-level title, e.g. the brief's "Who to contact". `text-h5`
   // is a real EliseAI token; card subheadings need it, and a plain <h*> with
