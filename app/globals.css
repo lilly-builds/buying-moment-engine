@@ -211,14 +211,15 @@
     font-family: var(--font-sans);
   }
 
-  /* Clearance for the fixed mobile bottom tab bar (design/components/top-nav →
-     BottomTabBar). Only below md, where that bar exists; the tab bar carries its
-     own safe-area inset, and this reserves the scroll room so the last actionable
-     row (View brief, Send, Connect) never sits under it. The page's hero gradient
-     fills the viewport behind the opaque bar, so no seam shows on short pages. */
+  /* Clearance for the fixed mobile bottom tab bar (MobileTabBar). Padding <main>,
+     not <body>: padding <body> would stop the page's hero gradient short of the
+     bar and reveal a seam on short pages. Padding <main> keeps the gradient
+     full-height behind the translucent bar while still reserving the scroll room
+     so the last actionable row (View brief, Send, Connect) never hides under it.
+     Only below md, where the bar exists; the bar carries its own safe-area inset. */
   @media (max-width: 767px) {
-    body {
-      padding-bottom: calc(3.75rem + env(safe-area-inset-bottom));
+    main {
+      padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
     }
   }
 

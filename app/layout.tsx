@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Inter_Tight, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { MobileTabBar } from "@/design/components/mobile-tab-bar";
 import { RevopsTour } from "./onboarding/revops-tour";
 
 /**
@@ -57,6 +58,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         {children}
+        {/* The phone bottom-nav lives at the document root so no page-level
+            containing block can un-fix it (see MobileTabBar). Renders nothing at
+            md:+ and on the auth / immersive screens. */}
+        <MobileTabBar />
         {/* The RevOps "connect your stack" coach-through (Thread 08) — the same
             spotlight tour the AE gets, walking feed → brief → integrations. Mounted
             here so it survives the cross-page walk; renders nothing unless active.

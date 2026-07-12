@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 
 /**
@@ -62,6 +62,30 @@ export function SegmentedControl<T extends string>({
 }: SegmentedControlProps<T>) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
 
+  // The scroll track (filter mode) + whether more options sit off the right edge,
+  // so a phone user gets a fade + chevron that says "this row scrolls" instead of
+  // guessing the visible options are all of them.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [scrollHint, setScrollHint] = useState(false);
+
+  const syncScrollHint = useCallback(() => {
+    const el = trackRef.current;
+    setScrollHint(!!el && el.scrollWidth - el.clientWidth - el.scrollLeft > 4);
+  }, []);
+
+  useEffect(() => {
+    if (fill) return;
+    syncScrollHint();
+    const el = trackRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", syncScrollHint, { passive: true });
+    window.addEventListener("resize", syncScrollHint);
+    return () => {
+      el.removeEventListener("scroll", syncScrollHint);
+      window.removeEventListener("resize", syncScrollHint);
+    };
+  }, [fill, syncScrollHint, options.length]);
+
   // If `value` matches no option (a stale URL param, say), the group would have
   // no tabbable child and drop out of the tab order entirely. Fall back to the
   // first segment as the tab stop — nothing renders as selected, but the control
@@ -100,7 +124,9 @@ export function SegmentedControl<T extends string>({
   }
 
   return (
-    <div
+    <div className={cn("relative w-full sm:w-fit", className)}>
+      <div
+      ref={trackRef}
       role="radiogroup"
       aria-label={label}
       className={cn(
@@ -113,7 +139,6 @@ export function SegmentedControl<T extends string>({
           : // FILTER — take the full width and scroll (the 5-option track is ~630px,
             // wider than any phone); pills keep full size via `shrink-0` and snap.
             "w-full snap-x overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-fit sm:overflow-visible",
-        className,
       )}
     >
       {options.map((option, index) => {
@@ -149,6 +174,32 @@ export function SegmentedControl<T extends string>({
           </button>
         );
       })}
+      </div>
+
+      {/* Scroll affordance (filter mode, phone only): a fade into the track colour
+          plus a chevron at the right edge, shown only while more options sit
+          off-screen to the right. It hides the moment the row is scrolled to the
+          end, and never shows on desktop (the track hugs its content there). */}
+      {!fill && scrollHint ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 flex items-center rounded-r-pill bg-gradient-to-l from-surface-subtle via-surface-subtle/85 to-transparent pl-8 pr-2 sm:hidden"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-ink-muted"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </div>
+      ) : null}
     </div>
   );
 }

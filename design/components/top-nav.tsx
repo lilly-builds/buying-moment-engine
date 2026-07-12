@@ -38,7 +38,7 @@ import {
  * nav shares `PageContainer` so it aligns with the content column beneath it.
  */
 
-interface NavItem {
+export interface NavItem {
   href: string;
   label: string;
   isActive: (pathname: string) => boolean;
@@ -48,7 +48,9 @@ interface NavItem {
   dataTour?: string;
 }
 
-const NAV_ITEMS: readonly NavItem[] = [
+/** Shared by the desktop text links (here) and the mobile bottom bar
+ *  (`MobileTabBar`), so the two navigations can never drift apart. */
+export const NAV_ITEMS: readonly NavItem[] = [
   {
     href: "/",
     label: "Feed",
@@ -92,7 +94,6 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
   const dark = tone === "dark";
 
   return (
-    <>
       <header
         className={cn(
           "sticky top-0 z-50 w-full border-b backdrop-blur-[25px]",
@@ -159,57 +160,5 @@ export function TopNav({ tone = "light", actions, className }: TopNavProps) {
           {actions ? <div className="ml-auto flex items-center gap-3">{actions}</div> : null}
         </PageContainer>
       </header>
-
-      <BottomTabBar pathname={pathname} />
-    </>
-  );
-}
-
-/**
- * BottomTabBar — the phone navigation (< md). Fixed to the bottom in thumb reach,
- * every destination visible at once (no scroll, no clipping), each a full tap
- * target. Opaque-white chrome with a hairline + a soft lift so it reads as a
- * distinct surface over the blue hero and stays legible whatever scrolls behind
- * it; the current tab carries the brand ink. Bottom padding clears the phone's
- * home indicator (`safe-area-inset-bottom`). Hidden at md:+ (desktop uses the top
- * bar). z-40 sits below the onboarding sheet (z-70) and the top nav (z-50).
- */
-function BottomTabBar({ pathname }: { pathname: string }) {
-  return (
-    <nav
-      aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-black/5 bg-surface/90 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_-8px_rgba(24,24,25,0.18)] md:hidden"
-    >
-      <ul className="mx-auto flex max-w-md items-stretch">
-        {NAV_ITEMS.map((item) => {
-          const active = item.isActive(pathname);
-          const { Icon } = item;
-          return (
-            <li key={item.href} className="flex-1">
-              <Link
-                href={item.href}
-                data-tour={item.dataTour}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-14 flex-col items-center justify-center gap-1 px-1 pt-2 pb-1.5 transition-colors",
-                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand",
-                  active ? "text-brand" : "text-ink-muted",
-                )}
-              >
-                <Icon className="size-6 shrink-0" />
-                <span
-                  className={cn(
-                    "font-sans text-[0.6875rem] leading-none tracking-control",
-                    active ? "font-book" : "font-normal",
-                  )}
-                >
-                  {item.label}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
   );
 }
