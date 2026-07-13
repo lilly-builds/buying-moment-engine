@@ -7,7 +7,11 @@ import {
   HUBSPOT_SEQUENCES_VERSION,
   MAX_CUSTOM_BODY_CHARS,
   SEND_PROPERTY_NAMES,
+  SEND_TOUCH_COUNT,
   BodyTooLongError,
+  ensureSendProperties,
+  subjectPropertyPayload,
+  bodyPropertyPayload,
   touchPropertyPair,
   type HubSpotSendDeps,
 } from "@/src/send/hubspot-send";
@@ -36,6 +40,10 @@ function sendMock() {
     }
     if (method === "PATCH" && path.startsWith("/crm/v3/objects/contacts/")) {
       return { status: 200, body: { id: path.split("/").pop() } };
+    }
+    // Label-reconcile PATCH on an existing send property — echo OK.
+    if (method === "PATCH" && path.startsWith("/crm/v3/properties/contacts/")) {
+      return { status: 200, body: { name: path.split("/").pop() } };
     }
     if (method === "POST" && path.includes("/sequences/") && path.endsWith("/enrollments")) {
       return { status: 201, body: { enrollmentId: "enr_1" } };
@@ -128,6 +136,44 @@ describe("HubSpot send — whole-body-token fidelity (experiment #2)", () => {
       propertyCreates.map((c) => String((c.body as { name?: unknown }).name)),
     );
     for (const name of SEND_PROPERTY_NAMES) expect(created.has(name)).toBe(true);
+  });
+
+  it("reconciles a stale label on an existing send property (the app owns the field name)", async () => {
+    // Simulate a portal provisioned by an OLDER build: every send property already
+    // exists (409 on create). ensureSendProperties must PATCH each one's label back
+    // to the canonical token name so the Sequence step can find it by label.
+    const { fetch: f, calls } = mockFetch((call) => {
+      if (call.method === "POST" && call.path.startsWith("/crm/v3/properties/contacts")) {
+        return { status: 409, body: { message: "already exists" } };
+      }
+      if (call.method === "PATCH" && call.path.startsWith("/crm/v3/properties/contacts/")) {
+        return { status: 200, body: {} };
+      }
+      return { status: 404, body: { path: call.path } };
+    });
+
+    const result = await ensureSendProperties({
+      fetch: f,
+      getAccessToken: async () => "at_test",
+      baseUrl: "https://api.hubapi.test",
+    });
+
+    // Nothing created (all pre-existed); all six relabeled to canonical.
+    expect(result.created).toEqual([]);
+    expect(result.relabeled).toHaveLength(6);
+
+    const patches = calls.filter(
+      (c) => c.method === "PATCH" && c.path.startsWith("/crm/v3/properties/contacts/"),
+    );
+    expect(patches).toHaveLength(6);
+    // Each PATCH targets its property by internal name and sets the canonical label.
+    for (let touch = 1; touch <= SEND_TOUCH_COUNT; touch++) {
+      for (const payload of [subjectPropertyPayload(touch), bodyPropertyPayload(touch)]) {
+        const patch = patches.find((c) => c.path.endsWith(`/${String(payload.name)}`));
+        expect(patch, `PATCH for ${String(payload.name)}`).toBeDefined();
+        expect((patch!.body as { label: string }).label).toBe(String(payload.label));
+      }
+    }
   });
 
   it("sendSequence writes all 3 touches' pairs in ONE PATCH and enrolls ONCE", async () => {

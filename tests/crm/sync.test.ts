@@ -196,9 +196,11 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
     expect((await getActiveConnection(t.db)).ok).toBe(false);
   });
 
-  it("a re-connect to an already-provisioned portal tolerates 409 and still succeeds", async () => {
-    // R17: never blindly overwrite a real record — an existing property answers
-    // 409 and we move on rather than PATCHing over an admin's customisation.
+  it("a re-connect reconciles the six send-property labels (fixes a stale portal)", async () => {
+    // R17 still holds for the TAG properties (tolerate 409 — don't clobber an
+    // admin's customisation). But the six SEND-property labels are the tokens the
+    // Sequence picks by, so a stale label (from an older build) is corrected on
+    // every reconnect: the app owns getting the field name right, not the agent.
     const mock = hubspotConnectMock();
     const args = { code: "the-code", encryptionKey: KEY };
 
@@ -206,9 +208,17 @@ describe("completeHubSpotConnect (OAuth callback → encrypted, per-tenant stora
     const second = await completeHubSpotConnect(t.db, oauthDeps(mock.fetch), args);
 
     expect(second.portalId).toBe("424242");
-    // Second pass hit the same routes and got 409s — no throw, one connection row.
+    // Second pass hit the same routes, got 409s, and relabeled — no throw, one row.
     const rows = await getActiveConnection(t.db);
     expect(rows.ok).toBe(true);
+    // Reconnect PATCHed the label of each already-existing send property back to
+    // canonical (six contact-property label reconciles).
+    const relabels = mock.calls.filter(
+      (c) =>
+        c.method === "PATCH" &&
+        /^\/crm\/v3\/properties\/contacts\/gtm_maestro_custom_/.test(c.path),
+    );
+    expect(relabels).toHaveLength(6);
   });
 
   it("reports canSend from the GRANTED scopes, not the requested ones", async () => {
