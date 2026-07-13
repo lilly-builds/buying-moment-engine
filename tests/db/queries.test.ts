@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "../setup";
 import { upsertPractice, upsertSignal } from "@/db/ingest";
-import { feedPractices, practicesNeedingBriefs, signalCount } from "@/db/queries";
+import {
+  feedPractices,
+  practicesNeedingBriefs,
+  signalCount,
+} from "@/db/queries";
 import { briefs, evidence } from "@/db/schema";
 
 const DETECTED = new Date("2026-07-01T00:00:00Z");
@@ -139,7 +143,12 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
       .returning({ id: evidence.id });
     return row.id;
   }
-  async function fresh(practiceId: string, kind: "staffing_spike" | "phone_complaints" | "growth_events", detectedAt: Date, url: string) {
+  async function fresh(
+    practiceId: string,
+    kind: "staffing_spike" | "phone_complaints" | "growth_events",
+    detectedAt: Date,
+    url: string,
+  ) {
     await upsertSignal(t.db, {
       practiceId,
       kind,
@@ -151,39 +160,85 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
 
   it("returns un-briefed classified practices with fresh signals, hottest first; excludes briefed/unclassified/expired", async () => {
     // A: classified, 2 fresh signals, no brief → returned first (count 2).
-    const a = await upsertPractice(t.db, { name: "Alpha Derm", geoKey: "austin-tx", vertical: "dermatology", websiteUrl: "https://alphaderm.com" });
+    const a = await upsertPractice(t.db, {
+      name: "Alpha Derm",
+      geoKey: "austin-tx",
+      vertical: "dermatology",
+      websiteUrl: "https://alphaderm.com",
+    });
     await fresh(a.id, "staffing_spike", FRESH, "https://a1");
     await fresh(a.id, "phone_complaints", FRESH, "https://a2");
 
     // G: classified, 1 fresh signal (newest), no brief → second.
-    const g = await upsertPractice(t.db, { name: "Gamma Derm", geoKey: "dallas-tx", vertical: "dermatology" });
-    await fresh(g.id, "staffing_spike", new Date("2026-07-08T12:00:00Z"), "https://g1");
+    const g = await upsertPractice(t.db, {
+      name: "Gamma Derm",
+      geoKey: "dallas-tx",
+      vertical: "dermatology",
+    });
+    await fresh(
+      g.id,
+      "staffing_spike",
+      new Date("2026-07-08T12:00:00Z"),
+      "https://g1",
+    );
 
     // E: classified, 1 fresh signal (older), no brief → third.
-    const e = await upsertPractice(t.db, { name: "Echo Derm", geoKey: "miami-fl", vertical: "dermatology" });
-    await fresh(e.id, "staffing_spike", new Date("2026-07-05T00:00:00Z"), "https://e1");
+    const e = await upsertPractice(t.db, {
+      name: "Echo Derm",
+      geoKey: "miami-fl",
+      vertical: "dermatology",
+    });
+    await fresh(
+      e.id,
+      "staffing_spike",
+      new Date("2026-07-05T00:00:00Z"),
+      "https://e1",
+    );
 
     // B: classified, 1 fresh signal, HAS a brief → excluded.
-    const b = await upsertPractice(t.db, { name: "Beta Derm", geoKey: "reno-nv", vertical: "dermatology" });
+    const b = await upsertPractice(t.db, {
+      name: "Beta Derm",
+      geoKey: "reno-nv",
+      vertical: "dermatology",
+    });
     await fresh(b.id, "staffing_spike", FRESH, "https://b1");
     await t.db.insert(briefs).values({ practiceId: b.id });
 
     // C: UNCLASSIFIED, 1 fresh signal, no brief → excluded.
-    const c = await upsertPractice(t.db, { name: "Gray Clinic", geoKey: "boise-id" });
+    const c = await upsertPractice(t.db, {
+      name: "Gray Clinic",
+      geoKey: "boise-id",
+    });
     await fresh(c.id, "staffing_spike", FRESH, "https://c1");
 
+    // S: demo/seed row, even classified with a fresh signal → excluded.
+    const s = await upsertPractice(t.db, {
+      name: "Seeded Demo Derm",
+      geoKey: "demo:austin-tx",
+      vertical: "dermatology",
+    });
+    await fresh(s.id, "staffing_spike", FRESH, "https://s1");
+
     // D: classified, only an EXPIRED signal, no brief → excluded.
-    const d = await upsertPractice(t.db, { name: "Delta Derm", geoKey: "tampa-fl", vertical: "dermatology" });
+    const d = await upsertPractice(t.db, {
+      name: "Delta Derm",
+      geoKey: "tampa-fl",
+      vertical: "dermatology",
+    });
     await upsertSignal(t.db, {
       practiceId: d.id,
       kind: "staffing_spike",
-      evidenceId: await evidenceAt("https://d1", new Date("2026-07-01T00:00:00Z")),
+      evidenceId: await evidenceAt(
+        "https://d1",
+        new Date("2026-07-01T00:00:00Z"),
+      ),
       detectedAt: new Date("2026-07-01T00:00:00Z"),
       expiresAt: EXPIRED_EXP,
     });
 
     const result = await practicesNeedingBriefs(t.db, { now: NOW });
     expect(result.map((r) => r.id)).toEqual([a.id, g.id, e.id]);
+    expect(result.map((r) => r.name)).not.toContain("Seeded Demo Derm");
     expect(result[0].freshSignalCount).toBe(2);
     expect(result[1].freshSignalCount).toBe(1);
     // returned fields carry the scrape seed + geo the conductor needs
@@ -193,22 +248,37 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
   });
 
   it("includeBriefed (--force) pulls already-briefed practices too", async () => {
-    const a = await upsertPractice(t.db, { name: "Alpha Derm", geoKey: "austin-tx", vertical: "dermatology" });
+    const a = await upsertPractice(t.db, {
+      name: "Alpha Derm",
+      geoKey: "austin-tx",
+      vertical: "dermatology",
+    });
     await fresh(a.id, "staffing_spike", FRESH, "https://a1");
     await t.db.insert(briefs).values({ practiceId: a.id });
 
     // default: excluded (has a brief)
     expect(await practicesNeedingBriefs(t.db, { now: NOW })).toHaveLength(0);
     // includeBriefed: pulled for deliberate regeneration
-    const forced = await practicesNeedingBriefs(t.db, { now: NOW, includeBriefed: true });
+    const forced = await practicesNeedingBriefs(t.db, {
+      now: NOW,
+      includeBriefed: true,
+    });
     expect(forced.map((r) => r.id)).toEqual([a.id]);
   });
 
   it("limit caps the result to the hottest N", async () => {
-    const a = await upsertPractice(t.db, { name: "Alpha Derm", geoKey: "austin-tx", vertical: "dermatology" });
+    const a = await upsertPractice(t.db, {
+      name: "Alpha Derm",
+      geoKey: "austin-tx",
+      vertical: "dermatology",
+    });
     await fresh(a.id, "staffing_spike", FRESH, "https://a1");
     await fresh(a.id, "phone_complaints", FRESH, "https://a2");
-    const e = await upsertPractice(t.db, { name: "Echo Derm", geoKey: "miami-fl", vertical: "dermatology" });
+    const e = await upsertPractice(t.db, {
+      name: "Echo Derm",
+      geoKey: "miami-fl",
+      vertical: "dermatology",
+    });
     await fresh(e.id, "staffing_spike", FRESH, "https://e1");
 
     const result = await practicesNeedingBriefs(t.db, { now: NOW, limit: 1 });

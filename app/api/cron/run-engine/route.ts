@@ -46,7 +46,7 @@ import { crossCheckSignals } from "@/src/engine/cross-check";
 export const runtime = "nodejs";
 // Never statically optimized — every hit runs the engine against live env + DB.
 export const dynamic = "force-dynamic";
-// Vercel Fluid Compute ceiling (Hobby + Pro = 300s). runEngine's briefLimit keeps a run inside it.
+// Vercel Fluid Compute ceiling (Hobby + Pro = 300s). The brief batch size bounds paid work per invocation.
 export const maxDuration = 300;
 
 function authorized(request: Request): boolean {
@@ -56,18 +56,16 @@ function authorized(request: Request): boolean {
 }
 
 /**
- * Resolve ENGINE_BRIEF_LIMIT. A BLANK env var (`""`, exactly what .env.example ships, and what an
- * empty Vercel dashboard field yields) must fall back to the default — `??` would NOT (it only
- * catches null/undefined), so `Number("")` → 0 would silently disable the whole brief cascade
- * while still burning source spend. `||` catches the blank; NaN/negative also fall back; a
- * deliberate "0" is still honored (sources-only by choice).
+ * Resolve ENGINE_BRIEF_LIMIT as an invocation batch size, not an eligibility cap. A BLANK env var
+ * (`""`, exactly what .env.example ships, and what an empty Vercel dashboard field yields) must
+ * fall back to the default; a deliberate "0" is still honored as explicit briefing-disabled mode.
  */
 export function resolveBriefLimit(): number {
   const raw = process.env.ENGINE_BRIEF_LIMIT?.trim();
   if (!raw) return DEFAULT_ENGINE_BRIEF_LIMIT;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return DEFAULT_ENGINE_BRIEF_LIMIT;
-  // Clamp the upper edge too: a huge value must not defeat the 300s bound or issue an enormous pull.
+  // Clamp the upper edge too: a huge value must not defeat the 300s bound with external calls.
   return Math.min(Math.floor(n), MAX_ENGINE_BRIEF_LIMIT);
 }
 

@@ -28,6 +28,7 @@ import {
 import { tenantProfileSchema } from "@/src/discovery/tenants";
 import type { RunDiscoveryDeps } from "@/jobs/run-discovery";
 import { upsertPractice } from "@/db/ingest";
+import { upsertContact, upsertPracticeFact } from "@/db/enrich";
 import { attachSignal, tagVertical } from "@/src/engine/resolver";
 import { computeExpiresAt } from "@/src/engine/freshness";
 import type { Database } from "@/db/types";
@@ -195,16 +196,44 @@ describe("runEngine", () => {
     );
   });
 
-  it("bounds the downstream cohort by briefLimit (the tail waits for the next run)", async () => {
+  it("uses briefLimit as an honest invocation batch: pending good leads are reported and picked up next run", async () => {
     await seedGoldenPractice(t.db); // briefable practice #1 (Schlessinger, Omaha)
-    // A genuinely distinct briefable practice #2 so the pull has two candidates.
+    // A genuinely distinct one-signal good lead. It is lower priority than the multi-signal
+    // golden practice, but still eligible and must not disappear silently behind the batch cap.
     const second = await upsertPractice(t.db, {
       name: "Second Derm Clinic",
       geoKey: "austin-tx",
       city: "Austin",
       state: "TX",
+      websiteUrl: "https://second.example",
     });
     await tagVertical(t.db, second.id, "dermatology");
+    await upsertPracticeFact(t.db, {
+      practiceId: second.id,
+      provider: "claude_research",
+      detectedAt: NOW,
+      field: "specialty",
+      value: "Dermatology",
+      sourceUrl: "https://second.example/about",
+      snippet: "Second Derm Clinic is a dermatology practice in Austin.",
+    });
+    await upsertPracticeFact(t.db, {
+      practiceId: second.id,
+      provider: "claude_research",
+      detectedAt: NOW,
+      field: "yearFounded",
+      value: "2004",
+      sourceUrl: "https://second.example/about",
+      snippet: "Second Derm Clinic has served Omaha since 2004.",
+    });
+    await upsertContact(t.db, {
+      practiceId: second.id,
+      role: "Practice Manager",
+      name: "Sam Manager",
+      email: "sam@second.example",
+      emailProvider: "pdl",
+      sourceUrl: "https://second.example/team",
+    });
     await attachSignal(t.db, {
       practiceId: second.id,
       kind: "phone_complaints",
@@ -216,6 +245,215 @@ describe("runEngine", () => {
       signalSource: "test",
     });
 
+    const first = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      pipelineClients: goldenClients(),
+      briefLimit: 1, // operational batch size only
+      logger: quiet,
+    });
+
+    expect("total" in first.downstream && first.downstream.total).toBe(1);
+    expect("eligible" in first.downstream && first.downstream.eligible).toBe(2);
+    expect("attempted" in first.downstream && first.downstream.attempted).toBe(
+      1,
+    );
+    expect("briefed" in first.downstream && first.downstream.briefed).toBe(1);
+    expect("pending" in first.downstream && first.downstream.pending).toBe(1);
+    expect(
+      "skippedReasons" in first.downstream &&
+        first.downstream.skippedReasons.some((reason) =>
+          reason.includes("left pending by invocation batch size 1"),
+        ),
+    ).toBe(true);
+
+    const secondRun = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      pipelineClients: goldenClients(),
+      briefLimit: 1,
+      logger: quiet,
+    });
+
+    expect(
+      "eligible" in secondRun.downstream && secondRun.downstream.eligible,
+    ).toBe(1);
+    expect(
+      "attempted" in secondRun.downstream && secondRun.downstream.attempted,
+    ).toBe(1);
+    expect(
+      "briefed" in secondRun.downstream && secondRun.downstream.briefed,
+    ).toBe(1);
+    expect(
+      "pending" in secondRun.downstream && secondRun.downstream.pending,
+    ).toBe(0);
+    expect(
+      "items" in secondRun.downstream &&
+        secondRun.downstream.items.some(
+          (item) => item.practiceId === second.id,
+        ),
+    ).toBe(true);
+  });
+
+  it("runs proactive cross-check before selecting the downstream brief cohort", async () => {
+    const ids = await seedGoldenPractice(t.db); // starts with staffing + phone signals
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async (practiceId) => {
+        await attachSignal(t.db, {
+          practiceId,
+          kind: "growth_events",
+          sourceUrl: "https://news.example/schlessinger-expands",
+          snippet: "Schlessinger MD Dermatology opens a new access center.",
+          confidence: 0.91,
+          detectedAt: NOW,
+          expiresAt: computeExpiresAt("growth_events", NOW),
+          signalSource: "crosscheck:growth_events",
+        });
+        return { attached: ["growth_events"], skipped: [] };
+      },
+      pipelineClients: goldenClients(),
+      briefLimit: 5,
+      logger: quiet,
+    });
+
+    expect("ran" in summary.crossCheck && summary.crossCheck.total).toBe(1);
+    expect("briefed" in summary.downstream && summary.downstream.briefed).toBe(
+      1,
+    );
+    if ("items" in summary.downstream) {
+      const item = summary.downstream.items.find(
+        (row) => row.practiceId === ids.practiceId,
+      );
+      expect(item?.result?.brief?.signalCount).toBe(3);
+    }
+  });
+
+  it("applies the cross-check limit after skipping practices with no missing signal families", async () => {
+    const fullyCovered = await upsertPractice(t.db, {
+      name: "Three Signal Dermatology",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+    });
+    await tagVertical(t.db, fullyCovered.id, "dermatology");
+    for (const kind of [
+      "staffing_spike",
+      "growth_events",
+      "phone_complaints",
+    ] as const) {
+      await attachSignal(t.db, {
+        practiceId: fullyCovered.id,
+        kind,
+        sourceUrl: `https://example.com/${kind}`,
+        detectedAt: NOW,
+        expiresAt: computeExpiresAt(kind, NOW),
+        signalSource: "test",
+      });
+    }
+
+    const oneSignal = await upsertPractice(t.db, {
+      name: "One Signal Dermatology",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+    });
+    await tagVertical(t.db, oneSignal.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: oneSignal.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/one-signal",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+
+    const checked: string[] = [];
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async (practiceId) => {
+        checked.push(practiceId);
+        return { attached: [], skipped: [] };
+      },
+      crossCheckLimit: 1,
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect("ran" in summary.crossCheck && summary.crossCheck.total).toBe(1);
+    expect(checked).toEqual([oneSignal.id]);
+  });
+
+  it("does not run cross-checks when the caller sets the cross-check limit to zero", async () => {
+    await seedGoldenPractice(t.db);
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async () => {
+        throw new Error("should not cross-check");
+      },
+      crossCheckLimit: 0,
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect(summary.crossCheck).toEqual({
+      ran: true,
+      total: 0,
+      attached: 0,
+      skipped: 0,
+    });
+  });
+
+  it("defaults cross-checks to zero when briefLimit is zero", async () => {
+    await seedGoldenPractice(t.db);
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async () => {
+        throw new Error("should not cross-check");
+      },
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect(summary.crossCheck).toEqual({
+      ran: true,
+      total: 0,
+      attached: 0,
+      skipped: 0,
+    });
+  });
+
+  it("reports briefLimit zero as explicit briefing-disabled mode with visible pending leads", async () => {
+    await seedGoldenPractice(t.db);
+
     const summary = await runEngine({
       db: t.db,
       meter,
@@ -223,11 +461,34 @@ describe("runEngine", () => {
       detectors: [],
       discovery: null,
       pipelineClients: goldenClients(),
-      briefLimit: 1, // only the hottest one this run
+      briefLimit: 0,
       logger: quiet,
     });
 
-    expect("total" in summary.downstream && summary.downstream.total).toBe(1);
+    expect("skipped" in summary.downstream && summary.downstream.skipped).toBe(
+      true,
+    );
+    expect("reason" in summary.downstream && summary.downstream.reason).toBe(
+      "briefing disabled (briefLimit=0)",
+    );
+    expect(
+      "eligible" in summary.downstream && summary.downstream.eligible,
+    ).toBe(1);
+    expect(
+      "attempted" in summary.downstream && summary.downstream.attempted,
+    ).toBe(0);
+    expect("briefed" in summary.downstream && summary.downstream.briefed).toBe(
+      0,
+    );
+    expect("pending" in summary.downstream && summary.downstream.pending).toBe(
+      1,
+    );
+    expect(
+      "skippedReasons" in summary.downstream &&
+        summary.downstream.skippedReasons.includes(
+          "briefing disabled (briefLimit=0)",
+        ),
+    ).toBe(true);
   });
 
   it("runs proactive cross-check before selecting the downstream brief cohort", async () => {

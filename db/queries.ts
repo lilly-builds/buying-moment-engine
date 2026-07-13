@@ -478,12 +478,13 @@ export interface PracticeNeedingBrief {
 /**
  * The seeding pull (U6): practices that are AT a buying moment but have no brief yet.
  *
- * Deliberately the SAME three exclusions as `feedPractices` — a brief we generate here
+ * Deliberately the SAME exclusions as `feedPractices` — a brief we generate here
  * must be one that can actually appear in the feed:
  *   1. `unclassified` → no pack, no pitch (kept out in SQL).
- *   2. ZERO fresh signals → not at a buying moment (grouping drops it — it contributes
+ *   2. Demo/seed rows → not real prospects (kept out by the shared demo filter).
+ *   3. ZERO fresh signals → not at a buying moment (grouping drops it — it contributes
  *      no fresh kind, so it never enters `byPractice`).
- *   3. EXPIRED signals → aged out of the moment (`isFresh`, the single source of truth,
+ *   4. EXPIRED signals → aged out of the moment (`isFresh`, the single source of truth,
  *      NOT re-expressed as SQL).
  * Plus the one this query adds: a practice that ALREADY has a brief is excluded
  * (`LEFT JOIN briefs ... IS NULL`) — the query-level half of the conductor's idempotency
@@ -504,10 +505,13 @@ export async function practicesNeedingBriefs(
   opts: { now?: Date; limit?: number; includeBriefed?: boolean } = {},
 ): Promise<PracticeNeedingBrief[]> {
   const now = opts.now ?? new Date();
-  const notUnclassified = ne(practices.vertical, "unclassified");
+  const realClassifiedPractice = and(
+    ne(practices.vertical, "unclassified"),
+    excludeDemoPractices,
+  );
   const where = opts.includeBriefed
-    ? notUnclassified
-    : and(notUnclassified, isNull(briefs.id));
+    ? realClassifiedPractice
+    : and(realClassifiedPractice, isNull(briefs.id));
   const rows = await db
     .select({
       id: practices.id,
