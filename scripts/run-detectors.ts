@@ -19,12 +19,29 @@ import { createStaffingSpikeDetector } from "@/src/detectors/staffing-spike";
 import { fetchAdzunaJobs } from "@/src/detectors/staffing-spike-adzuna";
 import { createPhoneComplaintsDetector } from "@/src/detectors/phone-complaints";
 import { fetchGooglePlaceDetails } from "@/src/detectors/phone-complaints-google-places";
-import { createMeter, type CostEventRecord, type CostRecorder } from "@/src/roi/cost-meter";
+import {
+  createMeter,
+  type CostEventRecord,
+  type CostRecorder,
+} from "@/src/roi/cost-meter";
 import { crossCheckSignals } from "@/src/engine/cross-check";
-import { signals, rawSignals, costEvents, practices } from "@/db/schema";
+import {
+  signals,
+  rawSignals,
+  costEvents,
+  practices,
+  signalChecks,
+} from "@/db/schema";
 import { count, eq, sql } from "drizzle-orm";
 
-const DEMO_METROS = ["Austin, TX", "Houston, TX", "Dallas, TX", "Charlotte, NC", "Tampa, FL", "Phoenix, AZ"];
+const DEMO_METROS = [
+  "Austin, TX",
+  "Houston, TX",
+  "Dallas, TX",
+  "Charlotte, NC",
+  "Tampa, FL",
+  "Phoenix, AZ",
+];
 const SPECIALTY_TERMS = [
   "medical receptionist",
   "front desk medical",
@@ -37,7 +54,11 @@ const SPECIALTY_TERMS = [
   "OBGYN receptionist",
 ];
 
-interface Args { dryRun: boolean; metro?: string; crossCheckLimit: number }
+interface Args {
+  dryRun: boolean;
+  metro?: string;
+  crossCheckLimit: number;
+}
 
 function parseArgs(argv: string[]): Args {
   const get = (flag: string) => {
@@ -51,7 +72,10 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
-function teeRecorder(inner: CostRecorder): { recorder: CostRecorder; sink: CostEventRecord[] } {
+function teeRecorder(inner: CostRecorder): {
+  recorder: CostRecorder;
+  sink: CostEventRecord[];
+} {
   const sink: CostEventRecord[] = [];
   return {
     sink,
@@ -80,18 +104,28 @@ async function main(): Promise<void> {
     recentGkgFiles: 400,
   }));
 
-  console.log("── detector run (Thread 17) ───────────────────────────────────");
+  console.log(
+    "── detector run (Thread 17) ───────────────────────────────────",
+  );
   console.log(`metros: ${metros.join("; ")}`);
-  console.log(`Adzuna calls: ${staffingQueries.length} (free-tier unit cost recorded as $0)`);
-  console.log(`GDELT calls:  ${growthQueries.length} (free API, recorded as $0)`);
-  console.log("Google phone detector: no broad run; per-place phone checks happen in cross-check/discovery.");
+  console.log(
+    `Adzuna calls: ${staffingQueries.length} (free-tier unit cost recorded as $0)`,
+  );
+  console.log(
+    `GDELT calls:  ${growthQueries.length} (free API, recorded as $0)`,
+  );
+  console.log(
+    "Google phone detector: no broad run; per-place phone checks happen in cross-check/discovery.",
+  );
 
   if (args.dryRun) {
     console.log("\n--dry-run: plan only. ZERO network calls, ZERO writes.");
     return;
   }
 
-  const missing = ["DATABASE_URL", "ADZUNA_APP_ID", "ADZUNA_APP_KEY"].filter((k) => !process.env[k]);
+  const missing = ["DATABASE_URL", "ADZUNA_APP_ID", "ADZUNA_APP_KEY"].filter(
+    (k) => !process.env[k],
+  );
   if (missing.length) throw new Error(`missing env: ${missing.join(", ")}`);
 
   const db = getDb();
@@ -104,9 +138,13 @@ async function main(): Promise<void> {
     meter,
     now,
     detectors: [
-      createStaffingSpikeDetector(fetchAdzunaJobs, { queries: staffingQueries }),
+      createStaffingSpikeDetector(fetchAdzunaJobs, {
+        queries: staffingQueries,
+      }),
       createPhoneComplaintsDetector(fetchGooglePlaceDetails, []),
-      createGrowthEventsDetector(fetchGdeltArticles, { queries: growthQueries }),
+      createGrowthEventsDetector(fetchGdeltArticles, {
+        queries: growthQueries,
+      }),
     ],
   });
 
@@ -115,11 +153,37 @@ async function main(): Promise<void> {
     await crossCheckSignals({ db, meter, now }, row.id);
   }
 
-  const rawByKind = await db.select({ kind: rawSignals.detectorKind, n: count() }).from(rawSignals).groupBy(rawSignals.detectorKind);
-  const sigByKind = await db.select({ kind: signals.kind, n: count() }).from(signals).groupBy(signals.kind);
-  const costByProvider = await db.select({ provider: costEvents.provider, n: count(), usd: sql<string>`coalesce(sum(${costEvents.costUsd}), 0)` }).from(costEvents).groupBy(costEvents.provider);
+  const rawByKind = await db
+    .select({ kind: rawSignals.detectorKind, n: count() })
+    .from(rawSignals)
+    .groupBy(rawSignals.detectorKind);
+  const sigByKind = await db
+    .select({ kind: signals.kind, n: count() })
+    .from(signals)
+    .groupBy(signals.kind);
+  const costByProvider = await db
+    .select({
+      provider: costEvents.provider,
+      n: count(),
+      usd: sql<string>`coalesce(sum(${costEvents.costUsd}), 0)`,
+    })
+    .from(costEvents)
+    .groupBy(costEvents.provider);
+  const checksByStatus = await db
+    .select({
+      provider: signalChecks.provider,
+      kind: signalChecks.kind,
+      status: signalChecks.status,
+      n: count(),
+    })
+    .from(signalChecks)
+    .groupBy(signalChecks.provider, signalChecks.kind, signalChecks.status);
   const multi = await db
-    .select({ id: practices.id, name: practices.name, kinds: sql<number>`count(distinct ${signals.kind})::int` })
+    .select({
+      id: practices.id,
+      name: practices.name,
+      kinds: sql<number>`count(distinct ${signals.kind})::int`,
+    })
     .from(practices)
     .innerJoin(signals, eq(signals.practiceId, practices.id))
     .groupBy(practices.id, practices.name)
@@ -130,8 +194,11 @@ async function main(): Promise<void> {
   console.log("\nraw_signals by kind:", rawByKind);
   console.log("signals by kind:", sigByKind);
   console.log("cost_events by provider:", costByProvider);
+  console.log("signal_checks by provider/kind/status:", checksByStatus);
   console.log("multi-kind practices:", multi.slice(0, 10));
-  console.log(`this script recorded ${tee.sink.length} cost rows totaling $${tee.sink.reduce((t, r) => t + r.costUsd, 0).toFixed(4)}`);
+  console.log(
+    `this script recorded ${tee.sink.length} cost rows totaling $${tee.sink.reduce((t, r) => t + r.costUsd, 0).toFixed(4)}`,
+  );
   process.exit(0);
 }
 

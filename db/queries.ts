@@ -1,4 +1,15 @@
-import { and, asc, eq, inArray, isNull, ne, notLike, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  ne,
+  notLike,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { Database } from "./types";
 import {
   briefs,
@@ -9,6 +20,7 @@ import {
   practices,
   roiEvents,
   sequences,
+  signalChecks,
   signals,
 } from "./schema";
 import { isFresh } from "@/src/engine/freshness";
@@ -190,7 +202,9 @@ export interface CostByVerticalRow {
   costUsd: number;
 }
 
-export async function costByVertical(db: Database): Promise<CostByVerticalRow[]> {
+export async function costByVertical(
+  db: Database,
+): Promise<CostByVerticalRow[]> {
   const rows = await db
     .select({
       vertical: practices.vertical,
@@ -201,7 +215,10 @@ export async function costByVertical(db: Database): Promise<CostByVerticalRow[]>
     // Drop seeded practices' spend; KEEP unattributed infra spend (null practice).
     .where(excludeDemoPractices)
     .groupBy(practices.vertical);
-  return rows.map((row) => ({ vertical: row.vertical, costUsd: Number(row.total) }));
+  return rows.map((row) => ({
+    vertical: row.vertical,
+    costUsd: Number(row.total),
+  }));
 }
 
 /** One AE lead-quality verdict, tagged with the practice's vertical. */
@@ -250,7 +267,9 @@ export interface PracticeKindRow {
   kind: DetectorKind;
 }
 
-export async function practiceSignalKinds(db: Database): Promise<PracticeKindRow[]> {
+export async function practiceSignalKinds(
+  db: Database,
+): Promise<PracticeKindRow[]> {
   // Joined to `practices` solely to apply the demo exclusion: seeded practices' signal
   // kinds must not feed the scoreboard's "which signals convert" attribution (D9).
   return db
@@ -267,7 +286,9 @@ export interface SequenceTouchRow {
   touches: number;
 }
 
-export async function sequenceTouchRows(db: Database): Promise<SequenceTouchRow[]> {
+export async function sequenceTouchRows(
+  db: Database,
+): Promise<SequenceTouchRow[]> {
   const rows = await db
     .select({
       vertical: practices.vertical,
@@ -542,7 +563,8 @@ export async function practicesNeedingBriefs(
       b.freshSignalCount - a.freshSignalCount ||
       b.freshest.getTime() - a.freshest.getTime(),
   );
-  const limited = opts.limit !== undefined ? sorted.slice(0, opts.limit) : sorted;
+  const limited =
+    opts.limit !== undefined ? sorted.slice(0, opts.limit) : sorted;
   return limited.map((entry) => ({
     id: entry.id,
     name: entry.name,
@@ -552,4 +574,182 @@ export async function practicesNeedingBriefs(
     websiteUrl: entry.websiteUrl,
     freshSignalCount: entry.freshSignalCount,
   }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Proactive signal cross-check audit/cache (Thread 08)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SIGNAL_CHECK_STATUSES = [
+  "fired",
+  "checked_no_signal",
+  "errored",
+  "skipped",
+] as const;
+
+export type SignalCheckStatus = (typeof SIGNAL_CHECK_STATUSES)[number];
+
+export interface SignalCheckRow {
+  id: string;
+  practiceId: string;
+  kind: DetectorKind;
+  status: SignalCheckStatus;
+  provider: string;
+  checkedAt: Date;
+  cooldownExpiresAt: Date;
+  costUsd: number | null;
+  matchedPracticeName: string | null;
+  matchConfidence: number | null;
+  evidenceId: string | null;
+  reason: string | null;
+}
+
+function signalCheckRow(row: typeof signalChecks.$inferSelect): SignalCheckRow {
+  return {
+    id: row.id,
+    practiceId: row.practiceId,
+    kind: row.kind,
+    status: row.status as SignalCheckStatus,
+    provider: row.provider,
+    checkedAt: row.checkedAt,
+    cooldownExpiresAt: row.cooldownExpiresAt,
+    costUsd: numericToNumber(row.costUsd),
+    matchedPracticeName: row.matchedPracticeName,
+    matchConfidence: numericToNumber(row.matchConfidence),
+    evidenceId: row.evidenceId,
+    reason: row.reason,
+  };
+}
+
+export async function freshSignalCheck(
+  db: Database,
+  args: { practiceId: string; kind: DetectorKind; provider: string; now: Date },
+): Promise<SignalCheckRow | null> {
+  const [row] = await db
+    .select()
+    .from(signalChecks)
+    .where(
+      and(
+        eq(signalChecks.practiceId, args.practiceId),
+        eq(signalChecks.kind, args.kind),
+        eq(signalChecks.provider, args.provider),
+        gt(signalChecks.cooldownExpiresAt, args.now),
+      ),
+    )
+    .limit(1);
+  return row ? signalCheckRow(row) : null;
+}
+
+export interface UpsertSignalCheckArgs {
+  practiceId: string;
+  kind: DetectorKind;
+  status: SignalCheckStatus;
+  provider: string;
+  checkedAt: Date;
+  cooldownExpiresAt: Date;
+  costUsd?: number | null;
+  matchedPracticeName?: string | null;
+  matchConfidence?: number | null;
+  evidenceId?: string | null;
+  reason?: string | null;
+}
+
+export async function upsertSignalCheck(
+  db: Database,
+  args: UpsertSignalCheckArgs,
+): Promise<SignalCheckRow> {
+  const mutable = {
+    status: args.status,
+    checkedAt: args.checkedAt,
+    cooldownExpiresAt: args.cooldownExpiresAt,
+    costUsd:
+      args.costUsd === undefined || args.costUsd === null
+        ? null
+        : String(args.costUsd),
+    matchedPracticeName: args.matchedPracticeName ?? null,
+    matchConfidence:
+      args.matchConfidence === undefined || args.matchConfidence === null
+        ? null
+        : String(args.matchConfidence),
+    evidenceId: args.evidenceId ?? null,
+    reason: args.reason ?? null,
+    updatedAt: new Date(),
+  };
+
+  await db
+    .insert(signalChecks)
+    .values({
+      practiceId: args.practiceId,
+      kind: args.kind,
+      provider: args.provider,
+      createdAt: new Date(),
+      ...mutable,
+    })
+    .onConflictDoUpdate({
+      target: [
+        signalChecks.practiceId,
+        signalChecks.kind,
+        signalChecks.provider,
+      ],
+      set: mutable,
+    });
+
+  const [row] = await db
+    .select()
+    .from(signalChecks)
+    .where(
+      and(
+        eq(signalChecks.practiceId, args.practiceId),
+        eq(signalChecks.kind, args.kind),
+        eq(signalChecks.provider, args.provider),
+      ),
+    )
+    .limit(1);
+  return signalCheckRow(row);
+}
+
+const CROSS_CHECK_PROVIDERS: Array<{
+  kind: DetectorKind;
+  provider: string;
+}> = [
+  { kind: "staffing_spike", provider: "adzuna" },
+  { kind: "growth_events", provider: "gdelt" },
+  { kind: "phone_complaints", provider: "google-places" },
+];
+
+export async function practicesNeedingCrossChecks(
+  db: Database,
+  opts: { now?: Date; limit?: number } = {},
+): Promise<FeedRow[]> {
+  const now = opts.now ?? new Date();
+  const limit = opts.limit;
+  if (limit !== undefined && limit <= 0) return [];
+
+  const feed = await feedPractices(db, now);
+  const needingChecks: FeedRow[] = [];
+
+  for (const practice of feed) {
+    const freshKinds = new Set(practice.signals.map((signal) => signal.kind));
+    let needsCheck = false;
+
+    for (const target of CROSS_CHECK_PROVIDERS) {
+      if (freshKinds.has(target.kind)) continue;
+      const freshCheck = await freshSignalCheck(db, {
+        practiceId: practice.id,
+        kind: target.kind,
+        provider: target.provider,
+        now,
+      });
+      if (!freshCheck) {
+        needsCheck = true;
+        break;
+      }
+    }
+
+    if (!needsCheck) continue;
+    needingChecks.push(practice);
+    if (limit !== undefined && needingChecks.length >= limit) break;
+  }
+
+  return needingChecks;
 }

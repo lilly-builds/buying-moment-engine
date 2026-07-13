@@ -88,7 +88,8 @@ export async function GET(request: Request): Promise<Response> {
 
     // Anthropic powers discovery's review-qualifier, enrichment extraction, and brief synthesis.
     // BYOK (U17): stored EliseAI key first, env fallback — resolveProviderKey does both.
-    const anthropicApiKey = (await resolveProviderKey(db, "anthropic")) ?? undefined;
+    const anthropicApiKey =
+      (await resolveProviderKey(db, "anthropic")) ?? undefined;
     const pdlKey = process.env.PDL_API_KEY;
     const hasGoogle = Boolean(process.env.GOOGLE_PLACES_API_KEY);
 
@@ -110,7 +111,6 @@ export async function GET(request: Request): Promise<Response> {
           metro,
           meter,
           anthropicApiKey,
-          crossCheck,
         });
       } catch (err) {
         console.warn("engine.discovery.config_error", {
@@ -132,7 +132,6 @@ export async function GET(request: Request): Promise<Response> {
             resolveWebsite: hasGoogle
               ? (p) => resolvePracticeWebsite({ meter, practiceId: p.id }, p)
               : undefined,
-            crossCheck,
             // agentic escalation OFF — cost discipline (matches scripts/run-pipeline.ts).
           }
         : undefined;
@@ -144,6 +143,8 @@ export async function GET(request: Request): Promise<Response> {
       now,
       detectors: detectorRegistry,
       discovery,
+      crossCheck,
+      crossCheckLimit: briefLimit,
       pipelineClients,
       briefLimit,
     });
@@ -152,6 +153,9 @@ export async function GET(request: Request): Promise<Response> {
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.warn("engine.run.setup_error", { error });
-    return NextResponse.json({ ran: false, stage: "setup", error }, { status: 500 });
+    return NextResponse.json(
+      { ran: false, stage: "setup", error },
+      { status: 500 },
+    );
   }
 }
