@@ -51,7 +51,7 @@ export function isAllowlisted(
 /**
  * Routes reachable without a session.
  *
- * `/login` and `/auth/callback` must always stay open or the redirect to /login
+ * `/login`, `/auth/callback`, and `/api/cron/run-engine` must stay open or the redirect to /login
  * would loop. `/auth/callback` is where Supabase lands the magic-link code — it
  * exchanges the code for a session and re-checks the allowlist before letting the
  * visitor anywhere else, so it is safe to reach without an existing session (it is
@@ -70,12 +70,14 @@ export function isAllowlisted(
  * empty component variants; /signals is the Data Sources intro (static source
  * labels + an animation, no lead/contact/signal on it). Keeping them gated in
  * production preserves R18 (the deployed app never serves a page to a
- * non-allowlisted visitor); opening them in dev means brand/design review doesn't
+ * non-allowlisted visitor). The cron route is still protected by `CRON_SECRET` inside
+ * its own handler; it must bypass the session redirect because Vercel Cron treats
+ * redirects as final responses. Opening styleguide/signals in dev means brand/design review doesn't
  * require a Supabase round-trip. If either ever grows a real practice on it, drop
  * it from this list.
  */
 export function publicPaths(isProduction: boolean): string[] {
-  const paths = ["/login", "/auth/callback"];
+  const paths = ["/login", "/auth/callback", "/api/cron/run-engine"];
   if (!isProduction) paths.push("/styleguide", "/signals");
   return paths;
 }
