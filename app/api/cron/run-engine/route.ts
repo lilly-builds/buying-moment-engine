@@ -15,6 +15,7 @@ import {
   runEngine,
   DEFAULT_ENGINE_BRIEF_LIMIT,
   MAX_ENGINE_BRIEF_LIMIT,
+  type DownstreamCohort,
   type PipelineClients,
 } from "@/jobs/run-engine";
 import { scrapePractice } from "@/src/enrich/scrape";
@@ -62,6 +63,20 @@ function authorized(request: Request): boolean {
  * (`""`, exactly what .env.example ships, and what an empty Vercel dashboard field yields) must
  * fall back to the default; a deliberate "0" is still honored as explicit briefing-disabled mode.
  */
+
+function resolveDownstreamCohort(request: Request): DownstreamCohort {
+  const raw = new URL(request.url).searchParams.get("cohort");
+  if (
+    raw === "website_present" ||
+    raw === "needs_contact" ||
+    raw === "weak_email" ||
+    raw === "website_missing"
+  ) {
+    return raw;
+  }
+  return "all";
+}
+
 export function resolveBriefLimit(request?: Request): number {
   const queryLimit = request ? new URL(request.url).searchParams.get("limit")?.trim() : null;
   const raw = queryLimit || process.env.ENGINE_BRIEF_LIMIT?.trim();
@@ -145,6 +160,7 @@ const anthropicApiKey =
     const briefLimit = pipelineClients ? resolveBriefLimit(request) : 0;
     const force = params.get("force") === "1";
     const enrichOnly = params.get("enrichOnly") === "1";
+    const downstreamCohort = resolveDownstreamCohort(request);
 
     const summary = await runEngine({
       db,
@@ -157,6 +173,7 @@ const anthropicApiKey =
       pipelineClients,
       briefLimit,
       enrichOnly,
+      downstreamCohort,
       force,
     });
 

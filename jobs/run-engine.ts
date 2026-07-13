@@ -1,3 +1,5 @@
+import { inArray } from "drizzle-orm";
+import { contacts } from "@/db/schema";
 import type { Database } from "@/db/types";
 import type { Meter } from "@/src/roi/cost-meter";
 import type { Detector } from "@/src/engine/detector";
@@ -68,6 +70,8 @@ export type PipelineClients = Pick<
   | "escalation"
 >;
 
+export type DownstreamCohort = "all" | "website_present" | "needs_contact" | "weak_email" | "website_missing";
+
 export interface RunEngineDeps {
   db: Database;
   /** ONE meter, threaded into every paid stage (R19). */
@@ -96,6 +100,8 @@ export interface RunEngineDeps {
   briefLimit: number;
   /** Enrich contacts only and skip brief synthesis. Keeps provider canaries separate from brief gates. */
   enrichOnly?: boolean;
+  /** Optional production canary cohort to avoid spending on leads that cannot answer the current question. */
+  downstreamCohort?: DownstreamCohort;
   /** Regenerate already-briefed practices too (deliberate). Default false → skip briefed. */
   force?: boolean;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
@@ -108,6 +114,7 @@ export type DownstreamSkipped = Skipped & {
   briefed: 0;
   pending: number;
   skippedReasons: string[];
+  cohort: DownstreamCohort;
 };
 type Errored = { errored: true; error: string };
 
@@ -127,6 +134,7 @@ export interface EngineRunSummary {
   /** Repeated at completion so canary output always shows the configured brief cap after finishing. */
   completedBriefLimit: number;
   mode: "brief" | "enrich_only";
+  downstreamCohort: DownstreamCohort;
   /** Operational batch size used for external brief-building calls this invocation. */
   briefBatchSize: number;
   sources: {
@@ -146,10 +154,65 @@ export interface DownstreamSummary extends BatchSummary {
   pending: number;
   /** Human-readable reasons work did not happen for eligible leads. */
   skippedReasons: string[];
+  cohort: DownstreamCohort;
 }
 
 function defaultLogger(event: string, meta?: Record<string, unknown>): void {
   console.warn(event, meta ?? {});
+}
+
+
+async function filterDownstreamCohort<T extends { id: string; websiteUrl?: string | null }>(
+  db: Database,
+  eligible: T[],
+  cohort: DownstreamCohort,
+): Promise<T[]> {
+  if (cohort === "all") return eligible;
+  if (cohort === "website_present") {
+    return eligible.filter((practice) => Boolean(practice.websiteUrl?.trim()));
+  }
+  if (cohort === "website_missing") {
+    return eligible.filter((practice) => !practice.websiteUrl?.trim());
+  }
+
+  const websitePresent = eligible.filter((practice) => Boolean(practice.websiteUrl?.trim()));
+  if (websitePresent.length === 0) return [];
+
+  const rows = await db
+    .select({
+      practiceId: contacts.practiceId,
+      name: contacts.name,
+      email: contacts.email,
+      emailQuality: contacts.emailQuality,
+    })
+    .from(contacts)
+    .where(inArray(contacts.practiceId, websitePresent.map((practice) => practice.id)));
+
+  const byPractice = new Map<string, { hasName: boolean; hasEmail: boolean; hasWeakEmail: boolean }>();
+  for (const row of rows) {
+    const entry = byPractice.get(row.practiceId) ?? {
+      hasName: false,
+      hasEmail: false,
+      hasWeakEmail: false,
+    };
+    entry.hasName ||= Boolean(row.name?.trim());
+    entry.hasEmail ||= Boolean(row.email?.trim());
+    entry.hasWeakEmail ||=
+      row.emailQuality === "weak_work" ||
+      row.emailQuality === "personal" ||
+      row.emailQuality === "org_inbox" ||
+      (Boolean(row.email?.trim()) && row.emailQuality !== "safe_work");
+    byPractice.set(row.practiceId, entry);
+  }
+
+  if (cohort === "needs_contact") {
+    return websitePresent.filter((practice) => {
+      const entry = byPractice.get(practice.id);
+      return !entry || !entry.hasName || !entry.hasEmail;
+    });
+  }
+
+  return websitePresent.filter((practice) => byPractice.get(practice.id)?.hasWeakEmail);
 }
 
 /**
@@ -179,6 +242,7 @@ export async function runEngine(
   const now = deps.now ?? new Date();
   const log = deps.logger ?? defaultLogger;
   const startedAt = now.toISOString();
+  const downstreamCohort = deps.downstreamCohort ?? "all";
 
   // 1 — SIGNAL SOURCES. Fan out to every source; each stage isolated so one flaky source never
   //     takes down the others or the cascade.
@@ -244,10 +308,11 @@ export async function runEngine(
   const clients = deps.pipelineClients;
   const downstream: DownstreamSummary | DownstreamSkipped | Errored =
     await runStage("downstream", log, async () => {
-      const eligible = await practicesNeedingBriefs(deps.db, {
+      const allEligible = await practicesNeedingBriefs(deps.db, {
         now,
         includeBriefed: deps.force ?? false,
       });
+      const eligible = await filterDownstreamCohort(deps.db, allEligible, downstreamCohort);
       const eligibleCount = eligible.length;
 
       if (!clients || deps.briefLimit <= 0) {
@@ -262,6 +327,7 @@ export async function runEngine(
           briefed: 0,
           pending: eligibleCount,
           skippedReasons: eligibleCount > 0 ? [reason] : [],
+          cohort: downstreamCohort,
         };
       }
 
@@ -329,6 +395,7 @@ export async function runEngine(
           ? Math.max(eligibleCount - batchSummary.enriched, 0)
           : Math.max(eligibleCount - batchSummary.briefed, 0),
         skippedReasons,
+        cohort: downstreamCohort,
       };
     });
 
@@ -342,6 +409,7 @@ export async function runEngine(
     pending: "pending" in downstream ? downstream.pending : null,
     mode: deps.enrichOnly ? "enrich_only" : "brief",
     completedBriefLimit: deps.briefLimit,
+    downstreamCohort,
   });
 
   return {
@@ -351,6 +419,7 @@ export async function runEngine(
     briefLimit: deps.briefLimit,
     completedBriefLimit: deps.briefLimit,
     mode: deps.enrichOnly ? "enrich_only" : "brief",
+    downstreamCohort,
     briefBatchSize: deps.briefLimit,
     sources: { detectors, discovery },
     crossCheck,
