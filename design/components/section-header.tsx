@@ -18,10 +18,14 @@ export type SectionHeaderSize = "display" | "h1" | "h2" | "h3" | "h4" | "h5";
 export type SectionHeaderLevel = "h1" | "h2" | "h3" | "h4";
 
 const SIZES: Record<SectionHeaderSize, string> = {
-  display: "text-display",
-  h1: "text-h1",
-  h2: "text-h2",
-  h3: "text-h3",
+  // Titles step down one stop on phones so a headline wraps to a sane number of
+  // lines instead of towering over — or overflowing — a narrow column, and so the
+  // many section titles (h3) stop shouting over the content. sm:+ is the
+  // verified-live desktop scale, untouched.
+  display: "text-h1 sm:text-display",
+  h1: "text-h2 sm:text-h1",
+  h2: "text-h4 sm:text-h2",
+  h3: "text-h4 sm:text-h3",
   h4: "text-h4",
   // h5 (24px) — a card-level title, e.g. the brief's "Who to contact". `text-h5`
   // is a real EliseAI token; card subheadings need it, and a plain <h*> with
@@ -63,10 +67,13 @@ export function SectionHeader({
   return (
     <div
       className={cn(
-        "flex w-full gap-6",
+        "flex w-full",
         align === "center"
-          ? "flex-col items-center text-center"
-          : "flex-row items-end justify-between",
+          ? "flex-col items-center gap-6 text-center"
+          : // Mobile: title stacks OVER its action (a filter/toggle) so neither is
+            // forced to shrink and overflow the phone. At sm:+ it's the verified-live
+            // side-by-side row, byte-for-byte (`flex-row items-end justify-between gap-6`).
+            "flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6",
         className,
       )}
     >
@@ -104,7 +111,12 @@ export function SectionHeader({
         ) : null}
       </div>
 
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {/* Full-width on mobile; `sm:w-auto` hugs its content on the desktop row. It stays
+          shrinkable (`min-w-0`, no `shrink-0`) so a wide-but-scrollable action — the
+          feed's 5-option filter — yields space and scrolls itself on a tablet instead of
+          pushing the row past the viewport. With room to spare (a real desktop) nothing
+          shrinks, so the verified-live row is unchanged. */}
+      {action ? <div className="w-full min-w-0 sm:w-auto">{action}</div> : null}
     </div>
   );
 }

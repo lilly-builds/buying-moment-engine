@@ -699,27 +699,48 @@ export function BriefView({
       <PageContainer className="pb-2 pt-10">
         {/* Clean headline hero — the buying-moment headline OWNS the header (D1 spine);
             who-to-contact runs as a full-width strip below it (Lilly, 2026-07-10). */}
-        <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-8 backdrop-blur-sm">
-          <div data-tour="why-now" className="flex flex-col gap-3">
-            {/* Practice name (left) and the mode toggle (right) share the top row. */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-col gap-6 rounded-card border border-white/25 bg-white/5 p-5 backdrop-blur-sm sm:p-8">
+          {/* Reading order — 1 practice name, 2 the buying-moment line, 3 the action
+              toggle. On a phone they run straight down in that order (the action
+              last, beneath the header words). On desktop the name + toggle share the
+              top row (sm:order) and the headline wraps full-width below — the
+              verified-live layout. One flat flex container reorders via `order`, so
+              the data-tour hooks stay single. */}
+          <div
+            data-tour="why-now"
+            className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-3 sm:gap-y-4"
+          >
+            {/* 1 · practice name on its own line, the location beneath it (line 2),
+                a step quieter so the name leads. */}
+            <div className="flex flex-col gap-0.5 sm:order-1">
               <span className="font-sans text-base font-medium uppercase tracking-eyebrow text-white">
                 {factual.practiceName}
-                {location ? ` · ${location}` : ""}
               </span>
-              <div data-tour="prep-toggle" className="w-fit shrink-0">
-                <SegmentedControl<BriefMode>
-                  label="Choose what to work on this brief"
-                  options={MODE_OPTIONS}
-                  value={mode}
-                  onValueChange={setMode}
-                  accent="brand"
-                />
-              </div>
+              {location ? (
+                <span className="font-sans text-sm font-medium uppercase tracking-eyebrow text-white/70">
+                  {location}
+                </span>
+              ) : null}
             </div>
-            <h1 className="max-w-3xl font-display text-h2 font-book tracking-brand text-balance text-white">
+
+            {/* The buying-moment spine (D1). text-h4 on a phone so a long headline
+                sits at a fitting size instead of towering over the hero; text-h2 is
+                the verified-live desktop size. `sm:w-full` drops it to its own line
+                below the name/toggle row on desktop. */}
+            <h1 className="max-w-3xl font-display text-h4 font-book tracking-brand text-balance text-white sm:order-3 sm:w-full sm:text-h2">
               {brief.headline}
             </h1>
+
+            <div data-tour="prep-toggle" className="w-full shrink-0 sm:order-2 sm:w-auto">
+              <SegmentedControl<BriefMode>
+                label="Choose what to work on this brief"
+                options={MODE_OPTIONS}
+                value={mode}
+                onValueChange={setMode}
+                accent="brand"
+                fill
+              />
+            </div>
           </div>
         </div>
       </PageContainer>

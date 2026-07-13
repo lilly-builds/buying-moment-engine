@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 
 /**
@@ -32,6 +32,14 @@ export interface SegmentedControlProps<T extends string> {
   /** `health` tints the active segment blue — use it on healthcare-vertical filters. */
   accent?: "brand" | "health";
   size?: "sm" | "md";
+  /**
+   * A few options that should read as a TOGGLE (e.g. the brief's Send / Prep) —
+   * on a phone the track spans the full width and the segments split it evenly, so
+   * it lands as one thumb-wide switch rather than two small pills adrift in a row.
+   * Desktop is unchanged (the track hugs its content). Leave off for many-option
+   * FILTERS: those stay natural-width and scroll horizontally when they can't fit.
+   */
+  fill?: boolean;
   /** Required: a radiogroup with no accessible name is unusable by screen reader. */
   label: string;
   className?: string;
@@ -48,10 +56,35 @@ export function SegmentedControl<T extends string>({
   onValueChange,
   accent = "brand",
   size = "md",
+  fill = false,
   label,
   className,
 }: SegmentedControlProps<T>) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  // The scroll track (filter mode) + whether more options sit off the right edge,
+  // so a phone user gets a fade + chevron that says "this row scrolls" instead of
+  // guessing the visible options are all of them.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [scrollHint, setScrollHint] = useState(false);
+
+  const syncScrollHint = useCallback(() => {
+    const el = trackRef.current;
+    setScrollHint(!!el && el.scrollWidth - el.clientWidth - el.scrollLeft > 4);
+  }, []);
+
+  useEffect(() => {
+    if (fill) return;
+    syncScrollHint();
+    const el = trackRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", syncScrollHint, { passive: true });
+    window.addEventListener("resize", syncScrollHint);
+    return () => {
+      el.removeEventListener("scroll", syncScrollHint);
+      window.removeEventListener("resize", syncScrollHint);
+    };
+  }, [fill, syncScrollHint, options.length]);
 
   // If `value` matches no option (a stale URL param, say), the group would have
   // no tabbable child and drop out of the tab order entirely. Fall back to the
@@ -91,15 +124,25 @@ export function SegmentedControl<T extends string>({
   }
 
   return (
-    <div
+    <div className={cn("relative w-full min-w-0 max-w-full sm:w-fit", className)}>
+      <div
+      ref={trackRef}
       role="radiogroup"
       aria-label={label}
       className={cn(
-        // `w-fit`: `inline-flex` sets the inner layout, not the outer size — inside a
-        // flex column the default `align-self: stretch` blows the track out to the
-        // full column width and leaves a dead grey gutter on the right.
-        "inline-flex w-fit items-center gap-1 rounded-pill bg-surface-subtle p-1",
-        className,
+        "flex items-center gap-1 rounded-pill bg-surface-subtle p-1",
+        // `w-fit` (sm:+) hugs the pills; `max-w-full` + `min-w-0` cap the track at
+        // its container at EVERY width so it can never push the page wide — and
+        // `overflow-x-auto` scrolls the pills when capped. `min-w-0` is load-bearing
+        // on Safari: without it a flex track with overflowing content expands to its
+        // content width instead of scrolling, which is exactly the horizontal-overflow
+        // this caused. `shrink-0` pills (below) keep full size and scroll.
+        fill
+          ? // TOGGLE — span the row and let the segments share it evenly below.
+            "w-full min-w-0 max-w-full sm:w-fit"
+          : // FILTER — full width, capped, scrolls (the 5-option track is ~630px,
+            // wider than any phone and than a narrow tablet row beside the title).
+            "w-full min-w-0 max-w-full snap-x overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-fit",
       )}
     >
       {options.map((option, index) => {
@@ -118,8 +161,11 @@ export function SegmentedControl<T extends string>({
             onClick={() => onValueChange(option.value)}
             onKeyDown={(event) => onKeyDown(event, index)}
             className={cn(
-              "rounded-pill font-sans font-book tracking-control whitespace-nowrap transition-colors",
+              "snap-start rounded-pill font-sans font-book tracking-control whitespace-nowrap transition-colors",
               "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+              // TOGGLE splits the phone track evenly (`flex-1`), then hugs on desktop.
+              // FILTER keeps each pill full-size so the track scrolls instead of squishing.
+              fill ? "flex-1 sm:flex-none" : "shrink-0",
               SIZES[size],
               selected
                 ? accent === "health"
@@ -132,6 +178,32 @@ export function SegmentedControl<T extends string>({
           </button>
         );
       })}
+      </div>
+
+      {/* Scroll affordance (filter mode, phone only): a fade into the track colour
+          plus a chevron at the right edge, shown only while more options sit
+          off-screen to the right. It hides the moment the row is scrolled to the
+          end, and never shows on desktop (the track hugs its content there). */}
+      {!fill && scrollHint ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 flex items-center rounded-r-pill bg-gradient-to-l from-surface-subtle via-surface-subtle/85 to-transparent pl-8 pr-2 sm:hidden"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-ink-muted"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </div>
+      ) : null}
     </div>
   );
 }

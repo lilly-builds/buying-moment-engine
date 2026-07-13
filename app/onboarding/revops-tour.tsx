@@ -58,6 +58,23 @@ import {
 
 const store = createTourStore("bme.revops-onboarding.v1");
 
+/**
+ * Resolve a `data-tour` selector to the element that's actually on screen. A hook
+ * can render in two places across breakpoints — the Scoreboard link lives in both
+ * the desktop top bar and the mobile bottom tab bar (one hidden at any width) — and
+ * a plain `querySelector` would grab whichever comes first in the DOM, sometimes the
+ * `display:none` one (a 0×0 rect that puts the spotlight in the corner). Prefer the
+ * first match with a real box; fall back to the first node so callers never dead-end.
+ */
+function visibleTarget(selector: string): Element | null {
+  const els = document.querySelectorAll(selector);
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return el;
+  }
+  return els[0] ?? null;
+}
+
 function pageForPath(pathname: string): RevopsTourPage | null {
   if (pathname === "/" || pathname === "/styleguide/feed") return "feed";
   if (pathname.startsWith("/practice/") || pathname === "/styleguide/brief") return "brief";
@@ -84,10 +101,34 @@ export function RevopsTour() {
   // truth (not the estimate) or a tall card's controls get clipped off the bottom.
   const cardRef = useRef<HTMLDivElement>(null);
   const [cardH, setCardH] = useState(CARD_H_EST);
+  // sm:+ floats the card beside its target (the placement math below assumes a
+  // floating card); under sm the StepCard is a full-width bottom sheet, so we skip
+  // that math and let its own sheet styles pin it to the bottom of the viewport.
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   const currentPage = pageForPath(pathname);
   const step = steps.find((s) => s.order === state.step) ?? null;
   const active = state.status === "active" && step != null && step.page === currentPage;
+
+  const spotlightTarget = step?.target ?? null;
+
+  // The Scoreboard-nav transition step points AT the nav button. On desktop that
+  // button is in the top bar; on a PHONE it's in the fixed BOTTOM bar. So on mobile
+  // this step must point DOWN, not up: we still spotlight the real tab (the ring
+  // lands on the bottom-bar Scoreboard via `visibleTarget`), skip the scroll a fixed
+  // target doesn't need, and float the card ABOVE the bar so it never covers the
+  // thing it's highlighting. `visibleTarget` resolves the top vs bottom instance.
+  const isBottomNavStep =
+    active && !isDesktop && step?.target === "nav-scoreboard";
 
   const skip = useCallback(() => {
     store.write({ ...store.getSnapshot(), status: "skipped" });
@@ -128,13 +169,24 @@ export function RevopsTour() {
     if (navTo) router.push(navTo);
   }, [router, steps, isStyleguide]);
 
+  // Replay entry point: visiting any page with `?tour=replay` restarts the tour from
+  // step 1 on the feed (a "take the tour again" link points here). It resets
+  // progress, then lands on the feed where step 1 lives — on the styleguide previews
+  // too. The `?tour=replay` guard makes re-runs after the redirect a no-op (the param
+  // is gone), so no dependency needs excluding.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tour") !== "replay") return;
+    store.write({ status: "active", step: 1, completed: [] });
+    router.replace(isStyleguide ? "/styleguide/feed" : "/");
+  }, [router, isStyleguide]);
+
   // Flip the brief tier (if needed) and resolve this step's target on the page.
   useEffect(() => {
     if (!active || !step) return;
     if (step.briefMode) {
       window.dispatchEvent(new CustomEvent("bme:brief-mode", { detail: step.briefMode }));
     }
-    if (!step.target) {
+    if (!spotlightTarget) {
       // Centred card, full dim. Defer to a rAF so we never setState synchronously
       // in the effect body (cascading-render lint rule + matches the target path).
       const centre = requestAnimationFrame(() => setSpot({ order: step.order, rect: null }));
@@ -143,13 +195,19 @@ export function RevopsTour() {
 
     let raf = 0;
     const started = performance.now();
-    const selector = `[data-tour="${step.target}"]`;
+    const selector = `[data-tour="${spotlightTarget}"]`;
 
     const look = () => {
-      const el = document.querySelector(selector);
+      const el = visibleTarget(selector);
       if (el) {
         const r = el.getBoundingClientRect();
         const vh = window.innerHeight;
+        // A fixed bottom-nav target is always on-screen — scrolling toward it would
+        // only jostle the page (the element never moves), so leave the page put.
+        if (isBottomNavStep) {
+          raf = requestAnimationFrame(() => setSpot({ order: step.order, rect: rectOf(el) }));
+          return;
+        }
         if (r.top < NAV_BAR_HEIGHT) {
           // A sticky NAV link (a transition step pointing "up in your nav"): scroll
           // the page to the very top so the nav sits on its own dark hero and its
@@ -186,14 +244,14 @@ export function RevopsTour() {
     raf = requestAnimationFrame(look);
 
     return () => cancelAnimationFrame(raf);
-  }, [active, step]);
+  }, [active, step, spotlightTarget, isBottomNavStep]);
 
   // Keep the spotlight glued to the target as the page scrolls / resizes.
   useEffect(() => {
-    if (!active || !step || !step.target) return;
-    const selector = `[data-tour="${step.target}"]`;
+    if (!active || !step || !spotlightTarget) return;
+    const selector = `[data-tour="${spotlightTarget}"]`;
     const remeasure = () => {
-      const el = document.querySelector(selector);
+      const el = visibleTarget(selector);
       if (el) setSpot({ order: step.order, rect: rectOf(el) });
     };
     window.addEventListener("scroll", remeasure, { passive: true, capture: true });
@@ -202,16 +260,16 @@ export function RevopsTour() {
       window.removeEventListener("scroll", remeasure, { capture: true } as EventListenerOptions);
       window.removeEventListener("resize", remeasure);
     };
-  }, [active, step]);
+  }, [active, step, spotlightTarget]);
 
   // "Play it": clicking the spotlit element on a cross-page step advances the tour
   // AND takes it to the right page (we route it ourselves so it works on the
   // styleguide previews too, where the real link points at an auth-gated route).
   useEffect(() => {
-    if (!active || !step || !step.target || !step.engage) return;
+    if (!active || !step || !spotlightTarget || !step.engage) return;
     const onClick = (e: MouseEvent) => {
       const t = e.target as Element | null;
-      if (t?.closest(`[data-tour="${step.target}"]`)) {
+      if (t?.closest(`[data-tour="${spotlightTarget}"]`)) {
         e.preventDefault();
         e.stopPropagation();
         advance();
@@ -219,7 +277,7 @@ export function RevopsTour() {
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [active, step, advance]);
+  }, [active, step, spotlightTarget, advance]);
 
   // Measure the rendered card so placement uses its real height. useLayoutEffect
   // runs before paint, so the card lands in its correct (fully-visible) spot on the
@@ -252,14 +310,23 @@ export function RevopsTour() {
       <SpotlightOverlay rect={rect} />
       <div
         ref={cardRef}
-        className="fixed z-[70] transition-[top,left] duration-300 ease-out"
-        style={{ top: pos.top, left: pos.left }}
+        className={`fixed z-[70] ${
+          isDesktop
+            ? "transition-[top,left] duration-300 ease-out"
+            : isBottomNavStep
+              ? // Float ABOVE the bottom bar so the spotlit Scoreboard tab stays
+                // visible below the card it points to (clears bar + ring + a gap).
+                "inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))]"
+              : "inset-x-0 bottom-0"
+        }`}
+        style={isDesktop ? { top: pos.top, left: pos.left } : undefined}
       >
         <StepCard
           step={step}
           current={step.order}
           total={REVOPS_TOUR_STEP_COUNT}
           isLast={isLast}
+          floating={isBottomNavStep}
           onNext={advance}
           onSkip={skip}
         />

@@ -70,7 +70,10 @@ function FeedCard({ item, first = false }: { item: FeedItem; first?: boolean }) 
 
   return (
     <Card variant="flat" padding="md">
-      <div className="flex flex-wrap items-center justify-between gap-8">
+      {/* Phone: name + signals stack, then the clock + action anchor to the
+          bottom-right corner (`self-end`) so every row shares one clean action
+          column. Desktop (sm:+) is the verified-live single justified row. */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-8 sm:gap-y-8">
         <div className="flex min-w-0 flex-col gap-3">
           <h4 className="font-display text-h5 text-ink">{item.name}</h4>
 
@@ -81,7 +84,7 @@ function FeedCard({ item, first = false }: { item: FeedItem; first?: boolean }) 
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-6">
+        <div className="flex shrink-0 items-center gap-4 self-end sm:gap-6 sm:self-auto">
           {/* The clock's window is the freshest signal's OWN window (30/60/90d),
               not the component's 7-day default — a fresh staffing lead must not
               render red at day 10. Staleness is decided server-side by `isFresh`. */}
