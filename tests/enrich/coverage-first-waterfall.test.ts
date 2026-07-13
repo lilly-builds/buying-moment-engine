@@ -112,6 +112,71 @@ describe("coverage-first waterfall production path", () => {
     expect(practice.companyFacebookUrl).toBe("https://www.facebook.com/harborvision");
   });
 
+
+  it("enriches email for an existing named contact before spending on people search", async () => {
+    const { practiceId } = await resolvePractice(t.db, {
+      name: "Harbor Vision Eye Care",
+      geoKey: "portland-or",
+    });
+    await upsertContact(t.db, {
+      practiceId,
+      role: "Practice Manager",
+      name: "Dana Whitfield",
+      linkedinUrl: "linkedin.com/in/dana-whitfield",
+      linkedinProvider: "website_scrape",
+    });
+
+    const { meter } = recordingMeter();
+    const fullPeopleCalls: unknown[] = [];
+    const fullEmailCalls: unknown[] = [];
+    const betterCalls: unknown[] = [];
+
+    const fullenrichPeople: FullEnrichPeopleClient = {
+      async searchPeople(request) { fullPeopleCalls.push(request); return { candidates: [] }; },
+    };
+    const fullenrichEmail: FullEnrichEmailClient = {
+      async enrichEmail(request) {
+        fullEmailCalls.push(request);
+        return { email: "dana@harborvision.example", quality: "weak_work", provider: "fullenrich", status: "UNKNOWN" };
+      },
+    };
+    const bettercontact: BetterContactClient = {
+      async enrichEmail(request) {
+        betterCalls.push(request);
+        return { email: "dana.whitfield@harborvision.example", quality: "safe_work", provider: "bettercontact" };
+      },
+    };
+
+    const result = await enrichPractice({
+      db: t.db,
+      scrape: scraperWithSocial(),
+      extract: FakeExtractClient.fromFixture(roleOnly),
+      fullenrichPeople,
+      fullenrichEmail,
+      bettercontact,
+      meter,
+      now: () => NOW,
+      logger: SILENT,
+    }, {
+      id: practiceId,
+      name: "Harbor Vision Eye Care",
+      city: "Portland",
+      state: "OR",
+      websiteUrl: "https://harborvision.example",
+    });
+
+    expect(result.status).toBe("enriched");
+    expect(result.providerCalls).toMatchObject({ prospeo: 0, fullenrichPeople: 0, fullenrichEmail: 1, bettercontact: 1 });
+    expect(fullPeopleCalls).toHaveLength(0);
+    expect(fullEmailCalls).toHaveLength(1);
+    expect(betterCalls).toHaveLength(1);
+
+    const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
+    expect(contact.email).toBe("dana.whitfield@harborvision.example");
+    expect(contact.emailProvider).toBe("bettercontact");
+    expect(contact.emailQuality).toBe("safe_work");
+  });
+
   it("persists a BetterContact safe-work upgrade over an existing weak FullEnrich email", async () => {
     const { practiceId } = await resolvePractice(t.db, {
       name: "Harbor Vision Eye Care",
@@ -170,13 +235,13 @@ describe("coverage-first waterfall production path", () => {
     });
 
     expect(result.status).toBe("enriched");
-    expect(result.providerCalls).toMatchObject({ prospeo: 0, fullenrichPeople: 1, fullenrichEmail: 1, bettercontact: 1 });
+    expect(result.providerCalls).toMatchObject({ prospeo: 0, fullenrichPeople: 0, fullenrichEmail: 1, bettercontact: 1 });
 
     const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
     expect(contact.email).toBe("dana.whitfield@harborvision.example");
     expect(contact.emailProvider).toBe("bettercontact");
     expect(contact.emailQuality).toBe("safe_work");
-    expect(contact.personProvider).toBe("fullenrich");
+    expect(contact.personProvider).toBeNull();
   });
   it("persists an honest no-contact marker after FullEnrich people misses", async () => {
     const { practiceId } = await resolvePractice(t.db, {

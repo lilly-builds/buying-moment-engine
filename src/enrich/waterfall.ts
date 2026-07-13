@@ -1,6 +1,7 @@
 import {
   fillPracticeSocialLinks,
   getContact,
+  getNamedContacts,
   setEnrichmentStatus,
   upsertContact,
   upsertPracticeFact,
@@ -34,6 +35,7 @@ import type { ScrapeResult } from "./scrape";
 import { ProviderBlockedError } from "./types";
 import type {
   BetterContactClient,
+  CoverageProvider,
   DiscoveredContactCandidate,
   EmailQuality,
   ExtractClient,
@@ -604,6 +606,44 @@ function providerCalls() {
 }
 
 
+function storedProviderToCoverageProvider(
+  provider: string | null | undefined,
+): CoverageProvider | null {
+  if (
+    provider === "website_scrape" ||
+    provider === "prospeo" ||
+    provider === "fullenrich" ||
+    provider === "bettercontact" ||
+    provider === "org_website"
+  ) {
+    return provider;
+  }
+  return null;
+}
+
+async function candidatesFromStoredContacts(
+  deps: Pick<WaterfallDeps, "db">,
+  practiceId: string,
+): Promise<DiscoveredContactCandidate[]> {
+  const stored = await getNamedContacts(deps.db, practiceId);
+  return stored.flatMap((contact) => {
+    if (!contact.name?.trim()) return [];
+    return [{
+      name: contact.name,
+      role: contact.role,
+      email: contact.email,
+      emailQuality: contact.emailQuality ?? undefined,
+      emailProvider: storedProviderToCoverageProvider(contact.emailProvider),
+      linkedinUrl: contact.linkedinUrl,
+      sourceProvider:
+        storedProviderToCoverageProvider(contact.personProvider) ??
+        storedProviderToCoverageProvider(contact.linkedinProvider),
+      sourceUrl: contact.sourceUrl,
+      confidence: 0.8,
+    }];
+  });
+}
+
 function candidateFromWebsite(findings: ResearchFindings): DiscoveredContactCandidate | null {
   const dm = findings.decisionMaker;
   if (!dm?.name) return null;
@@ -635,7 +675,9 @@ async function runCoverageFirstPath(
   const calls = providerCalls();
   const targetRoles = CONTACT_DISCOVERY_ROLES;
   const domain = websiteDomain(practice.websiteUrl);
-  const candidates: DiscoveredContactCandidate[] = [];
+  const candidates: DiscoveredContactCandidate[] = [
+    ...(await candidatesFromStoredContacts(deps, practice.id)),
+  ];
   const websiteCandidate = candidateFromWebsite(findings);
   if (websiteCandidate) candidates.push(websiteCandidate);
 
@@ -674,8 +716,8 @@ async function runCoverageFirstPath(
     | "fullenrich"
     | "bettercontact"
     | "org_website"
-    | null = email ? candidate?.sourceProvider ?? "website_scrape" : null;
-  let emailQuality: EmailQuality = email ? "safe_work" : "none";
+    | null = email ? candidate?.emailProvider ?? candidate?.sourceProvider ?? "website_scrape" : null;
+  let emailQuality: EmailQuality = email ? candidate?.emailQuality ?? "safe_work" : "none";
   let fullenrichEmail: PersonEmailResult | null = null;
 
   if (candidate?.name) {
