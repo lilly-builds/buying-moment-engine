@@ -1,5 +1,5 @@
 import { getDb } from "@/db/client";
-import { feedPractices } from "@/db/queries";
+import { dashboardFeedPractices } from "@/db/queries";
 import { isFresh } from "@/src/engine/freshness";
 import { toVerticalSlug } from "@/src/ui/signal-display";
 import { PageContainer, TopNav } from "@/design/components";
@@ -22,7 +22,7 @@ async function loadFeed(): Promise<FeedItem[]> {
   const now = new Date();
   let rows;
   try {
-    rows = await feedPractices(getDb(), now);
+    rows = await dashboardFeedPractices(getDb(), now);
   } catch {
     // No DATABASE_URL, or the DB is unreachable -> the designed empty state, never
     // a crash. The demo must render on a keyless clone.
