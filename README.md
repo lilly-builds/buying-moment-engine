@@ -233,11 +233,15 @@ review reader is also there for targeted cross-checks when a place's ID is alrea
   through Drizzle, Anthropic Claude for research and brief synthesis (Opus 4.8 for the outreach voice,
   Sonnet 5 and Haiku 4.5 for extraction), a Prospeo, FullEnrich, then BetterContact provider waterfall
   for contact data, and HubSpot for CRM, send, and email analytics behind a single OAuth grant.
-- **Contact selection and grading:** every contact is written with a buyer tier (A through E,
-  owner-operator down to reachable fallback) and an email-quality grade (safe work, weak, unverified,
-  personal, org inbox, or none). A FullEnrich `HIGH_PROBABILITY` result is stored but counted as weak
-  until a second provider upgrades it, and the waterfall short-circuits on the first sufficient result,
-  so a practice whose own site already yields a named decision-maker never triggers a paid person search.
+- **Contact quality labels:** every contact the engine saves carries two honesty labels. A buyer tier
+  ranks how senior the person is, from A (owner or CEO) down to E (a clinician who is not an owner),
+  with a separate reachable-fallback tier for someone who is not the decision-maker but still gives the
+  rep a way in. An email grade rates how much to trust the address, from a verified work email, down
+  through a likely-but-unconfirmed one, a personal address, or a generic office inbox, to none. One rule
+  keeps those grades honest: when a provider returns an email it only calls "high probability," the
+  engine records it as weak, not safe, until a second provider confirms it. And because the engine works
+  cheapest-first, a practice whose own website already names a decision-maker never triggers a paid
+  contact search.
 - **Data layer:** a normalized Postgres schema is the system of record, with provenance on every fact
   (its source URL plus the timestamp it was detected). Ingestion is idempotent, with upserts guarded by
   `ON CONFLICT` and existence checks so re-runs neither duplicate nor overwrite real rows; raw scraped
@@ -250,11 +254,14 @@ review reader is also there for targeted cross-checks when a place's ID is alrea
   text the model writes, and each of its claims must reference an evidence ID present in its own input.
   A brief clears three gates before it persists: schema shape, citation closure, and a numeric-grounding
   lint. One whose claims cannot be grounded is discarded, not stored.
-- **Send:** the rep-edited body is written to a single HubSpot custom contact property, and the contact
-  is enrolled in a Sequence whose template is one `{{custom_body}}` token, so the message sends from the
-  rep's own mailbox with native open, click, and reply tracking while shipping the exact edited text.
-  That one OAuth grant covers CRM writes, send, and analytics. Per-tenant OAuth tokens and pasted API
-  keys are encrypted at rest with AES-256-GCM.
+- **Send:** the rep-edited subject and body are written to per-contact HubSpot custom properties, and
+  the contact is enrolled in a Sequence whose email template is just those two personalization tokens
+  and nothing else, so the message sends from the rep's own mailbox with native open, click, and reply
+  tracking while shipping the exact edited text. HubSpot has no API to create a Sequence, so the
+  one-time setup is driven by a Claude prompt run in the Chrome extension: it builds the custom
+  properties and the Sequence in the HubSpot UI and returns the sequence ID to paste on the Connections
+  page. One OAuth grant then covers CRM writes, send, and analytics; per-tenant tokens and pasted keys
+  are encrypted at rest with AES-256-GCM.
 - **Cost metering:** every paid call (Claude, the contact providers, the detectors) is recorded at the
   call site into a `cost_events` table with its provider, operation, and USD cost, so the scoreboard's
   CAC is derived from metered spend rather than a manual tally.
