@@ -302,6 +302,65 @@ describe("runEngine", () => {
   });
 
 
+
+  it("excludes exhausted no-contact markers from the needs_contact cohort", async () => {
+    const exhausted = await upsertPractice(t.db, {
+      name: "Exhausted No Contact Clinic",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+      websiteUrl: "https://exhausted.example",
+    });
+    await tagVertical(t.db, exhausted.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: exhausted.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/exhausted",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+    await upsertContact(t.db, {
+      practiceId: exhausted.id,
+      role: "Practice Administrator",
+      emailQuality: "none",
+      buyerTier: "none",
+      selectedContactClassification: "none",
+      fallbackReason: "no usable named contact from Prospeo or FullEnrich",
+    });
+
+    const needsContact = await upsertPractice(t.db, {
+      name: "Still Needs Contact Clinic",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+      websiteUrl: "https://needs-contact.example",
+    });
+    await tagVertical(t.db, needsContact.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: needsContact.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/needs-contact",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      pipelineClients: undefined,
+      briefLimit: 10,
+      downstreamCohort: "needs_contact",
+      logger: quiet,
+    });
+
+    expect("eligible" in summary.downstream && summary.downstream.eligible).toBe(1);
+  });
+
   it("can run a real downstream enrichment-only batch without generating briefs", async () => {
     await seedGoldenPractice(t.db);
 

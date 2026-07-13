@@ -184,19 +184,22 @@ async function filterDownstreamCohort<T extends { id: string; websiteUrl?: strin
       name: contacts.name,
       email: contacts.email,
       emailQuality: contacts.emailQuality,
+      selectedContactClassification: contacts.selectedContactClassification,
     })
     .from(contacts)
     .where(inArray(contacts.practiceId, websitePresent.map((practice) => practice.id)));
 
-  const byPractice = new Map<string, { hasName: boolean; hasEmail: boolean; hasWeakEmail: boolean }>();
+  const byPractice = new Map<string, { hasName: boolean; hasEmail: boolean; hasWeakEmail: boolean; exhaustedNoContact: boolean }>();
   for (const row of rows) {
     const entry = byPractice.get(row.practiceId) ?? {
       hasName: false,
       hasEmail: false,
       hasWeakEmail: false,
+      exhaustedNoContact: false,
     };
     entry.hasName ||= Boolean(row.name?.trim());
     entry.hasEmail ||= Boolean(row.email?.trim());
+    entry.exhaustedNoContact ||= row.selectedContactClassification === "none";
     entry.hasWeakEmail ||=
       row.emailQuality === "weak_work" ||
       row.emailQuality === "personal" ||
@@ -208,7 +211,7 @@ async function filterDownstreamCohort<T extends { id: string; websiteUrl?: strin
   if (cohort === "needs_contact") {
     return websitePresent.filter((practice) => {
       const entry = byPractice.get(practice.id);
-      return !entry || !entry.hasName || !entry.hasEmail;
+      return !entry || (!entry.exhaustedNoContact && (!entry.hasName || !entry.hasEmail));
     });
   }
 

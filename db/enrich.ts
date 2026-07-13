@@ -253,6 +253,16 @@ export async function upsertContact(
         .where(eq(contacts.id, existing.id));
       filled.push("email");
     }
+    if (!input.email && input.emailQuality && existing.emailQuality === null) {
+      await tx
+        .update(contacts)
+        .set({
+          emailProvider: input.emailProvider ?? null,
+          emailQuality: input.emailQuality,
+        })
+        .where(and(eq(contacts.id, existing.id), isNull(contacts.emailQuality)));
+      filled.push("emailQuality");
+    }
     if (input.linkedinUrl && existing.linkedinUrl === null) {
       await tx
         .update(contacts)

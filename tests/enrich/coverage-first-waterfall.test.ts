@@ -188,4 +188,56 @@ describe("coverage-first waterfall production path", () => {
     expect(contact.emailQuality).toBe("safe_work");
     expect(contact.personProvider).toBe("prospeo");
   });
+  it("persists an honest no-contact marker after Prospeo and FullEnrich people both miss", async () => {
+    const { practiceId } = await resolvePractice(t.db, {
+      name: "No Contact Eye Care",
+      geoKey: "portland-or",
+    });
+    const { meter } = recordingMeter();
+
+    const prospeo: ProspeoClient = {
+      async searchPerson() { return { candidates: [] }; },
+    };
+    const fullenrichPeople: FullEnrichPeopleClient = {
+      async searchPeople() { return { candidates: [] }; },
+    };
+    const fullenrichEmail: FullEnrichEmailClient = {
+      async enrichEmail() { throw new Error("should not enrich email without a person"); },
+    };
+    const bettercontact: BetterContactClient = {
+      async enrichEmail() { throw new Error("should not enrich email without a person"); },
+    };
+
+    const result = await enrichPractice({
+      db: t.db,
+      scrape: scraperWithSocial(),
+      extract: FakeExtractClient.fromFixture(roleOnly),
+      prospeo,
+      fullenrichPeople,
+      fullenrichEmail,
+      bettercontact,
+      meter,
+      now: () => NOW,
+      logger: SILENT,
+    }, {
+      id: practiceId,
+      name: "No Contact Eye Care",
+      city: "Portland",
+      state: "OR",
+      websiteUrl: "https://nocontact.example",
+    });
+
+    expect(result.status).toBe("enriched");
+    expect(result.contactVariant).toBe("none");
+    expect(result.providerCalls).toMatchObject({ prospeo: 1, fullenrichPeople: 1, fullenrichEmail: 0, bettercontact: 0 });
+
+    const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
+    expect(contact.name).toBeNull();
+    expect(contact.email).toBeNull();
+    expect(contact.emailQuality).toBe("none");
+    expect(contact.buyerTier).toBe("none");
+    expect(contact.selectedContactClassification).toBe("none");
+    expect(contact.fallbackReason).toContain("no usable named contact");
+  });
+
 });

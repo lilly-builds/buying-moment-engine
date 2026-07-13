@@ -786,7 +786,24 @@ async function runCoverageFirstPath(
   );
 
   if (!candidate?.name && !email && !orgEmailFallback) {
-    log("enrich.coverage_first_no_contact", { practice: practice.name });
+    const fallbackReason =
+      "no usable named contact from Prospeo or FullEnrich; no organization inbox fallback found";
+    await upsertContact(deps.db, {
+      practiceId: practice.id,
+      role: findings.decisionMaker?.role.value ?? DEFAULT_DISCOVERY_ROLE,
+      name: null,
+      email: null,
+      emailProvider: null,
+      emailQuality: "none",
+      linkedinUrl: null,
+      linkedinProvider: null,
+      personProvider: null,
+      buyerTier: "none",
+      selectedContactClassification: "none",
+      fallbackReason,
+      sourceUrl: findings.decisionMaker?.role.sourceUrl ?? practice.websiteUrl ?? null,
+    });
+    log("enrich.coverage_first_no_contact", { practice: practice.name, fallbackReason });
     return { contactVariant: "none", providerCalls: calls };
   }
 
