@@ -3,11 +3,11 @@
  * lead TWO ways to get it, so a non-technical owner never has to dig through an
  * unfamiliar dashboard:
  *
- *  1. `chromePrompt` — paste into Claude Code + the Claude Chrome extension. Claude
- *     drives the dashboard right up to the key and PAUSES: the user does the final
- *     create/copy themselves, because an API key is a secret Claude must never read,
- *     copy, or type. The prompt also documents the sign-in step (Claude can't log in
- *     for you).
+ *  1. `chromePrompt` — paste into the Claude for Chrome extension. Claude GUIDES the
+ *     user: it walks them to the exact page and names the exact buttons, but the user
+ *     does every step that touches the key (create, copy, paste). Claude never
+ *     creates, adds, saves, reads, copies, or types the key, because it is a secret.
+ *     The prompt also documents the sign-in step (Claude can't log in for you).
  *  2. `manualSteps` — the same path written out, for anyone who'd rather click it
  *     themselves.
  *
@@ -34,13 +34,16 @@ export const ANTHROPIC_SETUP: KeySetup = {
   provider: "anthropic",
   keyUrl: "https://platform.claude.com/settings/keys",
   signIn: "You'll sign in to the Claude Console (email + password, or Google).",
-  chromePrompt: `Help me get my Anthropic (Claude) API key for GTM Maestro, using the Claude Chrome extension. Do the steps below and STOP right before the key is created — an API key is a secret, so never read, copy, or type it; I'll do that part.
+  chromePrompt: `Help me create my own Anthropic (Claude) API key and paste it into GTM Maestro, using the Claude for Chrome extension. Your job is to GUIDE me: take me to the right page and tell me the exact buttons to click. For safety you never create, add, save, read, copy, or type the key. I do every step that touches the key myself, because an API key is a secret.
 
 1. Open https://platform.claude.com/settings/keys in a new tab.
-2. If a sign-in screen appears, PAUSE and tell me to sign in (I'll use email + password or Google). You can't log in for me. When I'm in, keep going.
-3. On the "API keys" page, click "Create key" (top-right).
-4. In the "Create API key" box: leave Workspace as "Default", and type the Name: gtm-maestro. Leave "Expires" blank.
-5. STOP. Tell me exactly this: "Click Add, then copy the key that appears (it starts with sk-ant- and is shown only once) and paste it into GTM Maestro's Anthropic field." Do NOT click Add, and do NOT read or copy the key.`,
+2. If a sign-in screen shows, tell me to sign in (email and password, or Google). You cannot sign in for me. Wait until I am on the "API keys" page, then continue.
+3. Point me to the "Create key" button in the top right and tell me to click it.
+4. In the "Create API key" box, tell me to leave Workspace on "Default", type the name gtm-maestro, leave "Expires" blank, and click "Add".
+5. Tell me that the key now appears one time and starts with sk-ant-, and that I should copy it myself.
+6. Take me back to the GTM Maestro Integrations page and tell me to paste my key into the Anthropic field and click Save. If GTM Maestro asks me to sign in first, tell me to sign in, then continue.
+
+At no point do you read, copy, or type the key. Just tell me where to click. If you are ever unsure, stop and ask me.`,
   manualSteps: [
     "Go to platform.claude.com/settings/keys (sign in if it asks).",
     'Click "Create key" (top-right).',
@@ -55,12 +58,15 @@ export const PDL_SETUP: KeySetup = {
   keyUrl: "https://dashboard.peopledatalabs.com",
   signIn:
     "PDL emails you a one-time code to sign in (it does not use a password).",
-  chromePrompt: `Help me get my People Data Labs (PDL) API key for GTM Maestro, using the Claude Chrome extension. Do the steps below and STOP right before I copy the key — an API key is a secret, so never read, copy, or type it.
+  chromePrompt: `Help me get my People Data Labs (PDL) API key and paste it into GTM Maestro, using the Claude for Chrome extension. Your job is to GUIDE me: take me to the right page and tell me the exact spot to click. For safety you never read, copy, or type the key. I do every step that touches the key myself, because an API key is a secret.
 
 1. Open https://dashboard.peopledatalabs.com in a new tab.
-2. If it says "Verify Your Identity", PDL just emailed me a code. PAUSE and tell me to check my email, type the code, and click Continue. You can't enter my code. When I'm in, keep going.
-3. On the Home page, find the "My API Key" box near the top.
-4. STOP. Tell me exactly this: "Click the Copy button next to 'My API Key', then paste it into GTM Maestro's People Data Labs field." Do NOT read or copy the key. (If I'd rather make a fresh key, tell me to click "Manage Keys" and create one there.)`,
+2. If it says "Verify Your Identity", PDL just emailed me a code. Tell me to check my email, type the code, and click Continue. You cannot enter my code. Wait until I am on the Home page, then continue.
+3. Point me to the "My API Key" box near the top of the Home page.
+4. Tell me to click the Copy button next to my key, and that I copy it myself. (If I would rather create a fresh key, tell me to click "Manage Keys" and make one there.)
+5. Take me back to the GTM Maestro Integrations page and tell me to paste my key into the People Data Labs field and click Save. If GTM Maestro asks me to sign in first, tell me to sign in, then continue.
+
+At no point do you read, copy, or type the key. Just tell me where to click. If you are ever unsure, stop and ask me.`,
   manualSteps: [
     "Go to dashboard.peopledatalabs.com (if it asks, enter the code PDL emails you and click Continue).",
     'On the Home page, find the "My API Key" box near the top.',
@@ -77,16 +83,19 @@ export const KEY_SETUPS: Record<"anthropic" | "pdl", KeySetup> = {
 
 /**
  * The HubSpot SEQUENCE setup — the one send step no API can automate (HubSpot has
- * no create/list-sequence endpoint). The RevOps leader hands this prompt to Claude
- * Code + the Claude Chrome extension; the agent builds the dynamic sequence in
- * their HubSpot AND (hands-free, STEP D) writes the sequence ID back into GTM
- * Maestro's "Sequence ID" field, so the leader pastes nothing.
+ * no create/list-sequence endpoint). The RevOps leader pastes this prompt into the
+ * Claude for Chrome extension; the agent verifies/creates the six contact properties
+ * (STEP A — the app auto-provisions them at connect, but a stale portal can be
+ * missing some, so the agent completes them), builds the dynamic sequence, AND
+ * (hands-free, STEP D) writes the sequence ID back into GTM Maestro's "Sequence ID"
+ * field, so the leader pastes nothing.
  *
- * SINGLE SOURCE OF TRUTH: this is `onboarding/hubspot-setup-handoff.md` Path (2),
- * copied VERBATIM — the Connections page renders it and the doc mirrors it, so the
- * wording never drifts. The STEP D "read the ID → Save → VERIFY the badge" flow is
- * load-bearing (it closes the zero-paste loop); the "STOP before anything that
- * would send" guardrail is load-bearing (D9). Do NOT edit either.
+ * SOURCE OF TRUTH: `sequence-setup-prompt.ts`. It mirrors
+ * `onboarding/hubspot-setup-handoff.md` Path (2); keep the doc in sync when it
+ * changes. The STEP D "read the ID → Save → VERIFY the badge" flow closes the
+ * zero-paste loop; the "STOP before anything that would send" guardrail keeps D9;
+ * the six token names must equal the property labels in `hubspot-send.ts`. All
+ * three are guarded by `connections.test.ts`.
  */
 export interface SequenceSetup {
   /** One-line "what this does" for the card intro. */
@@ -101,7 +110,7 @@ export interface SequenceSetup {
 
 export const SEQUENCE_SETUP: SequenceSetup = {
   summary:
-    "Build your send sequence once. Claude can do it for you, then fill the ID in here.",
+    "The GTM Maestro drafts a customized 3-part email sequence. It sends through a HubSpot email sequence, so your whole customer journey gets tracked in one hub. Use the Claude for Chrome prompt below to set up this email sequence agentically (yes, it sets up the full flow for you). P.S. it may take 5 to 10 minutes to set up, so you can leave Claude for Chrome running in the background.",
   hubspotUrl: "https://app.hubspot.com/sequences",
   // Verbatim from the handoff doc (see `sequence-setup-prompt.ts` — never retyped).
   chromePrompt: HUBSPOT_SEQUENCE_PROMPT,

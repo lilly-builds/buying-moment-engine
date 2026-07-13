@@ -8,6 +8,11 @@ import {
 } from "@/src/connect/connections";
 import { KEY_SETUPS, SEQUENCE_SETUP } from "@/src/connect/setup-prompts";
 import { HUBSPOT_SEQUENCE_PROMPT } from "@/src/connect/sequence-setup-prompt";
+import {
+  SEND_TOUCH_COUNT,
+  bodyPropertyPayload,
+  subjectPropertyPayload,
+} from "@/src/send/hubspot-send";
 
 /** Every icon the checklist uses must be a real StepIcon glyph (guards typos). */
 const STEP_ICON_KEYS = [
@@ -167,6 +172,30 @@ describe("SEQUENCE_SETUP prompt (U5)", () => {
     expect(p).toContain('the badge flips to "Set"');
     // D9: the agent must stop before any send.
     expect(p).toContain("STOP before anything that would send");
+  });
+
+  it("keeps STEP A as verify-and-complete (a stale portal can be missing properties)", () => {
+    // The app auto-provisions at connect, but a portal connected before per-touch
+    // copy / the contacts-schema scope shipped can be missing some — a real run
+    // (2026-07-13) found only 2 of 6. So the prompt must still walk the agent
+    // through creating any that are missing, keyed by the exact internal names.
+    const p = SEQUENCE_SETUP.chromePrompt;
+    expect(p).toContain("Create property");
+    expect(p).toContain("gtm_maestro_custom_subject_3");
+    expect(p).toContain("gtm_maestro_custom_body_3");
+  });
+
+  it("every token the prompt names is the exact LABEL the app provisions", () => {
+    // The agent picks each personalization token by its property label. If the
+    // provisioned label (hubspot-send.ts) and the token name in the prompt drift
+    // apart, the agent inserts nothing — so pin every one to the prompt verbatim.
+    const p = SEQUENCE_SETUP.chromePrompt;
+    for (let touch = 1; touch <= SEND_TOUCH_COUNT; touch++) {
+      // Quote the token so touch 1 ("…Custom Subject") can't false-pass on the
+      // touch-2 line ("…Custom Subject 2"); the prompt wraps every token in quotes.
+      expect(p).toContain(`"${subjectPropertyPayload(touch).label}"`);
+      expect(p).toContain(`"${bodyPropertyPayload(touch).label}"`);
+    }
   });
 });
 

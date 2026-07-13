@@ -107,10 +107,13 @@ export class BodyTooLongError extends Error {
 export function bodyPropertyPayload(touchNumber: number): Record<string, unknown> {
   return {
     name: touchPropertyPair(touchNumber).body,
+    // The visible label MUST equal the token name the Chrome-setup prompt tells the
+    // agent to insert (SEQUENCE_SETUP.chromePrompt) — the agent picks the token by
+    // this label. connections.test.ts locks the two together so they never drift.
     label:
       touchNumber <= 1
-        ? "GTM Maestro — email body"
-        : `GTM Maestro — email body (touch ${touchNumber})`,
+        ? "GTM Maestro Custom Body"
+        : `GTM Maestro Custom Body ${touchNumber}`,
     type: "string",
     // textarea = multi-line, so plain-text bodies with newlines round-trip intact.
     fieldType: "textarea",
@@ -122,10 +125,11 @@ export function bodyPropertyPayload(touchNumber: number): Record<string, unknown
 export function subjectPropertyPayload(touchNumber: number): Record<string, unknown> {
   return {
     name: touchPropertyPair(touchNumber).subject,
+    // Label MUST equal the prompt's token name (see bodyPropertyPayload note).
     label:
       touchNumber <= 1
-        ? "GTM Maestro — email subject"
-        : `GTM Maestro — email subject (touch ${touchNumber})`,
+        ? "GTM Maestro Custom Subject"
+        : `GTM Maestro Custom Subject ${touchNumber}`,
     type: "string",
     // A subject is one line — single-line text.
     fieldType: "text",
