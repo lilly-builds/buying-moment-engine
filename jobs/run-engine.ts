@@ -211,7 +211,9 @@ async function filterDownstreamCohort<T extends { id: string; websiteUrl?: strin
   if (cohort === "needs_contact") {
     return websitePresent.filter((practice) => {
       const entry = byPractice.get(practice.id);
-      return !entry || (!entry.exhaustedNoContact && (!entry.hasName || !entry.hasEmail));
+      if (!entry) return true;
+      if (entry.exhaustedNoContact && !entry.hasName && !entry.hasEmail) return false;
+      return !entry.hasName || !entry.hasEmail;
     });
   }
 
