@@ -277,6 +277,7 @@ Everything else runs without it.
 - [`docs/spec.md`](docs/spec.md) - the full product spec: the user story, the decision log (D1-D15), the signal catalog, and the locked stack
 - [`docs/signal-catalog.md`](docs/signal-catalog.md) - every buying signal: built, parked, and the roadmap
 - [`docs/data-signal-system.md`](docs/data-signal-system.md) - how the live signal engine fetches, classifies, resolves, de-dupes, meters, and ranks signals
+- [`docs/test-runs/2026-07-13-enrichment-elevation.md`](docs/test-runs/2026-07-13-enrichment-elevation.md) - the test record behind the coverage-first enrichment waterfall: the provider bakeoffs, the real numbers, and why Prospeo goes first
 - [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md) - the exact math and honesty tag behind every scoreboard number
 - [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md) - the one-time admin setup (OAuth plus keys)
 - [`docs/hubspot-send-setup.md`](docs/hubspot-send-setup.md) - the HubSpot send configuration
