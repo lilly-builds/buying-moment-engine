@@ -107,29 +107,18 @@ The two end goals (lagging metrics):
 - Cost to win a customer (CAC). Does each new customer cost less?
 
 The leading metrics that give data to guide optimizations that ultimately increase revenue and decrease CAC.
-┌────────────────────────────────────────────┬───────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────┐
-│                 The metric                 │        The question it answers        │                         The move it lets you make                         │
-├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
-│ Per-signal conversion rate                 │ Which buying signals turn into        │ Keep the signals that pay off, kill the ones that do not, and re-rank the │
-│                                            │ meetings?                             │  feed around them                                                         │
-├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
-│ Win rate, cost per meeting, and cycle      │ Which specialties win fastest and     │ Put reps and budget on the specialties that convert, and rework the pitch │
-│ time, by specialty                         │ cheapest?                             │  for the ones falling behind                                              │
-├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
-│ Messages to land a meeting                 │ How many messages does it take to     │ Fix the sequences that are not landing                                    │
-│                                            │ land a meeting?                       │                                                                           │
-├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
-│ Cost per meeting                           │ What does each booked meeting cost?   │ Put budget where meetings are cheapest                                    │
-├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
-│ Lead-quality feedback, thumbs up or down   │ Did the AE mark the lead good or not? │ Learn what a good lead looks like, so the engine finds more and wastes    │
-│                                            │                                       │ less                                                                      │
-└────────────────────────────────────────────┴───────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────┘
+| The metric | The question it answers | The move it lets you make |
+|---|---|---|
+| Per-signal conversion rate | Which buying signals turn into meetings? | Keep the signals that pay off, kill the ones that do not, and re-rank the feed around them |
+| Win rate, cost per meeting, and cycle time, by specialty | Which specialties win fastest and cheapest? | Put reps and budget on the specialties that convert, and rework the pitch for the ones falling behind |
+| Messages to land a meeting | How many messages does it take to land a meeting? | Fix the sequences that are not landing |
+| Cost per meeting | What does each booked meeting cost? | Put budget where meetings are cheapest |
+| Lead-quality feedback, thumbs up or down | Did the AE mark the lead good or not? | Learn what a good lead looks like, so the engine finds more and wastes less |
 
 Metrics per customer segment:
 Every number is viewable for the whole book of business or one specialty at a time, so you can see which vertical is carrying the result.
   
----- The full
-math behind every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md).
+The full math behind every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md).
 
 ![The ROI scoreboard, scrolling from the headline numbers through per-signal, per-specialty, feedback, and the big test](docs/screenshots/scoreboard.gif)
 *The scoreboard. Every number carries a measured or modeled tag, and an empty metric shows a dash instead of a fake number.*
@@ -171,26 +160,50 @@ Step-by-step is in [`docs/revops-connections-guide.md`](docs/revops-connections-
 
 ## How it works (architecture)
 
-```
-  Discovery + detectors            Enrichment waterfall           Synthesis + feed
-  ---------------------            --------------------           ----------------
-  Adzuna  (staffing spike) ─┐      Claude reads the real     ┐    Cited two-tier brief
-  GDELT   (growth events)  ─┼──▶   site + finds the signals  ├─▶  persisted in Postgres
-  Google Places (reviews)  ─┘      PDL fills verified gaps   ┘    Ranked push feed + pull
-                                   (work email, LinkedIn)         ROI scoreboard
+The engine runs in three stages. It watches public data for a buying moment (discovery: Adzuna for
+front-desk hiring spikes, GDELT for growth news, Google Places for phone-complaint reviews),
+researches each practice and finds a real contact (the enrichment waterfall, below), then writes the
+cited two-tier brief and ranks it into the push feed and the ROI scoreboard (synthesis).
+
+The enrichment waterfall is coverage-first: the aim is a real, reachable contact at as many practices
+as possible, so it does the cheap step first and only pays for the next one when it has to.
+
+```mermaid
+flowchart TD
+    A[Practice with a website] --> B[Scrape the real site and hold the pages]
+    B --> C[Claude reads the pages and keeps<br/>only facts it can quote word-for-word]
+    B --> D[Grab the office inbox and the LinkedIn /<br/>Facebook pages as a backup]
+
+    C --> E{Do we already have<br/>a strong buyer contact?}
+    E -->|Yes| I[Rank the candidates and pick the best buyer]
+    E -->|No or weak| F[Prospeo: search for the owner, manager, or admin]
+    F --> G{Found someone usable?}
+    G -->|Yes| I
+    G -->|No or weak| H[FullEnrich: run the same search as a fallback]
+    H --> I
+
+    I --> J[FullEnrich: find their work email]
+    J --> K{Safe work email?}
+    K -->|Yes| M[Save the contact with a buyer tier and an email grade]
+    K -->|No or weak| L[BetterContact: fill in or upgrade the email]
+    L --> M
+    D -.->|used only if no personal email| M
+    M --> N[Score how complete the contact is, and why]
 ```
 *Google Places phone complaints are live through the discovery path, and the standalone per-place
 review reader is also there for targeted cross-checks when a place's ID is already known.*
 
 - The stack (the main tools it is built on): Next.js and TypeScript for the app, a Supabase Postgres
-  database reached through Drizzle, Anthropic's Claude for the research and brief writing, People Data
-  Labs for verified contact info, and HubSpot for the CRM and email send, all on that one OAuth
+  database reached through Drizzle, Anthropic's Claude for the research and brief writing, a short
+  waterfall of contact-data providers (Prospeo, FullEnrich, and BetterContact) for finding and
+  verifying the decision-maker, and HubSpot for the CRM and email send, all on that one OAuth
   connection.
-- The enrichment waterfall. "Waterfall" just means it does the cheap step first and only pays for the
-  expensive one to fill gaps. Claude does the web research: it reads the practice's real website and
-  reviews, finds the buying-moment signals, and cites every fact. Then People Data Labs fills only the
-  few gaps Claude cannot reliably get on its own, like a work email or a LinkedIn URL. Claude first,
-  PDL for the leftovers, so the cost stays low.
+- The enrichment waterfall, kept honest. The chart above is the whole flow. What it does not show is
+  the labeling: every saved contact carries a buyer tier (how senior the person is, from owner down to
+  a reachable fallback) and an email grade (safe work, weak, personal, office inbox, or none). So
+  coverage-first never means dressing up a weak contact as a strong one, and a rep sees how good a
+  contact really is before spending a message on it.
+
 - The data layer. It is a tidy Postgres database that acts as the single source of truth. Every fact
   carries its origin (the source URL and the moment it was spotted). Loading data is idempotent,
   meaning you can run it twice without creating duplicates. Raw data is kept separate from anything
@@ -203,12 +216,26 @@ review reader is also there for targeted cross-checks when a place's ID is alrea
   open, click, and reply tracking, while still shipping the exact words the rep wrote. That one OAuth
   connection covers the CRM, the send, and the tracking. Every stored token and pasted key is
   encrypted where it sits, using AES-256-GCM (a strong, standard encryption method).
-- Cost is a live number. Every paid API call (Claude, PDL, the detectors) is logged with its cost the
+- Cost is a live number. Every paid API call (Claude, the contact-data providers, the detectors) is logged with its cost the
   moment it happens, into a `cost_events` table. So the CAC on the scoreboard is real spend, not a
   number someone tallied by hand.
 - Scheduled runs. A Vercel Cron timer (a scheduled job, set for 8am on weekdays) is wired up to fire
   the whole engine each weekday morning. It is built and merged, but it stays asleep until its
   `CRON_SECRET` is set in the deploy, so it cannot fire by accident.
+
+---
+
+## Where this goes next
+
+Everything above is built. Here is where the engine is headed, in priority order, starting with the biggest.
+
+**The full-lifecycle learning loop** is the top priority and the biggest elevation on the list. Today the engine learns from public signals and the AE's thumbs up or down. The next step closes the loop with what actually happens on the sales call. Call recordings flow back into the system, and what was said (the objections that came up, the words that landed, the reasons a deal stalled or closed) feeds forward into the next brief, the next outreach message, and even the buying signals themselves. The engine stops leaning on public data alone and starts learning from real conversations, so every call makes the next one sharper. This is what turns a lead engine into a compounding one.
+
+**A mega-database of buying signals** is next. Today the engine reads three (front-desk hiring, phone-complaint reviews, growth events). The roadmap is a much larger library to pull from, so the engine can catch a buying moment from many more angles and rank on far richer evidence. More signals means more real moments caught, and a feed a competitor cannot easily copy.
+
+**A marketing suite** would warm the lead before sales ever calls. Once the engine spots a practice in a buying moment, marketing can go first. Using AI-generated and Claude-edited video plus hyper-targeted Meta ad campaigns, the company puts a few branded touches in front of that exact practice before any sales email or call arrives. By the time the AE reaches out, the prospect already thinks "I've heard of you." Same buying moment, but the first sales touch lands on a warm name instead of a cold one.
+
+**Brand voice settings** would let each team shape how the drafted emails sound: tone, style, and wording, set once. The AEs and the marketing team teach the engine their voice, so the drafts come out closer to send-ready and there is far less editing per message. Faster sends, and every message still sounds like the team wrote it.
 
 ---
 
