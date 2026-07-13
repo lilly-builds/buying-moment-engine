@@ -52,3 +52,12 @@ experiment-*-results.jsonl
 # HubSpot CLI personal access key (never commit)
 .hs-pak
 hubspot.config.yml
+
+# Enrichment vendor bakeoff and run data: real decision-maker names and verified work
+# emails. The repo is PUBLIC. The sanitized narrative doc
+# (docs/test-runs/2026-07-13-enrichment-elevation.md) is committed; the raw dumps and the
+# full working logs are NOT.
+docs/test-runs/*.json
+docs/test-runs/*.csv
+docs/test-runs/elevate-enrichment.md
+docs/test-runs/2026-07-13-coverage-first-production-cron-canary.md
