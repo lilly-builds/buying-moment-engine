@@ -15,14 +15,15 @@ import { NAV_ITEMS } from "./top-nav";
  * static one stuck at the document bottom. Mounting at the root removes every such
  * ancestor, so the bar always pins to the viewport.
  *
- * Chrome matches the app's dark identity — the #0f042d deep-purple section colour —
- * translucent with a blur, the current tab in brand lavender. The fill is opaque
- * ENOUGH (85%) to stay legible even if iOS drops the backdrop-filter, and the bar
- * is promoted onto its own compositing layer (`translateZ(0)`), the combination
- * that keeps a fixed + blurred bar stable on iOS Safari. Every tab is a ≥56px tap
- * target, all four visible at once (no scroll, no clipping). Bottom padding clears
- * the home indicator. Hidden at md:+ (desktop uses the top bar) and on the auth +
- * immersive-intro screens that intentionally carry no nav.
+ * Chrome is the brand PURPLE (brand-800 #5627ba) — the app's action colour, not a
+ * grey — translucent with a blur, the current tab crisp white against it and the
+ * rest a dimmer white that reads as light-purple on the tinted bar (never grey).
+ * The fill is opaque ENOUGH (92%) to stay legible even if iOS drops the
+ * backdrop-filter, and the bar is promoted onto its own compositing layer
+ * (`translateZ(0)`), the combination that keeps a fixed + blurred bar stable on iOS
+ * Safari. Every tab is a ≥56px tap target, all four visible at once (no scroll, no
+ * clipping). Bottom padding clears the home indicator. Hidden at md:+ (desktop uses
+ * the top bar) and on the auth + immersive-intro screens that carry no nav.
  */
 
 const HIDDEN_ON = ["/login", "/signals"];
@@ -37,9 +38,9 @@ export function MobileTabBar() {
     <nav
       aria-label="Primary"
       className={cn(
-        "fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-surface-dark/85 md:hidden",
+        "fixed inset-x-0 bottom-0 z-40 border-t border-white/15 bg-brand-800/92 md:hidden",
         "backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)] [transform:translateZ(0)]",
-        "pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.55)]",
+        "pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_-12px_rgba(24,11,50,0.6)]",
       )}
     >
       <ul className="mx-auto flex max-w-md items-stretch">
@@ -54,8 +55,8 @@ export function MobileTabBar() {
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex min-h-14 flex-col items-center justify-center gap-1 px-1 pt-2 pb-1.5 transition-colors",
-                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-300",
-                  active ? "text-brand-300" : "text-white/55",
+                  "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white",
+                  active ? "text-white" : "text-white/60",
                 )}
               >
                 <Icon className="size-6 shrink-0" />

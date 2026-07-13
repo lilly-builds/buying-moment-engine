@@ -119,14 +119,16 @@ export function RevopsTour() {
   const step = steps.find((s) => s.order === state.step) ?? null;
   const active = state.status === "active" && step != null && step.page === currentPage;
 
-  // The element this step spotlights — or null for a card with no spotlight. On a
-  // PHONE the Scoreboard nav lives in the fixed bottom bar, behind the tour sheet:
-  // spotlighting it would hide the ring under the card and try to scroll a fixed
-  // element into view. So on mobile this transition step drops its spotlight — the
-  // sheet explains and Next opens the Scoreboard. Desktop still spotlights the
-  // top-nav button (and lets the learner click it to advance).
-  const spotlightTarget =
-    step && !isDesktop && step.target === "nav-scoreboard" ? null : step?.target ?? null;
+  const spotlightTarget = step?.target ?? null;
+
+  // The Scoreboard-nav transition step points AT the nav button. On desktop that
+  // button is in the top bar; on a PHONE it's in the fixed BOTTOM bar. So on mobile
+  // this step must point DOWN, not up: we still spotlight the real tab (the ring
+  // lands on the bottom-bar Scoreboard via `visibleTarget`), skip the scroll a fixed
+  // target doesn't need, and float the card ABOVE the bar so it never covers the
+  // thing it's highlighting. `visibleTarget` resolves the top vs bottom instance.
+  const isBottomNavStep =
+    active && !isDesktop && step?.target === "nav-scoreboard";
 
   const skip = useCallback(() => {
     store.write({ ...store.getSnapshot(), status: "skipped" });
@@ -200,6 +202,12 @@ export function RevopsTour() {
       if (el) {
         const r = el.getBoundingClientRect();
         const vh = window.innerHeight;
+        // A fixed bottom-nav target is always on-screen — scrolling toward it would
+        // only jostle the page (the element never moves), so leave the page put.
+        if (isBottomNavStep) {
+          raf = requestAnimationFrame(() => setSpot({ order: step.order, rect: rectOf(el) }));
+          return;
+        }
         if (r.top < NAV_BAR_HEIGHT) {
           // A sticky NAV link (a transition step pointing "up in your nav"): scroll
           // the page to the very top so the nav sits on its own dark hero and its
@@ -236,7 +244,7 @@ export function RevopsTour() {
     raf = requestAnimationFrame(look);
 
     return () => cancelAnimationFrame(raf);
-  }, [active, step, spotlightTarget]);
+  }, [active, step, spotlightTarget, isBottomNavStep]);
 
   // Keep the spotlight glued to the target as the page scrolls / resizes.
   useEffect(() => {
@@ -305,7 +313,11 @@ export function RevopsTour() {
         className={`fixed z-[70] ${
           isDesktop
             ? "transition-[top,left] duration-300 ease-out"
-            : "inset-x-0 bottom-0"
+            : isBottomNavStep
+              ? // Float ABOVE the bottom bar so the spotlit Scoreboard tab stays
+                // visible below the card it points to (clears bar + ring + a gap).
+                "inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))]"
+              : "inset-x-0 bottom-0"
         }`}
         style={isDesktop ? { top: pos.top, left: pos.left } : undefined}
       >
@@ -314,6 +326,7 @@ export function RevopsTour() {
           current={step.order}
           total={REVOPS_TOUR_STEP_COUNT}
           isLast={isLast}
+          floating={isBottomNavStep}
           onNext={advance}
           onSkip={skip}
         />

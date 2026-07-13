@@ -75,6 +75,12 @@ export interface StepCardProps {
   total: number;
   /** The final step shows "Done ✓" instead of "Next →". */
   isLast?: boolean;
+  /**
+   * Render as a rounded FLOATING card instead of a bottom sheet (mobile only).
+   * Used when the card is lifted off the bottom to sit above the nav bar it points
+   * at, so a flat sheet edge doesn't hang in mid-air. Desktop is unaffected.
+   */
+  floating?: boolean;
   onNext: () => void;
   onSkip: () => void;
   className?: string;
@@ -85,6 +91,7 @@ export function StepCard({
   current,
   total,
   isLast = false,
+  floating = false,
   onNext,
   onSkip,
   className,
@@ -105,13 +112,20 @@ export function StepCard({
         // footer stays pinned, so what you read and what you tap are always visible
         // without scrolling. Bottom padding clears the phone's home indicator, and
         // `sm:` restores the verified-live desktop card exactly.
-        "flex max-h-[85dvh] w-full flex-col gap-3 rounded-t-media bg-surface px-5 pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-card sm:max-h-none sm:w-[40rem] sm:max-w-[calc(100vw-2rem)] sm:gap-4 sm:rounded-media sm:px-8 sm:py-7",
+        "flex w-full flex-col gap-3 bg-surface shadow-card sm:max-h-none sm:w-[40rem] sm:max-w-[calc(100vw-2rem)] sm:gap-4 sm:rounded-media sm:px-8 sm:py-7",
+        // `floating` (lifted above the nav) is a rounded card; the default is the
+        // bottom sheet flush to the screen edge, whose bottom padding clears the
+        // home indicator and whose read-me region can scroll if a step runs long.
+        floating
+          ? "rounded-media px-5 py-6"
+          : "max-h-[85dvh] rounded-t-media px-5 pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]",
         className,
       )}
     >
       {/* The read-me content — a scrollable region on the mobile sheet; transparent
-          (`display:contents`) at sm:+ so the desktop card lays out exactly as before. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto sm:contents">
+          (`display:contents`) at sm:+ so the desktop card lays out exactly as before,
+          and on the compact floating card, whose short content needs no scroll. */}
+      <div className={cn(floating ? "contents" : "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto sm:contents")}>
       {/* 1 · the gradient orb, holding this step's icon */}
       <span
         className="flex h-12 w-12 shrink-0 items-center justify-center rounded-pill text-white shadow-soft sm:h-14 sm:w-14"
