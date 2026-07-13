@@ -174,17 +174,36 @@ export interface HubSpotSendDeps extends HubSpotHttpDeps {
 const ALREADY_EXISTS = [409] as const;
 
 /**
- * Create the per-touch subject + body contact properties (+ their group) if absent
- * — the whole set: one (subject, body) pair for each of the `SEND_TOUCH_COUNT`
- * touches. Idempotent (tolerate 409, like `ensureLeadProperties`): a write to a
- * property that does not exist 400s, so the token trick needs every pair the
- * Sequence steps reference provisioned first. Rides connect-time provisioning
- * (`completeHubSpotConnect`); also callable on the send path for out-of-band setup.
- * Called once per sender (memoised below).
+ * Create the per-touch subject + body contact properties (+ their group), and
+ * RECONCILE the label on any that already exist — the whole set: one (subject,
+ * body) pair for each of the `SEND_TOUCH_COUNT` touches. A write to a property
+ * that does not exist 400s, so the token trick needs every pair the Sequence
+ * steps reference provisioned first.
+ *
+ * Why reconcile the label (not just tolerate 409): the sequence's email steps pick
+ * each personalization token BY LABEL, and the app matches the prompt's token names
+ * (`connections.test.ts`). A portal provisioned by an older build carries a stale
+ * label (e.g. "GTM Maestro — email subject"), so a token labelled "GTM Maestro
+ * Custom Subject" would resolve to nothing and the email would render blank. The
+ * app — not the setup agent — must reliably get the field name right, so on every
+ * connect/reconnect we PATCH the label of an existing property back to canonical.
+ * Idempotent: a correct label PATCHes to itself. (Unlike the tag properties, whose
+ * labels an admin may legitimately customise, these are GTM Maestro-owned plumbing
+ * that must equal the prompt verbatim, so reconciling them is correct.)
+ *
+ * Rides connect-time provisioning (`completeHubSpotConnect`); also callable on the
+ * send path for out-of-band setup. Called once per sender (memoised below).
+ *
+ * `reconcileLabels` (default true) does the label-fix PATCH above. Connect passes
+ * it (that's when the sequence is being built and the label must be right); the
+ * send path passes `false` — by then the sequence's tokens are already bound to the
+ * internal names, so relabeling would be 6 pointless PATCHes on the hot path.
  */
 export async function ensureSendProperties(
   deps: HubSpotHttpDeps,
-): Promise<{ created: string[] }> {
+  opts?: { reconcileLabels?: boolean },
+): Promise<{ created: string[]; relabeled: string[] }> {
+  const reconcileLabels = opts?.reconcileLabels ?? true;
   const request = createHubSpotRequest(deps);
   await request(
     "POST",
@@ -193,18 +212,31 @@ export async function ensureSendProperties(
     { tolerate: ALREADY_EXISTS },
   );
   const created: string[] = [];
+  const relabeled: string[] = [];
   for (let touchNumber = 1; touchNumber <= SEND_TOUCH_COUNT; touchNumber++) {
     for (const payload of [
       subjectPropertyPayload(touchNumber),
       bodyPropertyPayload(touchNumber),
     ]) {
+      const name = String(payload.name);
       const res = await request("POST", "/crm/v3/properties/contacts", payload, {
         tolerate: ALREADY_EXISTS,
       });
-      if (!isTolerated(res)) created.push(String(payload.name));
+      if (!isTolerated(res)) {
+        // Freshly created — it already carries the canonical label.
+        created.push(name);
+        continue;
+      }
+      if (!reconcileLabels) continue;
+      // Already existed: force its label to the canonical value so the token the
+      // Sequence step inserts (picked by label) always resolves to this property.
+      await request("PATCH", `/crm/v3/properties/contacts/${name}`, {
+        label: payload.label,
+      });
+      relabeled.push(name);
     }
   }
-  return { created };
+  return { created, relabeled };
 }
 
 export function createHubSpotSender(deps: HubSpotSendDeps): SequenceSendAdapter {
@@ -222,7 +254,12 @@ export function createHubSpotSender(deps: HubSpotSendDeps): SequenceSendAdapter 
   let ensured: Promise<unknown> | null = null;
   function ensureOnce(): Promise<unknown> {
     if (!ensured) {
-      ensured = shouldProvision ? ensureSendProperties(deps) : Promise.resolve();
+      // No label reconcile on the send path: by send time the sequence's tokens are
+      // already bound to the internal names, so a relabel here would be dead weight.
+      // Connect (completeHubSpotConnect) does the reconcile, at setup time.
+      ensured = shouldProvision
+        ? ensureSendProperties(deps, { reconcileLabels: false })
+        : Promise.resolve();
     }
     return ensured;
   }

@@ -137,6 +137,10 @@ export function hubspotConnectMock(opts?: ConnectMockOptions): MockFetch {
       if (opts?.propertiesForbidden) {
         return { status: 403, body: { category: "MISSING_SCOPES" } };
       }
+      // A label-reconcile PATCH on an existing property (send fields) — echo OK.
+      if (call.method === "PATCH") {
+        return { status: 200, body: { name: call.path.split("/").pop() } };
+      }
       if (call.method !== "POST") {
         return { status: 404, body: {} };
       }
