@@ -69,7 +69,7 @@ export type PipelineClients = Pick<
   | "escalation"
 >;
 
-export type DownstreamCohort = "all" | "website_present" | "needs_contact" | "weak_email" | "website_missing";
+export type DownstreamCohort = "all" | "website_present" | "needs_contact" | "named_no_email" | "weak_email" | "website_missing";
 
 export interface RunEngineDeps {
   db: Database;
@@ -213,6 +213,13 @@ async function filterDownstreamCohort<T extends { id: string; websiteUrl?: strin
       if (!entry) return true;
       if (entry.exhaustedNoContact && !entry.hasName && !entry.hasEmail) return false;
       return !entry.hasName || !entry.hasEmail;
+    });
+  }
+
+  if (cohort === "named_no_email") {
+    return websitePresent.filter((practice) => {
+      const entry = byPractice.get(practice.id);
+      return Boolean(entry?.hasName) && !entry?.hasEmail;
     });
   }
 

@@ -68,6 +68,7 @@ function resolveDownstreamCohort(request: Request): DownstreamCohort {
   if (
     raw === "website_present" ||
     raw === "needs_contact" ||
+    raw === "named_no_email" ||
     raw === "weak_email" ||
     raw === "website_missing"
   ) {
