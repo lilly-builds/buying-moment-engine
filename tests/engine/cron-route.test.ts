@@ -81,3 +81,15 @@ describe("resolveBriefLimit", () => {
     expect(resolveBriefLimit()).toBe(MAX_ENGINE_BRIEF_LIMIT);
   });
 });
+
+
+describe("manual cron canary controls", () => {
+  it("query limit overrides the env limit for one authorized manual trigger", () => {
+    process.env.ENGINE_BRIEF_LIMIT = "10";
+    expect(resolveBriefLimit(new Request("https://app/api/cron/run-engine?limit=1"))).toBe(1);
+  });
+
+  it("query limit is still clamped", () => {
+    expect(resolveBriefLimit(new Request("https://app/api/cron/run-engine?limit=999"))).toBe(MAX_ENGINE_BRIEF_LIMIT);
+  });
+});

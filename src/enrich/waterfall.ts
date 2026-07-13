@@ -1,4 +1,5 @@
 import {
+  fillPracticeSocialLinks,
   getContact,
   setEnrichmentStatus,
   upsertContact,
@@ -20,13 +21,29 @@ import {
   type Gaps,
 } from "./gaps";
 import { runPdlPersonDiscover, runPdlPersonEnrich } from "./pdl";
+import { findOrgEmailFallback, type OrgEmailFallback } from "./org-email";
+import {
+  classifyBuyerTier,
+  classifySelection,
+  isWeakRole,
+  selectBestContact,
+} from "./contact-ranking";
+import { shouldUseBetterContactFallback } from "./email-quality";
 import { isEmptyFindings } from "./research-schema";
 import type { ScrapeResult } from "./scrape";
+import { ProviderBlockedError } from "./types";
 import type {
+  BetterContactClient,
+  DiscoveredContactCandidate,
+  EmailQuality,
   ExtractClient,
+  FullEnrichEmailClient,
+  FullEnrichPeopleClient,
   PdlClient,
   PdlPersonDiscoveryResult,
   PdlPersonResult,
+  PersonEmailResult,
+  ProspeoClient,
   ResearchClient,
   ResearchFindings,
 } from "./types";
@@ -74,7 +91,12 @@ export interface WaterfallDeps {
   db: Database;
   scrape: Scraper;
   extract: ExtractClient;
-  pdl: PdlClient;
+  /** Legacy PDL path kept only for older wiring/tests; coverage-first production uses the clients below. */
+  pdl?: PdlClient;
+  prospeo?: ProspeoClient;
+  fullenrichPeople?: FullEnrichPeopleClient;
+  fullenrichEmail?: FullEnrichEmailClient;
+  bettercontact?: BetterContactClient;
   meter: Meter;
   escalation?: EscalationWiring;
   /** Injected clock — provenance timestamps must be reproducible in tests. */
@@ -112,8 +134,9 @@ export type EscalationTrigger =
 export interface WaterfallResult {
   practiceId: string;
   status: "enriched" | "failed";
-  /** THE cost guard's observable: 0 when the extractor fully resolved the contact. */
+  /** Legacy observable; zero on the coverage-first path because PDL is intentionally excluded. */
   pdlCalls: number;
+  providerCalls?: Record<string, number>;
   factsWritten: number;
   /** Facts the model produced that a page we hold REFUTES. The prompt-drift early warning. */
   factsDropped: number;
@@ -204,6 +227,8 @@ interface PrimaryOutcome {
   pages: Map<string, string>;
   pagesHeld: number;
   factsDropped: number;
+  orgEmailFallback: OrgEmailFallback | null;
+  socialLinks: ScrapeResult["socialLinks"];
 }
 
 export async function enrichPractice(
@@ -323,10 +348,58 @@ export async function enrichPractice(
     await tagVertical(deps.db, practice.id, classification.vertical);
   }
 
-  // Stage 2 — PDL. Named contacts go straight to gap-fill; role-only contacts get one
-  // capped discovery search, then reuse the same enrich/persist path. A re-run must not
-  // re-buy an email `upsertContact` would then refuse to write. The stored row is read
-  // on (practice, role), the same key it is written on.
+  await fillPracticeSocialLinks(deps.db, practice.id, primary.socialLinks);
+
+  if (hasCoverageFirstDeps(deps)) {
+    try {
+      const coverage = await runCoverageFirstPath(
+        deps,
+        practice,
+        verified,
+        primary.orgEmailFallback,
+        log,
+      );
+      await setEnrichmentStatus(deps.db, practice.id, "enriched");
+      return {
+        practiceId: practice.id,
+        status: "enriched",
+        pdlCalls: 0,
+        providerCalls: coverage.providerCalls,
+        factsWritten,
+        factsDropped,
+        factsUnverifiable,
+        pagesHeld: primary.pagesHeld,
+        contactVariant: coverage.contactVariant,
+        vertical: classification.vertical,
+        escalationTrigger: primary.trigger,
+        escalated,
+      };
+    } catch (err) {
+      if (err instanceof ProviderBlockedError) {
+        return fail({
+          reason: err.message,
+          trigger: primary.trigger,
+          pagesHeld: primary.pagesHeld,
+          factsDropped,
+          escalated,
+        });
+      }
+      throw err;
+    }
+  }
+
+  if (!deps.pdl) {
+    return fail({
+      reason: "coverage-first provider clients are not wired",
+      trigger: primary.trigger,
+      pagesHeld: primary.pagesHeld,
+      factsDropped,
+      escalated,
+    });
+  }
+
+  // Legacy PDL path for existing tests/wiring only. Production coverage-first wiring
+  // passes Prospeo + FullEnrich + BetterContact and never reaches this branch.
   const decisionMaker = verified.decisionMaker;
   const claudeGaps = computeGaps(verified);
   const gaps =
@@ -337,7 +410,7 @@ export async function enrichPractice(
         )
       : claudeGaps;
   const { pdlCalls, pdlResult, discoveredContact } = await fillGaps(
-    deps,
+    deps as WaterfallDeps & { pdl: PdlClient },
     practice,
     verified,
     gaps,
@@ -353,6 +426,7 @@ export async function enrichPractice(
     pdlResult,
     discoveredContact,
     practice.websiteUrl ?? null,
+    primary.orgEmailFallback,
   );
 
   await setEnrichmentStatus(deps.db, practice.id, "enriched");
@@ -367,8 +441,6 @@ export async function enrichPractice(
     pagesHeld: primary.pagesHeld,
     contactVariant,
     vertical: classification.vertical,
-    // Non-null on an ENRICHED practice means the free path failed and the paid one saved
-    // it. That pairing is the escalation rate U8 measures.
     escalationTrigger: primary.trigger,
     escalated,
   };
@@ -388,6 +460,13 @@ async function runPrimaryPath(
     pages: new Map<string, string>(),
     pagesHeld: 0,
     factsDropped: 0,
+    orgEmailFallback: null,
+    socialLinks: {
+      linkedinUrl: null,
+      facebookUrl: null,
+      instagramUrl: null,
+      sources: { linkedin: null, facebook: null, instagram: null },
+    },
   };
 
   // Without a URL there is nothing to read. The agentic path can still search by name.
@@ -404,7 +483,12 @@ async function runPrimaryPath(
     };
   }
 
-  const held = { pages: scraped.pages, pagesHeld: scraped.pagesHeld };
+  const held = {
+    pages: scraped.pages,
+    pagesHeld: scraped.pagesHeld,
+    orgEmailFallback: findOrgEmailFallback(scraped.pages, practice.websiteUrl),
+    socialLinks: scraped.socialLinks,
+  };
 
   // ONE Haiku call over the held text. Metered inside `runExtract` (R19).
   const outcome = await runExtractGuarded(deps, practice, scraped, log);
@@ -505,8 +589,228 @@ function logDrops(
   });
 }
 
+function hasCoverageFirstDeps(deps: WaterfallDeps): deps is WaterfallDeps & {
+  prospeo: ProspeoClient;
+  fullenrichPeople: FullEnrichPeopleClient;
+  fullenrichEmail: FullEnrichEmailClient;
+  bettercontact: BetterContactClient;
+} {
+  return Boolean(
+    deps.prospeo &&
+      deps.fullenrichPeople &&
+      deps.fullenrichEmail &&
+      deps.bettercontact,
+  );
+}
+
+function providerCalls() {
+  return { prospeo: 0, fullenrichPeople: 0, fullenrichEmail: 0, bettercontact: 0 };
+}
+
+
+function candidateFromWebsite(findings: ResearchFindings): DiscoveredContactCandidate | null {
+  const dm = findings.decisionMaker;
+  if (!dm?.name) return null;
+  return {
+    name: dm.name.value,
+    role: dm.role.value,
+    email: dm.email?.value ?? null,
+    linkedinUrl: dm.linkedinUrl?.value ?? null,
+    sourceProvider: "website_scrape",
+    sourceUrl: dm.name.sourceUrl ?? dm.role.sourceUrl,
+    confidence: 1,
+  };
+}
+
+async function runCoverageFirstPath(
+  deps: WaterfallDeps & {
+    prospeo: ProspeoClient;
+    fullenrichPeople: FullEnrichPeopleClient;
+    fullenrichEmail: FullEnrichEmailClient;
+    bettercontact: BetterContactClient;
+  },
+  practice: PracticeToEnrich,
+  findings: ResearchFindings,
+  orgEmailFallback: OrgEmailFallback | null,
+  log: (event: string, meta?: Record<string, unknown>) => void,
+): Promise<{
+  contactVariant: WaterfallResult["contactVariant"];
+  providerCalls: Record<string, number>;
+}> {
+  const calls = providerCalls();
+  const targetRoles = CONTACT_DISCOVERY_ROLES;
+  const domain = websiteDomain(practice.websiteUrl);
+  const candidates: DiscoveredContactCandidate[] = [];
+  const websiteCandidate = candidateFromWebsite(findings);
+  if (websiteCandidate) candidates.push(websiteCandidate);
+
+  let selected = selectBestContact(candidates, { websiteDomain: domain, state: practice.state });
+  if (!selected || isWeakRole(selected.tier)) {
+    calls.prospeo += 1;
+    const prospeo = await deps.meter(
+      {
+        provider: "prospeo",
+        operation: "person.search",
+        pipelineStep: "enrich.person_discovery",
+        practiceId: practice.id,
+        units: 1,
+        unitCostUsd: 0,
+        meta: (result) => ({ candidates: result.candidates.length }),
+      },
+      () =>
+        deps.prospeo.searchPerson({
+          companyName: practice.name,
+          city: practice.city,
+          state: practice.state,
+          websiteDomain: domain,
+          targetRoles,
+        }),
+    );
+    candidates.push(...prospeo.candidates);
+    selected = selectBestContact(candidates, { websiteDomain: domain, state: practice.state });
+  }
+
+  if (!selected || isWeakRole(selected.tier)) {
+    calls.fullenrichPeople += 1;
+    const fullenrich = await deps.meter(
+      {
+        provider: "fullenrich",
+        operation: "people.search",
+        pipelineStep: "enrich.person_discovery",
+        practiceId: practice.id,
+        units: 1,
+        unitCostUsd: 0,
+        meta: (result) => ({ candidates: result.candidates.length }),
+      },
+      () =>
+        deps.fullenrichPeople.searchPeople({
+          companyName: practice.name,
+          city: practice.city,
+          state: practice.state,
+          websiteDomain: domain,
+          targetRoles,
+        }),
+    );
+    candidates.push(...fullenrich.candidates);
+    selected = selectBestContact(candidates, { websiteDomain: domain, state: practice.state });
+  }
+
+  const candidate = selected?.candidate ?? null;
+  let email = candidate?.email ?? null;
+  let emailProvider:
+    | "website_scrape"
+    | "prospeo"
+    | "fullenrich"
+    | "bettercontact"
+    | "org_website"
+    | null = email ? candidate?.sourceProvider ?? "website_scrape" : null;
+  let emailQuality: EmailQuality = email ? "safe_work" : "none";
+  let fullenrichEmail: PersonEmailResult | null = null;
+
+  if (candidate?.name) {
+    const candidateName = candidate.name;
+    if (!email || shouldUseBetterContactFallback(emailQuality)) {
+      calls.fullenrichEmail += 1;
+      fullenrichEmail = await deps.meter(
+        {
+          provider: "fullenrich",
+          operation: "contact.enrich",
+          pipelineStep: "enrich.email",
+          practiceId: practice.id,
+          units: 1,
+          unitCostUsd: 0,
+          meta: (result) => ({ quality: result.quality, status: result.status ?? null }),
+        },
+        () =>
+          deps.fullenrichEmail.enrichEmail({
+            fullName: candidateName,
+            companyName: practice.name,
+            role: candidate.role,
+            linkedinUrl: candidate.linkedinUrl,
+            websiteDomain: domain,
+          }),
+      );
+      if (fullenrichEmail.email) {
+        email = fullenrichEmail.email;
+        emailQuality = fullenrichEmail.quality;
+        emailProvider = "fullenrich";
+      }
+    }
+
+    if (shouldUseBetterContactFallback(emailQuality)) {
+      calls.bettercontact += 1;
+      const better = await deps.meter(
+        {
+          provider: "bettercontact",
+          operation: "contact.enrich",
+          pipelineStep: "enrich.email",
+          practiceId: practice.id,
+          units: 1,
+          unitCostUsd: 0,
+          meta: (result) => ({ quality: result.quality, status: result.status ?? null }),
+        },
+        () =>
+          deps.bettercontact.enrichEmail({
+            fullName: candidateName,
+            companyName: practice.name,
+            role: candidate.role,
+            linkedinUrl: candidate.linkedinUrl ?? fullenrichEmail?.linkedinUrl,
+            websiteDomain: domain,
+          }),
+      );
+      if (better.email && (better.quality === "safe_work" || !email)) {
+        email = better.email;
+        emailQuality = better.quality;
+        emailProvider = "bettercontact";
+      }
+    }
+  }
+
+  let fallbackReason: string | null = null;
+  if (!email && orgEmailFallback) {
+    email = orgEmailFallback.value;
+    emailProvider = "org_website";
+    emailQuality = "org_inbox";
+    fallbackReason = "no person email; used published organization inbox";
+  } else if (!email && !candidate?.name) {
+    fallbackReason = "no usable named contact; company social fallback only if available";
+  } else if (!email) {
+    fallbackReason = "selected person has no usable email";
+  }
+
+  const role = candidate?.role ?? findings.decisionMaker?.role.value ?? DEFAULT_DISCOVERY_ROLE;
+  const tier = selected?.tier ?? classifyBuyerTier(role);
+  const classification = selected?.classification ?? classifySelection(tier);
+  const linkedinUrl = normalizeLinkedinUrl(
+    candidate?.linkedinUrl ?? fullenrichEmail?.linkedinUrl ?? findings.decisionMaker?.linkedinUrl?.value ?? null,
+  );
+
+  if (!candidate?.name && !email && !orgEmailFallback) {
+    log("enrich.coverage_first_no_contact", { practice: practice.name });
+    return { contactVariant: "none", providerCalls: calls };
+  }
+
+  await upsertContact(deps.db, {
+    practiceId: practice.id,
+    role,
+    name: candidate?.name ?? findings.decisionMaker?.name?.value ?? null,
+    email,
+    emailProvider,
+    emailQuality,
+    linkedinUrl,
+    linkedinProvider: linkedinUrl ? candidate?.sourceProvider ?? "website_scrape" : null,
+    personProvider: candidate?.sourceProvider ?? (findings.decisionMaker?.name ? "website_scrape" : null),
+    buyerTier: tier,
+    selectedContactClassification: classification,
+    fallbackReason,
+    sourceUrl: candidate?.sourceUrl ?? findings.decisionMaker?.role.sourceUrl ?? orgEmailFallback?.sourceUrl ?? practice.websiteUrl ?? null,
+  });
+
+  return { contactVariant: candidate?.name || findings.decisionMaker?.name ? "named" : "role_only", providerCalls: calls };
+}
+
 async function fillGaps(
-  deps: WaterfallDeps,
+  deps: WaterfallDeps & { pdl: PdlClient },
   practice: PracticeToEnrich,
   findings: ResearchFindings,
   gaps: Gaps,
@@ -574,7 +878,7 @@ async function fillGaps(
 }
 
 async function discoverThenEnrichContact(
-  deps: WaterfallDeps,
+  deps: WaterfallDeps & { pdl: PdlClient },
   practice: PracticeToEnrich,
   fallbackRole: string,
   log: (event: string, meta?: Record<string, unknown>) => void,
@@ -637,7 +941,7 @@ async function discoverThenEnrichContact(
 }
 
 async function enrichNamedContact(
-  deps: WaterfallDeps,
+  deps: WaterfallDeps & { pdl: PdlClient },
   practice: PracticeToEnrich,
   fullName: string,
   role: string,
@@ -667,9 +971,10 @@ async function persistContact(
   pdlResult: PdlPersonResult | null,
   discoveredContact: DiscoveredContact | null,
   fallbackSourceUrl: string | null,
+  orgEmailFallback: OrgEmailFallback | null,
 ): Promise<WaterfallResult["contactVariant"]> {
   const dm = findings.decisionMaker;
-  if (!dm && !discoveredContact) return "none";
+  if (!dm && !discoveredContact && !orgEmailFallback) return "none";
 
   // PDL may fill ONLY the fields Claude left blank. A Claude-cited value always
   // wins: it has a source URL, PDL's does not. Discovered contacts start from a
@@ -679,7 +984,7 @@ async function persistContact(
     : gaps.email
       ? pdlResult?.workEmail
       : null;
-  const email = dm?.email?.value ?? pdlEmail ?? null;
+  const email = dm?.email?.value ?? pdlEmail ?? orgEmailFallback?.value ?? null;
   const pdlLinkedinUrl = discoveredContact
     ? (pdlResult?.linkedinUrl ?? discoveredContact.linkedinUrl)
     : gaps.linkedinUrl
@@ -698,14 +1003,20 @@ async function persistContact(
     role,
     name,
     email: email ?? null,
-    emailProvider: email ? (dm?.email ? "claude_research" : "pdl") : null,
+    emailProvider: email
+      ? dm?.email
+        ? "claude_research"
+        : pdlEmail
+          ? "pdl"
+          : "claude_research"
+      : null,
     linkedinUrl,
     linkedinProvider: linkedinUrl
       ? dm?.linkedinUrl
         ? "claude_research"
         : "pdl"
       : null,
-    sourceUrl: dm?.role.sourceUrl ?? fallbackSourceUrl,
+    sourceUrl: dm?.role.sourceUrl ?? orgEmailFallback?.sourceUrl ?? fallbackSourceUrl,
   });
 
   return name ? "named" : "role_only";

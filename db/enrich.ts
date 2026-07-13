@@ -14,7 +14,27 @@ import type { Database } from "./types";
  * is NOT NULL, so D2's citation contract is a database constraint, not a habit.
  */
 
-export type EnrichmentProvider = "claude_research" | "pdl";
+export type EnrichmentProvider =
+  | "claude_research"
+  | "pdl"
+  | "prospeo"
+  | "fullenrich"
+  | "bettercontact"
+  | "website_scrape"
+  | "org_website";
+
+export type BuyerTier = "A" | "B" | "C" | "D" | "E" | "X" | "none";
+export type SelectedContactClassification =
+  | "best_buyer"
+  | "reachable_fallback"
+  | "weak_unrelated"
+  | "none";
+export type EmailQuality =
+  | "safe_work"
+  | "weak_work"
+  | "personal"
+  | "org_inbox"
+  | "none";
 
 export interface FactInput {
   field: string;
@@ -103,8 +123,13 @@ export interface ContactInput {
   name?: string | null;
   email?: string | null;
   emailProvider?: EnrichmentProvider | null;
+  emailQuality?: EmailQuality | null;
   linkedinUrl?: string | null;
   linkedinProvider?: EnrichmentProvider | null;
+  personProvider?: EnrichmentProvider | null;
+  buyerTier?: BuyerTier | null;
+  selectedContactClassification?: SelectedContactClassification | null;
+  fallbackReason?: string | null;
   personalizationSnippet?: string | null;
   /** The page Claude cited for the name/role. */
   sourceUrl?: string | null;
@@ -178,8 +203,14 @@ export async function upsertContact(
           name: input.name ?? null,
           email: input.email ?? null,
           emailProvider: input.emailProvider ?? null,
+          emailQuality: input.emailQuality ?? null,
           linkedinUrl: input.linkedinUrl ?? null,
           linkedinProvider: input.linkedinProvider ?? null,
+          personProvider: input.personProvider ?? null,
+          buyerTier: input.buyerTier ?? null,
+          selectedContactClassification:
+            input.selectedContactClassification ?? null,
+          fallbackReason: input.fallbackReason ?? null,
           personalizationSnippet: input.personalizationSnippet ?? null,
           sourceUrl: input.sourceUrl ?? null,
         })
@@ -191,7 +222,11 @@ export async function upsertContact(
     if (input.email && existing.email === null) {
       await tx
         .update(contacts)
-        .set({ email: input.email, emailProvider: input.emailProvider ?? null })
+        .set({
+          email: input.email,
+          emailProvider: input.emailProvider ?? null,
+          emailQuality: input.emailQuality ?? null,
+        })
         .where(and(eq(contacts.id, existing.id), isNull(contacts.email)));
       filled.push("email");
     }
@@ -204,6 +239,44 @@ export async function upsertContact(
         })
         .where(and(eq(contacts.id, existing.id), isNull(contacts.linkedinUrl)));
       filled.push("linkedinUrl");
+    }
+    if (input.personProvider && existing.personProvider === null) {
+      await tx
+        .update(contacts)
+        .set({ personProvider: input.personProvider })
+        .where(and(eq(contacts.id, existing.id), isNull(contacts.personProvider)));
+      filled.push("personProvider");
+    }
+    if (input.buyerTier && existing.buyerTier === null) {
+      await tx
+        .update(contacts)
+        .set({ buyerTier: input.buyerTier })
+        .where(and(eq(contacts.id, existing.id), isNull(contacts.buyerTier)));
+      filled.push("buyerTier");
+    }
+    if (
+      input.selectedContactClassification &&
+      existing.selectedContactClassification === null
+    ) {
+      await tx
+        .update(contacts)
+        .set({
+          selectedContactClassification: input.selectedContactClassification,
+        })
+        .where(
+          and(
+            eq(contacts.id, existing.id),
+            isNull(contacts.selectedContactClassification),
+          ),
+        );
+      filled.push("selectedContactClassification");
+    }
+    if (input.fallbackReason && existing.fallbackReason === null) {
+      await tx
+        .update(contacts)
+        .set({ fallbackReason: input.fallbackReason })
+        .where(and(eq(contacts.id, existing.id), isNull(contacts.fallbackReason)));
+      filled.push("fallbackReason");
     }
     if (input.name && existing.name === null) {
       await tx
@@ -228,4 +301,40 @@ export async function setEnrichmentStatus(
     .update(practices)
     .set({ enrichmentStatus: status })
     .where(eq(practices.id, practiceId));
+}
+
+export async function fillPracticeSocialLinks(
+  db: Database,
+  practiceId: string,
+  social: { linkedinUrl?: string | null; facebookUrl?: string | null; instagramUrl?: string | null },
+): Promise<string[]> {
+  const filled: string[] = [];
+  const [existing] = await db
+    .select({
+      linkedinUrl: practices.companyLinkedinUrl,
+      facebookUrl: practices.companyFacebookUrl,
+      instagramUrl: practices.companyInstagramUrl,
+    })
+    .from(practices)
+    .where(eq(practices.id, practiceId))
+    .limit(1);
+  if (!existing) return filled;
+
+  const patch: Partial<typeof practices.$inferInsert> = {};
+  if (social.linkedinUrl && existing.linkedinUrl === null) {
+    patch.companyLinkedinUrl = social.linkedinUrl;
+    filled.push("companyLinkedinUrl");
+  }
+  if (social.facebookUrl && existing.facebookUrl === null) {
+    patch.companyFacebookUrl = social.facebookUrl;
+    filled.push("companyFacebookUrl");
+  }
+  if (social.instagramUrl && existing.instagramUrl === null) {
+    patch.companyInstagramUrl = social.instagramUrl;
+    filled.push("companyInstagramUrl");
+  }
+  if (filled.length > 0) {
+    await db.update(practices).set(patch).where(eq(practices.id, practiceId));
+  }
+  return filled;
 }

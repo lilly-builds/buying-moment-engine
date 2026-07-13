@@ -11,6 +11,7 @@ import {
   normalizeSiteUrl,
 } from "./page-parse";
 import { isAllowed, parseRobotsTxt, type RobotsPolicy } from "./robots";
+import { extractCompanySocialLinks, type CompanySocialLinks } from "./social-links";
 
 /**
  * Fetch a practice's OWN pages and hold their text, keyed by absolute URL.
@@ -68,6 +69,7 @@ export interface ScrapeResult {
   pagesHeld: number;
   totalChars: number;
   reason?: ScrapeFailure;
+  socialLinks: CompanySocialLinks;
 }
 
 export interface ScrapeDeps {
@@ -85,7 +87,18 @@ function defaultLogger(event: string, meta?: Record<string, unknown>): void {
 }
 
 function failed(reason: ScrapeFailure): ScrapeResult {
-  return { pages: new Map(), pagesHeld: 0, totalChars: 0, reason };
+  return {
+    pages: new Map(),
+    pagesHeld: 0,
+    totalChars: 0,
+    reason,
+    socialLinks: {
+      linkedinUrl: null,
+      facebookUrl: null,
+      instagramUrl: null,
+      sources: { linkedin: null, facebook: null, instagram: null },
+    },
+  };
 }
 
 interface RawPage {
@@ -197,7 +210,19 @@ function homepageText(html: string): string {
  * line is clipped and marked rather than dropped whole — a partial team page still
  * carries the decision-maker's name.
  */
-function assemble(entries: Array<[string, string]>): ScrapeResult {
+function emptySocialLinks(): CompanySocialLinks {
+  return {
+    linkedinUrl: null,
+    facebookUrl: null,
+    instagramUrl: null,
+    sources: { linkedin: null, facebook: null, instagram: null },
+  };
+}
+
+function assemble(
+  entries: Array<[string, string]>,
+  socialLinks: CompanySocialLinks = emptySocialLinks(),
+): ScrapeResult {
   const pages = new Map<string, string>();
   let totalChars = 0;
 
@@ -216,7 +241,7 @@ function assemble(entries: Array<[string, string]>): ScrapeResult {
     totalChars += clipped.length;
   }
 
-  return { pages, pagesHeld: pages.size, totalChars };
+  return { pages, pagesHeld: pages.size, totalChars, socialLinks };
 }
 
 export async function scrapePractice(
@@ -275,6 +300,10 @@ export async function scrapePractice(
     }
   }
 
+  const rawPages: Array<{ sourceUrl: string; html: string }> = [
+    { sourceUrl: homeUrl, html: home.html },
+  ];
+
   const { buckets } = discoverLinks(home.html, origin);
   const targets = BUCKET_ORDER.flatMap((bucket) => {
     const path = buckets[bucket].find((candidate) => isAllowed(policy, candidate));
@@ -307,10 +336,11 @@ export async function scrapePractice(
       log("scrape.page_left_origin", { requested: url, landed: page.finalUrl });
       continue;
     }
+    rawPages.push({ sourceUrl: url, html: page.html });
     entries.push([url, cleanHtml(page.html)]);
   }
 
-  const result = assemble(entries);
+  const result = assemble(entries, extractCompanySocialLinks(rawPages));
   if (result.pagesHeld === 0) {
     log("scrape.no_text", { url: homeUrl });
     return failed("empty");

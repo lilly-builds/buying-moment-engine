@@ -56,7 +56,16 @@ export const MAX_ENGINE_BRIEF_LIMIT = 50;
  *  db / meter / now / logger / force the engine threads in from one place. */
 export type PipelineClients = Pick<
   PipelineDeps,
-  "scrape" | "extract" | "pdl" | "voice" | "resolveWebsite" | "escalation"
+  | "scrape"
+  | "extract"
+  | "pdl"
+  | "prospeo"
+  | "fullenrichPeople"
+  | "fullenrichEmail"
+  | "bettercontact"
+  | "voice"
+  | "resolveWebsite"
+  | "escalation"
 >;
 
 export interface RunEngineDeps {
@@ -230,12 +239,15 @@ export async function runEngine(
   const clients = deps.pipelineClients;
   const downstream: DownstreamSummary | DownstreamSkipped | Errored =
     await runStage("downstream", log, async () => {
-      const eligible = await practicesNeedingBriefs(deps.db, { now });
+      const eligible = await practicesNeedingBriefs(deps.db, {
+        now,
+        includeBriefed: deps.force ?? false,
+      });
       const eligibleCount = eligible.length;
 
       if (!clients || deps.briefLimit <= 0) {
         const reason = !clients
-          ? "no enrichment/brief clients (key absent)"
+          ? "no coverage-first enrichment/brief clients (missing Anthropic/Prospeo/FullEnrich/BetterContact key)"
           : "briefing disabled (briefLimit=0)";
         return {
           skipped: true,

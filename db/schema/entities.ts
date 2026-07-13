@@ -44,6 +44,34 @@ export const signalKind = pgEnum("signal_kind", [
 export const enrichmentProvider = pgEnum("enrichment_provider", [
   "claude_research",
   "pdl",
+  "prospeo",
+  "fullenrich",
+  "bettercontact",
+  "website_scrape",
+  "org_website",
+]);
+
+export const buyerTier = pgEnum("buyer_tier", [
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "X",
+  "none",
+]);
+
+export const selectedContactClassification = pgEnum(
+  "selected_contact_classification",
+  ["best_buyer", "reachable_fallback", "weak_unrelated", "none"],
+);
+
+export const emailQuality = pgEnum("email_quality", [
+  "safe_work",
+  "weak_work",
+  "personal",
+  "org_inbox",
+  "none",
 ]);
 
 export const practices = pgTable(
@@ -64,6 +92,9 @@ export const practices = pgTable(
     // with that fact's (practice, field) unique key. Nullable — a practice we
     // cannot find a site for enriches thin, honestly, and never blocks.
     websiteUrl: text("website_url"),
+    companyLinkedinUrl: text("company_linkedin_url"),
+    companyFacebookUrl: text("company_facebook_url"),
+    companyInstagramUrl: text("company_instagram_url"),
     // First-class tag (R17). Defaults to `unclassified` — the honest "not yet
     // classified" state; U5's resolver sets the real vertical.
     vertical: vertical("vertical").notNull().default("unclassified"),
@@ -221,8 +252,15 @@ export const contacts = pgTable("contacts", {
   // it never fails, and it never invents an address.
   email: text("email"),
   emailProvider: enrichmentProvider("email_provider"),
+  emailQuality: emailQuality("email_quality"),
   linkedinUrl: text("linkedin_url"),
   linkedinProvider: enrichmentProvider("linkedin_provider"),
+  personProvider: enrichmentProvider("person_provider"),
+  buyerTier: buyerTier("buyer_tier"),
+  selectedContactClassification: selectedContactClassification(
+    "selected_contact_classification",
+  ),
+  fallbackReason: text("fallback_reason"),
   bestChannel: text("best_channel"),
   personalizationSnippet: text("personalization_snippet"),
   sourceUrl: text("source_url"),

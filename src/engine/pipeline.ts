@@ -9,7 +9,14 @@ import {
   type Scraper,
   type WaterfallDeps,
 } from "@/src/enrich/waterfall";
-import type { ExtractClient, PdlClient } from "@/src/enrich/types";
+import type {
+  BetterContactClient,
+  ExtractClient,
+  FullEnrichEmailClient,
+  FullEnrichPeopleClient,
+  PdlClient,
+  ProspeoClient,
+} from "@/src/enrich/types";
 import type { Meter } from "@/src/roi/cost-meter";
 import { resolvePractice, type PracticeCandidate } from "./resolver";
 
@@ -54,7 +61,12 @@ export interface PipelineDeps {
   // Enrichment-waterfall stage clients (injected — the conductor owns no socket).
   scrape: Scraper;
   extract: ExtractClient;
-  pdl: PdlClient;
+  /** Legacy PDL client. Omitted when coverage-first provider clients are wired. */
+  pdl?: PdlClient;
+  prospeo?: ProspeoClient;
+  fullenrichPeople?: FullEnrichPeopleClient;
+  fullenrichEmail?: FullEnrichEmailClient;
+  bettercontact?: BetterContactClient;
   escalation?: EscalationWiring;
   // Synthesizer stage client.
   voice: VoiceClient;
@@ -78,6 +90,7 @@ export interface EnrichSummary {
   vertical: string;
   factsWritten: number;
   pdlCalls: number;
+  providerCalls?: Record<string, number>;
   contactVariant: "named" | "role_only" | "none";
   escalated: boolean;
   reason?: string;
@@ -179,6 +192,10 @@ export async function runLeadToBrief(
     scrape: deps.scrape,
     extract: deps.extract,
     pdl: deps.pdl,
+    prospeo: deps.prospeo,
+    fullenrichPeople: deps.fullenrichPeople,
+    fullenrichEmail: deps.fullenrichEmail,
+    bettercontact: deps.bettercontact,
     meter: deps.meter,
     escalation: deps.escalation,
     now: deps.now,
@@ -196,6 +213,7 @@ export async function runLeadToBrief(
     vertical: enriched.vertical,
     factsWritten: enriched.factsWritten,
     pdlCalls: enriched.pdlCalls,
+    providerCalls: enriched.providerCalls,
     contactVariant: enriched.contactVariant,
     escalated: enriched.escalated,
     reason: enriched.reason,
