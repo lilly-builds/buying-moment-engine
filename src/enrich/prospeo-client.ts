@@ -134,6 +134,8 @@ export function createProspeoClient(deps: ProspeoClientDeps) {
           throw new ProviderBlockedError("prospeo", reason, JSON.stringify(raw).slice(0, 300));
         }
         if (!res.ok) {
+          const normalized = normalizeProspeoSearchResponse(raw);
+          if (normalized.candidates.length === 0) return normalized;
           throw new ProviderBlockedError(
             "prospeo",
             "api_contract",

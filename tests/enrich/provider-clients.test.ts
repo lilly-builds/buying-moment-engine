@@ -46,6 +46,23 @@ describe("Prospeo production client", () => {
     });
   });
 
+
+  it("treats Prospeo HTTP 400 NO_RESULTS as a clean miss so fallback providers can run", async () => {
+    const client = createProspeoClient({
+      apiKey: "test-key",
+      fetch: (async () => Response.json(
+        { error: true, error_code: "NO_RESULTS" },
+        { status: 400 },
+      )) as typeof fetch,
+    });
+
+    await expect(client.searchPerson({
+      companyName: "No Match Practice",
+      websiteDomain: "nomatch.example",
+      targetRoles: ["practice manager"],
+    })).resolves.toMatchObject({ candidates: [] });
+  });
+
   it("sends that request body to /search-person", async () => {
     let sent: unknown = null;
     const client = createProspeoClient({
