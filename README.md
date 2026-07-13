@@ -120,23 +120,15 @@ math behind every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-me
 
 ---
 
-## Onboarding: full value before you connect anything
-
-The whole tool works before anyone connects a thing. The feed, the briefs, the inline editing, and
-the scoreboard all run on the builder's own keys right out of the box. A hiring manager or a rep has
-zero setup to do, and a rep can mark any lead good or bad with a single tap.
-
-A first-time rep gets a short guided tour called "work your first lead," shown as branded step cards
-(a glowing orb with the step's icon, a one-word instruction in bold, and a small context chip). It
-walks them through the real feed and a real brief, and they can skip it any time.
+## Onboarding: walks you through the need-to-know features:
 
 ![The guided onboarding tour step card](docs/screenshots/onboarding.png)
 *The guided tour: a branded step card (glowing orb, one-word instruction, context chip) over the real feed.*
 
 ### Connecting your tools
 
-The only setup anyone actually does lives on the Connections page (`/integrations`). This is where
-the job description's "integrate with the tools in their stack" becomes real. There are three rows:
+The only setup anyone (typically the RevOps leader) actually does lives on the Connections page (`/integrations`).
+There are three integrations:
 
 - HubSpot: one secure click (OAuth, so no passwords get shared). That single connection turns on
   three things at once: it pushes and tags the tool's leads into the CRM, sends the approved outreach
@@ -144,13 +136,11 @@ the job description's "integrate with the tools in their stack" becomes real. Th
   the send. One connection feeds one clean stream of data into the scoreboard, instead of duct-taping
   three tools together.
 - Anthropic and People Data Labs: paste your own key for each, and each is encrypted where it is
-  stored. These power the research, the writing voice of the briefs, and the verified contact details.
+  stored. These power the prospect enrichment, verification, research, and brief writing.
 
-Until a company connects its own accounts, the whole tool runs on the builder's demo keys, so someone
-evaluating it sees the full thing first. Connecting flips two things. The AI spend now bills to the
-company's own account, so it shows up as real, measured cost in the scoreboard's CAC. And the sends
-and CRM updates start reaching the company's real systems. The Send button on a brief is the nudge
-that kicks this off: it routes a rep's request to the RevOps owner who does this one-time setup.
+Until a company connects its own accounts, the whole tool runs on the builder's demo keys (except for hubspot), so someone
+evaluating it sees the full value first and gets new leads daily for a week. Connecting flips two features on. (1) Emails can be sent and tracked through a company's CRM. (2) AI-driven research and brief-writing continues beyond week one trial. Once the Anthropic key is connected, API calls now bill to the
+company's own account, so it shows up as real, measured cost in the scoreboard's CAC. 
 Step-by-step is in [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
 
 ![The Connections page: HubSpot OAuth plus Anthropic and PDL key setup](docs/screenshots/integrations.gif)
