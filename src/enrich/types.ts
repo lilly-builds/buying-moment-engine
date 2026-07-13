@@ -320,11 +320,13 @@ export interface DiscoveredContactCandidate {
   name: string | null;
   role: string | null;
   email?: string | null;
+  emailQuality?: EmailQuality;
+  emailProvider?: CoverageProvider | null;
   linkedinUrl?: string | null;
   companyName?: string | null;
   companyDomain?: string | null;
   location?: string | null;
-  sourceProvider: CoverageProvider;
+  sourceProvider?: CoverageProvider | null;
   sourceUrl?: string | null;
   confidence?: number | null;
 }

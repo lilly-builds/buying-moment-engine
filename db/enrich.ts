@@ -190,6 +190,17 @@ export async function getContact(
   return row ?? null;
 }
 
+export async function getNamedContacts(
+  db: Database,
+  practiceId: string,
+): Promise<StoredContact[]> {
+  const rows = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.practiceId, practiceId));
+  return rows.filter((row) => Boolean(row.name?.trim()));
+}
+
 /**
  * Upsert the practice's decision-maker, keyed on (practice_id, role). No unique
  * constraint exists on `contacts`, so this is an explicit check-existence-then-write
