@@ -1,10 +1,8 @@
 # GTM Maestro: the Buying-Moment Engine
 
-**A live feed of healthcare practices hitting a buying moment right now, each with a verified,
-source-linked brief that is ready to work.** An account executive opens the app and starts
-selling. They do not start researching.
-
-**Live demo:** LIVE DEMO URL: `<pending - confirm deploy>`
+A live feed of healthcare practices that just hit a buying moment, each one handed over with a short
+brief that is ready to use and links back to the source of every fact. A sales rep (an account
+executive, or AE) opens the app and starts selling, instead of starting to research.
 
 ![GTM Maestro: the signal sources merging, then dissolving into the live feed of practices at a buying moment](docs/screenshots/hero-tour.gif)
 
@@ -12,160 +10,177 @@ selling. They do not start researching.
 
 ## The story it is built around
 
-> As an account executive on the healthcare team, I want to be handed a **constant flow of
-> practices hitting a buying moment right now**, each with a **verified, ready-to-use,
-> personalized brief**, so I can get on any call or send any outreach **already confidently
-> informed, without spending my time researching.**
+The whole thing is built around one rep's wish:
 
-That is the whole product. A rep should never open a blank page. The feed hands them a queue of
-real practices that just did something that means they are ready to buy, and each one arrives with
-the brief already written and every fact cited.
+> As an account executive on the healthcare team, I want to be handed a steady stream of practices
+> that are hitting a buying moment right now, each with a ready-to-use, personalized brief, so I can
+> get on a call or send outreach already informed, without spending my time researching.
+
+That is the product. A rep should never stare at a blank page. The feed hands them a queue of real
+practices that just did something that says they are ready to buy, and each one shows up with the
+brief already written and every fact cited.
 
 ![The feed of real practices at a buying moment, hottest on top](docs/screenshots/feed.gif)
 *The push feed: real named practices at a buying moment, ranked so the hottest rise to the top.*
 
 ---
 
-## The thesis: sell on the moment, not the list
+## The idea: catch people at the right moment
 
-A cold list answers *"who fits the profile?"* Most outbound stops there, and most outbound is
-ignored, because fitting a profile is not the same as being ready to buy. A lot of buying is
-**timing**. Something happens, a need appears, and there is a window. Find that window and
-conversion goes up.
+Most outbound starts from a list of companies that fit a profile, then blasts them. It mostly gets
+ignored, because fitting a profile is not the same as being ready to buy. A lot of buying comes down
+to timing. Something happens, a need shows up, and there is a short window. Catch that window and
+more people say yes.
 
-So the engine sells on the **trigger event**. It watches public data for the moments that mean a
-healthcare practice is about to need front-desk and patient-communication help:
+So the engine watches for the trigger event: the public signs that a healthcare practice is about to
+need help with its front desk and patient calls.
 
-- **They are hiring for the front desk.** A staffing spike for patient coordinators or call-center
-  roles means they cannot keep up with the phones. That is exactly the wedge.
-- **Patients are complaining they cannot get through.** Reviews that say "on hold forever" or
-  "no one answers" are acute, self-reported phone pain.
-- **They just grew.** An acquisition, a new location, or new providers means new patient volume
-  the front desk was not built for.
+- They are hiring for the front desk. A rush to hire patient coordinators or call-center staff
+  usually means they cannot keep up with the phones, which is exactly the opening.
+- Patients are complaining they cannot get through. Reviews that say "on hold forever" or "no one
+  answers" are people reporting the phone problem themselves.
+- They just grew. An acquisition, a new location, or new doctors means more patients than the front
+  desk was built to handle.
 
-The feed ranks practices by **how many distinct fresh signals are firing** (freshness breaks ties),
-so a practice with three live triggers outranks one with a single fading trigger and the AE always
-works the strongest accounts first. The full catalog of what the engine detects today, what is
-built but parked, and where the signal layer is going next lives in
-[`docs/signal-catalog.md`](docs/signal-catalog.md). The implementation-level signal-system guide is
-[`docs/data-signal-system.md`](docs/data-signal-system.md).
+When a practice shows up on one signal, the engine turns around and checks the others for that same
+clinic: is it also hiring front-desk staff, also in the news for a new location or an acquisition,
+also collecting reviews about no one answering the phone? Any signal that fires and can be cited gets
+stacked onto that practice, so a lead that first came in on reviews can grow into a two- or
+three-signal lead. The engine only stacks a signal when the name and location match the practice it
+already has, so a similarly named but different clinic never gets folded in by mistake. These checks
+only run for practices that already qualified, and every paid lookup gets logged with its cost, so
+the cross-checking stays cheap.
+
+The feed ranks practices by how many different fresh signals are firing, using freshness to break
+ties. A practice with three live triggers sits above one with a single fading trigger, so the rep
+always works the strongest accounts first. The full list of what the engine detects today, what is
+built but parked, and where the signal layer is headed lives in
+[`docs/signal-catalog.md`](docs/signal-catalog.md). The deeper, code-level guide to the signal system
+is in [`docs/data-signal-system.md`](docs/data-signal-system.md).
 
 ---
 
-## What is inside a brief, and why you can trust it
+## What's in a brief, and why you can trust it
 
-Every practice carries a brief with two tiers you toggle between: one built to send from, one built
-to prep from.
+Every practice comes with a brief that has two modes you flip between. One is set up to send from,
+the other to prep from.
 
-**Send email**
-- The **buying-moment headline** and who to contact: the real decision-maker, their role, and the
-  best channel
-- The **recommended action:** a call opener and an **editable three-touch outreach sequence**
-  (initial plus two follow-ups) you edit inline, so your exact words ship
+Send from it:
+- The buying-moment headline, plus who to contact: the real decision-maker, their role, and the best
+  way to reach them.
+- The suggested move: a call opener and an editable three-touch email sequence (a first message and
+  two follow-ups) that you edit right there, so your own words are what go out.
 
-**Prep for call**
-- The buying moment with each signal's freshness and a **confidence badge per signal**
-- Practice profile: locations, EHR, patient volume, front-desk load, and incumbent tooling
-- The EliseAI-fit pain line, a real proof point, and an ROI range
-- Two or three discovery questions and the top three objections with rebuttals
-- The signal-source tag on each fired signal (which pipeline surfaced it)
+Prep from it:
+- The buying moment, with how fresh each signal is and a confidence badge on each one.
+- A profile of the practice: its locations, which medical-records system it uses (its EHR), roughly
+  how many patients it sees, how loaded the front desk is, and the tools it already runs.
+- The one line on why EliseAI fits their pain, a real proof point, and a rough ROI range.
+- Two or three discovery questions, and the top three objections with answers.
+- A tag on each signal showing which source turned it up.
 
-**The trust mechanism: every fact is underline-linked to its source, and the link is verified
-before the brief is ever stored.** This is the part that is genuinely hard, and it is real:
+Here is what makes it trustworthy: every fact in a brief is underlined and linked to the exact source
+it came from, and that link is checked before the brief is ever saved. This is the hard part, and it
+genuinely works this way:
 
-- During enrichment, a fact is kept only if its snippet appears **verbatim** on the page the engine
-  actually fetched. Anything that cannot be matched word-for-word is dropped, not guessed.
-- During synthesis, a brief passes three gates (shape, citation-closure, and truth) before it is
-  saved. A brief whose claims cannot be grounded in its sources is **not persisted at all.**
-- Each citation deep-links to the exact sentence on the source page, so a rep verifies any line in
-  a second rather than taking the tool's word for it.
+- While the engine gathers facts, it keeps a fact only if the exact words show up on the page it
+  actually read. Anything it cannot match word for word gets dropped, not guessed at.
+- Before a brief is saved, it has to pass three checks: is it shaped right, does every claim have a
+  citation, and is each claim actually backed by its source. A brief whose claims cannot be traced to
+  a source is not saved at all.
+- Each citation jumps you to the exact sentence on the source page, so a rep can confirm any line in
+  a second instead of taking the tool's word for it.
 
-That is what makes a brief safe to act on without re-checking. The product's whole promise is that
-a rep can trust it, so the trust is built in code, not asserted in copy.
+That is what lets a rep act on a brief without double-checking it. The whole promise is that the rep
+can trust it, so the trust is enforced by the code itself.
 
 ![An open brief with a source citation clicked open](docs/screenshots/brief-citation.gif)
-*A brief with a citation opened. Every fact links to its source, verified verbatim before the brief was stored.*
+*A brief with a citation opened. Every fact links to its source, checked word-for-word before the brief was saved.*
 
-The briefs cover **four verticals**, each with its own authored pack (the pain line, opener, proof
-point, EHR-as-signal, and ROI benchmark): Dermatology, Women's Health / OB-GYN, Ophthalmology, and
-Orthopedics. Where a real, citable proof point does not exist yet (orthopedics), the pack ships an
-honest `proof_pending` marker rather than a fabricated one. The engine and brief frame are
-identical across all four; a vertical is a different pitch, not a different product.
+The briefs cover four medical specialties, each with its own hand-written pack (the pain line, the
+opener, a proof point, how the records system doubles as a signal, and an ROI benchmark):
+dermatology, women's health / OB-GYN, ophthalmology, and orthopedics. Where there is not yet a real,
+citable proof point (orthopedics), the pack ships an honest "proof pending" marker instead of making
+one up. The engine and the brief layout are the same for all four. Switching specialties changes the
+pitch, not the product.
 
 ---
 
-## Proof it is working: the ROI scoreboard
+## The scoreboard: is it actually working?
 
-The tool grades its own impact. The scoreboard is scoped to *this tool's* effect, not a generic
-company dashboard, and it is written so an eighth-grader gets every number at a glance. The
-deciding rule: a number is on the screen only because it drives an action.
+The tool keeps score of its own impact. The scoreboard measures what this tool did, not some generic
+company dashboard, and it is written so anyone can read every number at a glance. The rule for what
+earns a spot: a number is on screen only if it helps someone decide what to do next.
 
-It answers the questions that move revenue and CAC: which signals turn into meetings, which
-specialties win fastest and cheapest, how many messages it takes to land a meeting, what each
-booked meeting costs, and whether the AE marked each lead good or not. Every figure is viewable in
-aggregate and per-vertical.
+It answers the questions that move revenue and the cost to land a customer (CAC): which signals turn
+into meetings, which specialties win fastest and cheapest, how many messages it takes to book a
+meeting, what each booked meeting costs, and whether the rep marked each lead as good or not. You can
+see every figure overall or broken down by specialty.
 
-**The honesty tags are the point.** Each number is tagged **measured** (read straight off the
-tool's own logged activity and metered spend) or **modeled** (an honest projection from public
-benchmarks, sharpened into measured as real volume grows). We never dress a projection up as a
-measurement. When there is no data yet, a metric shows a dash, never a fabricated figure. The full
-calculation for every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md).
+The honesty labels do the real work here. Each number is tagged either measured (read straight from
+the tool's own activity and logged spend) or modeled (an honest estimate from public benchmarks,
+which turns into a measured number as real volume builds up). An estimate is never dressed up as a
+measurement. When there is no data yet, the number shows a dash instead of a made-up figure. The full
+math behind every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md).
 
 ![The ROI scoreboard, scrolling from the headline numbers through per-signal, per-specialty, feedback, and the big test](docs/screenshots/scoreboard.gif)
-*The scoreboard. Every number carries a measured or modeled tag; empty metrics degrade to a dash, never a fake.*
+*The scoreboard. Every number carries a measured or modeled tag, and an empty metric shows a dash instead of a fake number.*
 
 ---
 
-## Onboarding and rollout: full value before a single key
+## Onboarding: full value before you connect anything
 
-The whole tool runs before anyone connects anything. The feed, the briefs, the inline editing, and
-the scoreboard all work on the builder's own keys out of the box. A hiring manager or an AE has zero
-setup, and an AE can mark any lead good or not with a one-tap thumb.
+The whole tool works before anyone connects a thing. The feed, the briefs, the inline editing, and
+the scoreboard all run on the builder's own keys right out of the box. A hiring manager or a rep has
+zero setup to do, and a rep can mark any lead good or bad with a single tap.
 
-A first-time AE gets a guided **"work your first lead"** tour, rendered as brand step cards (a
-gradient orb with the step icon, a one-bold-word instruction, and a context chip). It coaches them
-over the real feed and a real brief, and it is fully skippable.
+A first-time rep gets a short guided tour called "work your first lead," shown as branded step cards
+(a glowing orb with the step's icon, a one-word instruction in bold, and a small context chip). It
+walks them through the real feed and a real brief, and they can skip it any time.
 
 ![The guided onboarding tour step card](docs/screenshots/onboarding.png)
-*The guided tour: a brand step card (gradient orb, one-bold-word instruction, context chip) over the real feed.*
+*The guided tour: a branded step card (glowing orb, one-word instruction, context chip) over the real feed.*
 
-### Connecting the stack
+### Connecting your tools
 
-The only setup anyone does lives on the **Connections page** (`/integrations`), and this is where the
-JD's "integrate with the tools in their stack" work is real. It is three rows:
+The only setup anyone actually does lives on the Connections page (`/integrations`). This is where
+the job description's "integrate with the tools in their stack" becomes real. There are three rows:
 
-- **HubSpot** — one OAuth click. That single grant turns on **three things at once**: pushing and
-  tagging tool-sourced leads in the CRM, sending the approved outreach through the rep's own inbox,
-  and the native open/click/reply analytics that ride the send. One connection, one pipeline of data
-  for the scoreboard, instead of stitching three tools together.
-- **Anthropic** and **People Data Labs** — paste-your-own-key, each encrypted at rest. These power the
-  research, the brief voice, and the verified contact data.
+- HubSpot: one secure click (OAuth, so no passwords get shared). That single connection turns on
+  three things at once: it pushes and tags the tool's leads into the CRM, sends the approved outreach
+  through the rep's own inbox, and pulls in the open, click, and reply tracking that rides along with
+  the send. One connection feeds one clean stream of data into the scoreboard, instead of duct-taping
+  three tools together.
+- Anthropic and People Data Labs: paste your own key for each, and each is encrypted where it is
+  stored. These power the research, the writing voice of the briefs, and the verified contact details.
 
-Until an org connects, the whole tool runs on the builder's demo keys, so an evaluator sees full value
-first. Connecting flips two things: the AI spend now bills to the org's own account (so it shows up as
-**real, measured cost** in the scoreboard's CAC), and send plus CRM writes reach the org's systems. The
-Send button on a brief is the demand-driven nudge that routes a rep's request to the RevOps owner who
-does this one-time setup. Full step-by-step: [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
+Until a company connects its own accounts, the whole tool runs on the builder's demo keys, so someone
+evaluating it sees the full thing first. Connecting flips two things. The AI spend now bills to the
+company's own account, so it shows up as real, measured cost in the scoreboard's CAC. And the sends
+and CRM updates start reaching the company's real systems. The Send button on a brief is the nudge
+that kicks this off: it routes a rep's request to the RevOps owner who does this one-time setup.
+Step-by-step is in [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
 
 ![The Connections page: HubSpot OAuth plus Anthropic and PDL key setup](docs/screenshots/integrations.gif)
-*The Connections page (`/integrations`): one OAuth click for HubSpot, two pasted keys for the engine. The only setup anyone does.*
+*The Connections page (`/integrations`): one secure click for HubSpot, two pasted keys for the engine. The only setup anyone does.*
 
 ---
 
 ## The full loop (and what "demo mode" means)
 
-This is a full GTM engine, not a research assistant. It finds the buying moment, drafts the
-outreach, **sends it**, tracks it in the CRM, and scores the meetings booked and deals won that
-come back. Landing deals is the whole point, and the ROI scoreboard is where that shows up. The
-send path and the CRM push are built and tested end to end.
+This is a full go-to-market engine, not just a research helper. It finds the buying moment, drafts
+the outreach, sends it, tracks it in the CRM, and then scores the meetings booked and deals won that
+come back. Landing deals is the point, and the scoreboard is where that shows up. The send path and
+the CRM push are both built and tested end to end.
 
-Two honest limits, and they apply to **this demo only**. First, the **data is real** while the
-**final send is simulated**: the engine pulls real practices, real public signals, and real named
-decision-makers, but in the demo it drafts and displays rather than firing live outreach. That is
-a deliberate safety gate so no real clinic is ever contacted while the tool is being evaluated, and
-it flips on the moment EliseAI connects their HubSpot. It is enforced in code, not by convention: a
-fail-closed send firewall only ever allows a sandbox test recipient. Second, the engine only ever
-touches public *business* data. There is zero patient data or PHI, ever.
+Two honest limits, and both apply to this demo only. First, the data is real but the final send is
+simulated. The engine pulls real practices, real public signals, and real named decision-makers, but
+in the demo it drafts and shows the outreach instead of actually sending it. That is a deliberate
+safety gate, so no real clinic gets contacted while people are evaluating the tool, and it switches
+on the moment EliseAI connects their HubSpot. This is enforced in the code, not just a promise: a
+fail-closed send firewall (fail-closed meaning it blocks by default) only ever allows a single
+sandbox test address. Second, the engine only ever touches public business data. There is zero
+patient data or medical information (no PHI), ever.
 
 ---
 
@@ -179,49 +194,55 @@ touches public *business* data. There is zero patient data or PHI, ever.
   Google Places (reviews)  ─┘      PDL fills verified gaps   ┘    Ranked push feed + pull
                                    (work email, LinkedIn)         ROI scoreboard
 ```
-*Google Places phone complaints are live through the discovery path; the standalone per-place
-review detector is also available for targeted cross-checks when a `place_id` is known.*
+*Google Places phone complaints are live through the discovery path, and the standalone per-place
+review reader is also there for targeted cross-checks when a place's ID is already known.*
 
-- **Stack:** Next.js + TypeScript, Supabase Postgres via Drizzle, Anthropic Claude for research and
-  brief synthesis, People Data Labs for verified contact data, HubSpot for CRM and email send on a
-  single OAuth grant.
-- **The enrichment waterfall:** Claude does the agentic web research (it reads the practice's real
-  site and reviews, discovers the buying-moment signals, and cites every fact), and PDL fills only
-  the verified gaps Claude cannot reliably get (work email, LinkedIn URL). Claude-first, PDL for the
-  gaps, so cost stays low.
-- **The data layer:** a normalized Postgres system of record with provenance on every fact (source
-  URL plus the timestamp it was detected), idempotent de-duped ingestion, raw-versus-derived
-  separation, RLS on every table, and first-class tag columns (vertical, signal-source,
-  lead-quality) so every scoreboard number slices by vertical instantly. This is what makes the
-  cited briefs and the per-vertical ROI real rather than cosmetic.
-- **Send, done right:** the AE edits the drafted email in the dashboard; the full body rides one
-  HubSpot custom property into a Sequence enrollment, so it sends through the rep's own inbox with
-  native open/click/reply tracking, while shipping the exact edited text. One OAuth grant covers
-  CRM, send, and analytics; per-tenant tokens and pasted keys are encrypted at rest with AES-256-GCM.
-- **Cost is a live number:** every paid API call (Claude, PDL, detectors) is metered at the call
-  site into a `cost_events` table, so the CAC on the scoreboard is real spend, not a manual tally.
-- **Scheduled runs:** a Vercel Cron heartbeat (`0 8 * * 1-5`) is wired to fire the whole engine on
-  weekday mornings. It is built and merged but stays **dormant** until its `CRON_SECRET` is set in
-  the deploy (fail-closed by design).
+- The stack (the main tools it is built on): Next.js and TypeScript for the app, a Supabase Postgres
+  database reached through Drizzle, Anthropic's Claude for the research and brief writing, People Data
+  Labs for verified contact info, and HubSpot for the CRM and email send, all on that one OAuth
+  connection.
+- The enrichment waterfall. "Waterfall" just means it does the cheap step first and only pays for the
+  expensive one to fill gaps. Claude does the web research: it reads the practice's real website and
+  reviews, finds the buying-moment signals, and cites every fact. Then People Data Labs fills only the
+  few gaps Claude cannot reliably get on its own, like a work email or a LinkedIn URL. Claude first,
+  PDL for the leftovers, so the cost stays low.
+- The data layer. It is a tidy Postgres database that acts as the single source of truth. Every fact
+  carries its origin (the source URL and the moment it was spotted). Loading data is idempotent,
+  meaning you can run it twice without creating duplicates. Raw data is kept separate from anything
+  derived from it. Every table has row-level security (RLS), which are database-enforced walls so one
+  customer's data can never leak into another's. And there are built-in tag columns (specialty, which
+  signal, lead quality) so any scoreboard number can be sliced by specialty instantly. This is what
+  makes the cited briefs and the per-specialty ROI real instead of cosmetic.
+- Send, done right. The rep edits the drafted email in the dashboard. The full edited text rides along
+  on one HubSpot field into a Sequence enrollment, so it sends from the rep's own inbox with native
+  open, click, and reply tracking, while still shipping the exact words the rep wrote. That one OAuth
+  connection covers the CRM, the send, and the tracking. Every stored token and pasted key is
+  encrypted where it sits, using AES-256-GCM (a strong, standard encryption method).
+- Cost is a live number. Every paid API call (Claude, PDL, the detectors) is logged with its cost the
+  moment it happens, into a `cost_events` table. So the CAC on the scoreboard is real spend, not a
+  number someone tallied by hand.
+- Scheduled runs. A Vercel Cron timer (a scheduled job, set for 8am on weekdays) is wired up to fire
+  the whole engine each weekday morning. It is built and merged, but it stays asleep until its
+  `CRON_SECRET` is set in the deploy, so it cannot fire by accident.
 
-### Honest status: built, and where the line is
+### Honest status: what's built, and where the line is
 
-Everything above is built and demoable. A few pieces are deliberately gated or are the next step,
-and the docs say so rather than imply more than ships:
+Everything above is built and you can demo it. A few pieces are deliberately switched off or are the
+clear next step, and the docs say so instead of implying more than ships:
 
-| Piece | What is true | Where the line is |
+| Piece | What's true today | Where the line is |
 |---|---|---|
-| **Enrichment run** | Runs in the demo, wired into the pipeline, on a **manual** trigger, off the **environment** API keys | An always-on schedule is the Vercel Cron, which is built but dormant until `CRON_SECRET` is set |
-| **Paste-your-own-key** | The `/integrations` key fields store an encrypted, per-tenant key | The manual pipeline reads the environment keys; a pasted key is wired only into the dormant scheduled cron (Anthropic), not the manual run |
-| **Phone-complaint signal** | Live through Google Places discovery and stored as `phone_complaints` | The standalone per-place detector is a targeted lookup/cross-check path when a `place_id` is known |
-| **Lead feedback** | The 👍/👎 mark renders; the data model and scoreboard support one-tap reasons and free-text | Live capture of the reasons/free-text and vote persistence is the next step; it is seeded for the demo today |
-| **Send** | The full send path is built and tested (the engine's job is to send outreach and land deals) | Off for this demo only, as a safety gate so no real clinic is contacted; flips on the moment EliseAI connects HubSpot |
+| Enrichment run | Runs in the demo, wired into the pipeline, on a manual trigger, using the environment's API keys | An always-on schedule (the Vercel Cron) is built but asleep until `CRON_SECRET` is set |
+| Paste-your-own-key | The `/integrations` key fields store an encrypted, per-company key | The manual pipeline reads the environment keys; a pasted key is wired only into the sleeping scheduled cron (Anthropic), not the manual run |
+| Phone-complaint signal | Live through Google Places discovery, stored as `phone_complaints` | The standalone per-place reader is a targeted lookup you run when you already know a place's ID |
+| Lead feedback | The thumbs-up / thumbs-down shows up, and the data model and scoreboard already support one-tap reasons and free text | Actually saving those reasons and votes live is the next step; today it is seeded for the demo |
+| Send | The full send path is built and tested (the engine's job is to send outreach and land deals) | Off for this demo only, as a safety gate so no real clinic is contacted; it flips on the moment EliseAI connects HubSpot |
 
 ---
 
 ## Getting started
 
-Prerequisites: Node 20+, pnpm, and a Postgres database (Supabase).
+You'll need Node 20+, pnpm, and a Postgres database (Supabase).
 
 ```bash
 pnpm install
@@ -231,23 +252,24 @@ pnpm db:seed                   # optional: seed a demo dataset
 pnpm dev                       # http://localhost:3000
 ```
 
-Every page renders on a fresh clone even without keys, using the designed empty and all-zero
-states, so you can walk the whole app first. To run the engine against real data (discover
-practices, enrich, synthesize briefs):
+Every page renders on a fresh clone even without any keys, using the designed empty and all-zero
+states, so you can walk through the whole app first. To run the engine against real data (find
+practices, enrich them, write briefs):
 
 ```bash
 pnpm pipeline                  # supports --dry-run and --limit N
 ```
 
-Other scripts: `pnpm test` (over 900 automated tests across 84 files, covering the engine, brief
-synthesis, the data layer, and the send path), `pnpm typecheck`, `pnpm build`.
+Other commands: `pnpm test` (over 900 automated tests across 84 files, covering the engine, brief
+writing, the data layer, and the send path), `pnpm typecheck`, `pnpm build`.
 
-**Keys.** `.env.example` names every key the project uses and why. The engine needs an Anthropic
-key (research and brief voice) and, recommended, a PDL key (verified contacts). HubSpot is an OAuth
-connect, needed only for live send and CRM tracking. Everything else runs without it.
+Keys: `.env.example` lists every key the project uses and what it is for. The engine needs an
+Anthropic key (for the research and the brief writing voice) and, ideally, a PDL key (for verified
+contacts). HubSpot is an OAuth connect, and you only need it for live send and CRM tracking.
+Everything else runs without it.
 
-> **A note on this app's Next.js:** this project runs a modified build of Next.js. Read
-> `AGENTS.md` before touching framework code.
+> A note on this app's Next.js: this project runs a modified build of Next.js. Read `AGENTS.md`
+> before touching framework code.
 
 ---
 
@@ -255,9 +277,9 @@ connect, needed only for live send and CRM tracking. Everything else runs withou
 
 - [`docs/spec.md`](docs/spec.md) - the full product spec: the user story, the decision log (D1-D15), the signal catalog, and the locked stack
 - [`docs/signal-catalog.md`](docs/signal-catalog.md) - every buying signal: built, parked, and the roadmap
-- [`docs/data-signal-system.md`](docs/data-signal-system.md) - how the live data-signal engine fetches, classifies, resolves, dedupes, meters, and ranks signals
+- [`docs/data-signal-system.md`](docs/data-signal-system.md) - how the live signal engine fetches, classifies, resolves, de-dupes, meters, and ranks signals
 - [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md) - the exact math and honesty tag behind every scoreboard number
-- [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md) - the one-time admin setup (OAuth + keys)
+- [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md) - the one-time admin setup (OAuth plus keys)
 - [`docs/hubspot-send-setup.md`](docs/hubspot-send-setup.md) - the HubSpot send configuration
-- [`docs/adapt-to-proptech.md`](docs/adapt-to-proptech.md) - how the same engine generalizes to a new vertical
-- [`docs/loom-walkthrough-outline.md`](docs/loom-walkthrough-outline.md) - the walkthrough script (product tour + rollout)
+- [`docs/adapt-to-proptech.md`](docs/adapt-to-proptech.md) - how the same engine adapts to a new industry
+- [`docs/loom-walkthrough-outline.md`](docs/loom-walkthrough-outline.md) - the walkthrough script (product tour plus rollout)
