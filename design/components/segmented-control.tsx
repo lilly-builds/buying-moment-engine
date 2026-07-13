@@ -124,21 +124,25 @@ export function SegmentedControl<T extends string>({
   }
 
   return (
-    <div className={cn("relative w-full sm:w-fit", className)}>
+    <div className={cn("relative w-full min-w-0 max-w-full sm:w-fit", className)}>
       <div
       ref={trackRef}
       role="radiogroup"
       aria-label={label}
       className={cn(
         "flex items-center gap-1 rounded-pill bg-surface-subtle p-1",
-        // Desktop (sm:+) is the verified-live track: `w-fit` hugs the pills, never
-        // stretching to leave a dead grey gutter. On a PHONE the two modes split:
+        // `w-fit` (sm:+) hugs the pills; `max-w-full` + `min-w-0` cap the track at
+        // its container at EVERY width so it can never push the page wide — and
+        // `overflow-x-auto` scrolls the pills when capped. `min-w-0` is load-bearing
+        // on Safari: without it a flex track with overflowing content expands to its
+        // content width instead of scrolling, which is exactly the horizontal-overflow
+        // this caused. `shrink-0` pills (below) keep full size and scroll.
         fill
           ? // TOGGLE — span the row and let the segments share it evenly below.
-            "w-full sm:w-fit"
-          : // FILTER — take the full width and scroll (the 5-option track is ~630px,
-            // wider than any phone); pills keep full size via `shrink-0` and snap.
-            "w-full snap-x overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-fit sm:overflow-visible",
+            "w-full min-w-0 max-w-full sm:w-fit"
+          : // FILTER — full width, capped, scrolls (the 5-option track is ~630px,
+            // wider than any phone and than a narrow tablet row beside the title).
+            "w-full min-w-0 max-w-full snap-x overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-fit",
       )}
     >
       {options.map((option, index) => {
