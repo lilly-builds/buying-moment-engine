@@ -7,9 +7,17 @@ import type {
   SignalCandidate,
 } from "@/src/engine/detector";
 import type { DetectorKind } from "@/src/ingest/validate";
-import { createMeter, type CostEventRecord, type Meter } from "@/src/roi/cost-meter";
+import {
+  createMeter,
+  type CostEventRecord,
+  type Meter,
+} from "@/src/roi/cost-meter";
 import { teeRecorder } from "@/src/enrich/experiment-run";
-import { emptyScraper, FakeExtractClient, FakePdlClient } from "../enrich/doubles";
+import {
+  emptyScraper,
+  FakeExtractClient,
+  FakePdlClient,
+} from "../enrich/doubles";
 import { FakeVoiceClient } from "../brief/doubles";
 import { goodVoice, NOW, seedGoldenPractice } from "../brief/fixtures/golden";
 import {
@@ -35,7 +43,12 @@ const quiet = () => {};
 
 /** A fake signal source: emits nothing, but records a metered call so R19 threading is testable. */
 function fakeDetector(
-  opts: { name?: string; kind?: DetectorKind; spendUsd?: number; candidates?: SignalCandidate[] } = {},
+  opts: {
+    name?: string;
+    kind?: DetectorKind;
+    spendUsd?: number;
+    candidates?: SignalCandidate[];
+  } = {},
 ): Detector {
   return {
     name: opts.name ?? "fake-detector",
@@ -63,7 +76,8 @@ const DISCOVERY_TENANT = tenantProfileSchema.parse({
   id: "test-tenant",
   metros: ["Austin, TX"],
   icp: [{ category: "dermatology", vertical: "dermatology" }],
-  qualificationPrompt: "The reviewer describes trouble reaching the practice by phone.",
+  qualificationPrompt:
+    "The reviewer describes trouble reaching the practice by phone.",
   signalKind: "phone_complaints",
   ratingThreshold: 4.0,
   rePullWindowDays: 90,
@@ -128,10 +142,14 @@ describe("runEngine", () => {
     // Both sources ran.
     expect("errored" in summary.sources.detectors).toBe(false);
     expect((summary.sources.detectors as { ran: true }).ran).toBe(true);
-    expect("ran" in summary.sources.discovery && summary.sources.discovery.ran).toBe(true);
+    expect(
+      "ran" in summary.sources.discovery && summary.sources.discovery.ran,
+    ).toBe(true);
 
     // The cascade briefed the golden practice.
-    expect("briefed" in summary.downstream && summary.downstream.briefed).toBe(1);
+    expect("briefed" in summary.downstream && summary.downstream.briefed).toBe(
+      1,
+    );
 
     // R19: the detector's paid call was metered through the shared meter.
     expect(sink.some((r) => r.costUsd === 0.02)).toBe(true);
@@ -149,7 +167,10 @@ describe("runEngine", () => {
       logger: quiet,
     });
 
-    expect("skipped" in summary.sources.discovery && summary.sources.discovery.skipped).toBe(true);
+    expect(
+      "skipped" in summary.sources.discovery &&
+        summary.sources.discovery.skipped,
+    ).toBe(true);
     // Detectors still ran despite discovery being off.
     expect((summary.sources.detectors as { ran: true }).ran).toBe(true);
   });
@@ -169,7 +190,9 @@ describe("runEngine", () => {
     });
 
     expect((summary.sources.detectors as { ran: true }).ran).toBe(true);
-    expect("skipped" in summary.downstream && summary.downstream.skipped).toBe(true);
+    expect("skipped" in summary.downstream && summary.downstream.skipped).toBe(
+      true,
+    );
   });
 
   it("bounds the downstream cohort by briefLimit (the tail waits for the next run)", async () => {
@@ -205,6 +228,156 @@ describe("runEngine", () => {
     });
 
     expect("total" in summary.downstream && summary.downstream.total).toBe(1);
+  });
+
+  it("runs proactive cross-check before selecting the downstream brief cohort", async () => {
+    const ids = await seedGoldenPractice(t.db); // starts with staffing + phone signals
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async (practiceId) => {
+        await attachSignal(t.db, {
+          practiceId,
+          kind: "growth_events",
+          sourceUrl: "https://news.example/schlessinger-expands",
+          snippet: "Schlessinger MD Dermatology opens a new access center.",
+          confidence: 0.91,
+          detectedAt: NOW,
+          expiresAt: computeExpiresAt("growth_events", NOW),
+          signalSource: "crosscheck:growth_events",
+        });
+        return { attached: ["growth_events"], skipped: [] };
+      },
+      pipelineClients: goldenClients(),
+      briefLimit: 5,
+      logger: quiet,
+    });
+
+    expect("ran" in summary.crossCheck && summary.crossCheck.total).toBe(1);
+    expect("briefed" in summary.downstream && summary.downstream.briefed).toBe(
+      1,
+    );
+    if ("items" in summary.downstream) {
+      const item = summary.downstream.items.find(
+        (row) => row.practiceId === ids.practiceId,
+      );
+      expect(item?.result?.brief?.signalCount).toBe(3);
+    }
+  });
+
+  it("applies the cross-check limit after skipping practices with no missing signal families", async () => {
+    const fullyCovered = await upsertPractice(t.db, {
+      name: "Three Signal Dermatology",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+    });
+    await tagVertical(t.db, fullyCovered.id, "dermatology");
+    for (const kind of [
+      "staffing_spike",
+      "growth_events",
+      "phone_complaints",
+    ] as const) {
+      await attachSignal(t.db, {
+        practiceId: fullyCovered.id,
+        kind,
+        sourceUrl: `https://example.com/${kind}`,
+        detectedAt: NOW,
+        expiresAt: computeExpiresAt(kind, NOW),
+        signalSource: "test",
+      });
+    }
+
+    const oneSignal = await upsertPractice(t.db, {
+      name: "One Signal Dermatology",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+    });
+    await tagVertical(t.db, oneSignal.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: oneSignal.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/one-signal",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+
+    const checked: string[] = [];
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async (practiceId) => {
+        checked.push(practiceId);
+        return { attached: [], skipped: [] };
+      },
+      crossCheckLimit: 1,
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect("ran" in summary.crossCheck && summary.crossCheck.total).toBe(1);
+    expect(checked).toEqual([oneSignal.id]);
+  });
+
+  it("does not run cross-checks when the caller sets the cross-check limit to zero", async () => {
+    await seedGoldenPractice(t.db);
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async () => {
+        throw new Error("should not cross-check");
+      },
+      crossCheckLimit: 0,
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect(summary.crossCheck).toEqual({
+      ran: true,
+      total: 0,
+      attached: 0,
+      skipped: 0,
+    });
+  });
+
+  it("defaults cross-checks to zero when briefLimit is zero", async () => {
+    await seedGoldenPractice(t.db);
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      crossCheck: async () => {
+        throw new Error("should not cross-check");
+      },
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect(summary.crossCheck).toEqual({
+      ran: true,
+      total: 0,
+      attached: 0,
+      skipped: 0,
+    });
   });
 
   it("isolates a hard STAGE failure — a throwing downstream query folds into {errored}, sources still run", async () => {
@@ -260,6 +433,8 @@ describe("runEngine", () => {
 
     // The batch caught the throw; runEngine surfaced a well-formed summary, not an exception.
     expect(summary.ran).toBe(true);
-    expect("errored" in summary.downstream && summary.downstream.errored).toBe(1);
+    expect("errored" in summary.downstream && summary.downstream.errored).toBe(
+      1,
+    );
   });
 });

@@ -81,9 +81,7 @@ export const practices = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [
-    unique("practices_normalized_geo_uq").on(t.normalizedName, t.geoKey),
-  ],
+  (t) => [unique("practices_normalized_geo_uq").on(t.normalizedName, t.geoKey)],
 ).enableRLS();
 
 /**
@@ -101,6 +99,43 @@ export const evidence = pgTable("evidence", {
   detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
   createdAt: createdAt(),
 }).enableRLS();
+
+/**
+ * signal_checks — audit/cache rows for proactive cross-source checks. A fired
+ * signal still lives in `signals`; this table records that a source was checked
+ * (including clean misses, errors, and prerequisite skips) so the engine can
+ * avoid repeat spend and prove source coverage honestly.
+ */
+export const signalChecks = pgTable(
+  "signal_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    practiceId: uuid("practice_id")
+      .notNull()
+      .references(() => practices.id),
+    kind: signalKind("kind").notNull(),
+    status: text("status").notNull(),
+    provider: text("provider").notNull(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+    cooldownExpiresAt: timestamp("cooldown_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    costUsd: numeric("cost_usd"),
+    matchedPracticeName: text("matched_practice_name"),
+    matchConfidence: numeric("match_confidence"),
+    evidenceId: uuid("evidence_id").references(() => evidence.id),
+    reason: text("reason"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique("signal_checks_practice_kind_provider_uq").on(
+      t.practiceId,
+      t.kind,
+      t.provider,
+    ),
+  ],
+).enableRLS();
 
 export const signals = pgTable(
   "signals",

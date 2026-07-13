@@ -7,8 +7,14 @@ import {
   type DiscoverySummary,
   type RunDiscoveryDeps,
 } from "./run-discovery";
-import { practicesNeedingBriefs } from "@/db/queries";
-import { runPipelineBatch, type BatchSummary } from "@/src/engine/pipeline-batch";
+import {
+  practicesNeedingBriefs,
+  practicesNeedingCrossChecks,
+} from "@/db/queries";
+import {
+  runPipelineBatch,
+  type BatchSummary,
+} from "@/src/engine/pipeline-batch";
 import type { Lead, PipelineDeps } from "@/src/engine/pipeline";
 
 /**
@@ -51,7 +57,7 @@ export const MAX_ENGINE_BRIEF_LIMIT = 50;
  *  db / meter / now / logger / force the engine threads in from one place. */
 export type PipelineClients = Pick<
   PipelineDeps,
-  "scrape" | "extract" | "pdl" | "voice" | "resolveWebsite" | "escalation" | "crossCheck"
+  "scrape" | "extract" | "pdl" | "voice" | "resolveWebsite" | "escalation"
 >;
 
 export interface RunEngineDeps {
@@ -68,6 +74,10 @@ export interface RunEngineDeps {
    * share this run's `db` + `meter` + `now` so spend and timestamps stay consistent.
    */
   discovery: RunDiscoveryDeps | null;
+  /** Optional proactive cross-check stage. Runs after sources and before brief selection. */
+  crossCheck?: (practiceId: string) => Promise<unknown>;
+  /** Max practices to cross-check this run. Defaults to the brief limit, then the normal default. */
+  crossCheckLimit?: number;
   /** Downstream conductor clients (enrich → synthesize). Omit to skip the cascade — e.g. the
    *  enrichment/brief key is absent, so there is nothing to build a brief with. */
   pipelineClients?: PipelineClients;
@@ -84,6 +94,13 @@ export interface RunEngineDeps {
 type Skipped = { skipped: true; reason: string };
 type Errored = { errored: true; error: string };
 
+export interface CrossCheckRunSummary {
+  ran: true;
+  total: number;
+  attached: number;
+  skipped: number;
+}
+
 export interface EngineRunSummary {
   ran: true;
   startedAt: string;
@@ -93,6 +110,7 @@ export interface EngineRunSummary {
     detectors: RunSummary | Errored;
     discovery: DiscoverySummary | Skipped | Errored;
   };
+  crossCheck: CrossCheckRunSummary | Skipped | Errored;
   downstream: BatchSummary | Skipped | Errored;
 }
 
@@ -121,7 +139,9 @@ async function runStage<T>(
 }
 
 /** Fire every signal source, then cascade the fresh cohort into cited briefs. */
-export async function runEngine(deps: RunEngineDeps): Promise<EngineRunSummary> {
+export async function runEngine(
+  deps: RunEngineDeps,
+): Promise<EngineRunSummary> {
   const now = deps.now ?? new Date();
   const log = deps.logger ?? defaultLogger;
   const startedAt = now.toISOString();
@@ -139,10 +159,53 @@ export async function runEngine(deps: RunEngineDeps): Promise<EngineRunSummary> 
   );
 
   const discovery: DiscoverySummary | Skipped | Errored = deps.discovery
-    ? await runStage("discovery", log, () => runDiscovery(deps.discovery as RunDiscoveryDeps))
-    : { skipped: true, reason: "no discovery deps (missing Google Places / Anthropic key)" };
+    ? await runStage("discovery", log, () =>
+        runDiscovery(deps.discovery as RunDiscoveryDeps),
+      )
+    : {
+        skipped: true,
+        reason: "no discovery deps (missing Google Places / Anthropic key)",
+      };
 
-  // 2 — DOWNSTREAM CASCADE. The freshly-landed leads with no brief yet, bounded, through the
+  // 2 — PROACTIVE CROSS-CHECK. After all source stages have landed signals, but BEFORE the
+  //     brief cohort is selected, check feed-eligible practices against the other signal
+  //     families. This is the point where the brief can still see newly stacked signals.
+  const crossCheck: CrossCheckRunSummary | Skipped | Errored = deps.crossCheck
+    ? await runStage("cross-check", log, async () => {
+        const limit =
+          deps.crossCheckLimit ??
+          (deps.briefLimit > 0 ? deps.briefLimit : 0);
+        if (limit <= 0) return { ran: true, total: 0, attached: 0, skipped: 0 };
+        const cohort = await practicesNeedingCrossChecks(deps.db, {
+          limit,
+          now,
+        });
+        let attached = 0;
+        let skipped = 0;
+        for (const practice of cohort) {
+          const result = await deps.crossCheck?.(practice.id);
+          if (
+            result &&
+            typeof result === "object" &&
+            "attached" in result &&
+            Array.isArray((result as { attached: unknown }).attached)
+          ) {
+            attached += (result as { attached: unknown[] }).attached.length;
+          }
+          if (
+            result &&
+            typeof result === "object" &&
+            "skipped" in result &&
+            Array.isArray((result as { skipped: unknown }).skipped)
+          ) {
+            skipped += (result as { skipped: unknown[] }).skipped.length;
+          }
+        }
+        return { ran: true, total: cohort.length, attached, skipped };
+      })
+    : { skipped: true, reason: "no cross-check deps" };
+
+  // 3 — DOWNSTREAM CASCADE. The freshly-landed leads with no brief yet, bounded, through the
   //     conductor (resolve → website → enrich → synthesize → persist).
   let downstream: BatchSummary | Skipped | Errored;
   const clients = deps.pipelineClients;
@@ -155,9 +218,19 @@ export async function runEngine(deps: RunEngineDeps): Promise<EngineRunSummary> 
     };
   } else {
     downstream = await runStage("downstream", log, async () => {
-      const pull = await practicesNeedingBriefs(deps.db, { limit: deps.briefLimit, now });
+      const pull = await practicesNeedingBriefs(deps.db, {
+        limit: deps.briefLimit,
+        now,
+      });
       if (pull.length === 0) {
-        return { total: 0, briefed: 0, skipped: 0, failed: 0, errored: 0, items: [] };
+        return {
+          total: 0,
+          briefed: 0,
+          skipped: 0,
+          failed: 0,
+          errored: 0,
+          items: [],
+        };
       }
       const leads: Lead[] = pull.map((p) => ({
         name: p.name,
@@ -191,6 +264,7 @@ export async function runEngine(deps: RunEngineDeps): Promise<EngineRunSummary> 
     finishedAt,
     briefLimit: deps.briefLimit,
     sources: { detectors, discovery },
+    crossCheck,
     downstream,
   };
 }

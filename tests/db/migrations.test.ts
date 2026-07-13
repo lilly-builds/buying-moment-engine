@@ -6,6 +6,7 @@ import {
   evidence,
   practiceFacts,
   practices,
+  signalChecks,
   signals,
 } from "@/db/schema";
 
@@ -22,6 +23,7 @@ describe("migrations", () => {
     // If any migration failed, these selects throw.
     expect(await t.db.select().from(practices)).toEqual([]);
     expect(await t.db.select().from(signals)).toEqual([]);
+    expect(await t.db.select().from(signalChecks)).toEqual([]);
     expect(await t.db.select().from(evidence)).toEqual([]);
     expect(await t.db.select().from(contacts)).toEqual([]);
     expect(await t.db.select().from(costEvents)).toEqual([]);
