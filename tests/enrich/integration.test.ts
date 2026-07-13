@@ -207,6 +207,43 @@ describe("enrichment waterfall (integration)", () => {
     expect(contact.email).toBeNull();
   });
 
+  it("stores a published organization inbox when no direct work email is found", async () => {
+    const practiceId = await seedPractice(
+      "Harbor Vision Eye Care",
+      "portland-or",
+    );
+    const harborWithOfficeEmail = new Map(HARBOR_PAGES).set(
+      "https://harborvision.example/contact",
+      "# Contact\n\nFor appointments, email our office at office@harborvision.example.",
+    );
+    const { deps: d } = deps(
+      harborWithOfficeEmail,
+      FakeExtractClient.fromFixture(roleOnly),
+      FakePdlClient.fromFixture(personNotFound),
+    );
+
+    const result = await enrichPractice(d, {
+      id: practiceId,
+      name: "Harbor Vision Eye Care",
+      city: "Portland",
+      state: "OR",
+      websiteUrl: "https://harborvision.example",
+    });
+
+    expect(result.status).toBe("enriched");
+    expect(result.contactVariant).toBe("role_only");
+
+    const [contact] = await t.db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.practiceId, practiceId));
+    expect(contact.name).toBeNull();
+    expect(contact.role).toBe("Office Manager");
+    expect(contact.email).toBe("office@harborvision.example");
+    expect(contact.emailProvider).toBe("claude_research");
+    expect(contact.sourceUrl).toBe("https://harborvision.example/careers");
+  });
+
   it("discovers a named contact when the website only gave a role", async () => {
     const practiceId = await seedPractice(
       "Harbor Vision Eye Care",

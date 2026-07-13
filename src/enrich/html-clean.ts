@@ -119,6 +119,15 @@ export function cleanHtml(html: string): string {
   $(NOISE_SELECTOR).remove();
   $(HIDDEN_SELECTOR).remove();
 
+  // Public organization inboxes are often present only as mailto hrefs with link
+  // text like "Email us". Expose the address in the held text so the deterministic
+  // org-email fallback can use a real published address instead of guessing one.
+  $("a[href^='mailto:']").each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    const email = href.replace(/^mailto:/i, "").split(/[?#]/)[0].trim();
+    if (email && !$(el).text().includes(email)) $(el).append(` ${email}`);
+  });
+
   const sections: string[] = [];
   $(HEADING_SELECTOR).each((_, el) => {
     const text = $(el).text().trim();

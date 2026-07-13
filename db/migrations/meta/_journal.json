@@ -71,6 +71,13 @@
       "when": 1783942814348,
       "tag": "0009_signal_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783730000000,
+      "tag": "0010_coverage_first_enrichment",
+      "breakpoints": true
     }
   ]
 }

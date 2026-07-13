@@ -99,7 +99,17 @@ export function fakeScraper(pages: Map<string, string>): FakeScraper {
         (n, text) => n + text.length,
         0,
       );
-      return { pages, pagesHeld: pages.size, totalChars };
+      return {
+        pages,
+        pagesHeld: pages.size,
+        totalChars,
+        socialLinks: {
+          linkedinUrl: null,
+          facebookUrl: null,
+          instagramUrl: null,
+          sources: { linkedin: null, facebook: null, instagram: null },
+        },
+      };
     },
   };
 }
@@ -113,7 +123,18 @@ export function emptyScraper(
     calls,
     scrape: async (websiteUrl: string) => {
       calls.push(websiteUrl);
-      return { pages: new Map(), pagesHeld: 0, totalChars: 0, reason };
+      return {
+        pages: new Map(),
+        pagesHeld: 0,
+        totalChars: 0,
+        reason,
+        socialLinks: {
+          linkedinUrl: null,
+          facebookUrl: null,
+          instagramUrl: null,
+          sources: { linkedin: null, facebook: null, instagram: null },
+        },
+      };
     },
   };
 }

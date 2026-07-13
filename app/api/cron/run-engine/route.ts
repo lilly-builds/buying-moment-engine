@@ -19,7 +19,9 @@ import {
 } from "@/jobs/run-engine";
 import { scrapePractice } from "@/src/enrich/scrape";
 import { anthropicExtractClient } from "@/src/enrich/extract";
-import { pdlClient } from "@/src/enrich/pdl-client";
+import { createProspeoClient } from "@/src/enrich/prospeo-client";
+import { createFullEnrichClient } from "@/src/enrich/fullenrich-client";
+import { createBetterContactClient } from "@/src/enrich/bettercontact-client";
 import { anthropicVoiceClient } from "@/src/brief/voice";
 import { resolvePracticeWebsite } from "@/src/enrich/website";
 import { crossCheckSignals } from "@/src/engine/cross-check";
@@ -60,8 +62,9 @@ function authorized(request: Request): boolean {
  * (`""`, exactly what .env.example ships, and what an empty Vercel dashboard field yields) must
  * fall back to the default; a deliberate "0" is still honored as explicit briefing-disabled mode.
  */
-export function resolveBriefLimit(): number {
-  const raw = process.env.ENGINE_BRIEF_LIMIT?.trim();
+export function resolveBriefLimit(request?: Request): number {
+  const queryLimit = request ? new URL(request.url).searchParams.get("limit")?.trim() : null;
+  const raw = queryLimit || process.env.ENGINE_BRIEF_LIMIT?.trim();
   if (!raw) return DEFAULT_ENGINE_BRIEF_LIMIT;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return DEFAULT_ENGINE_BRIEF_LIMIT;
@@ -86,9 +89,11 @@ export async function GET(request: Request): Promise<Response> {
 
     // Anthropic powers discovery's review-qualifier, enrichment extraction, and brief synthesis.
     // BYOK (U17): stored EliseAI key first, env fallback — resolveProviderKey does both.
-    const anthropicApiKey =
+const anthropicApiKey =
       (await resolveProviderKey(db, "anthropic")) ?? undefined;
-    const pdlKey = process.env.PDL_API_KEY;
+    const prospeoKey = process.env.PROSPEO_API_KEY;
+    const fullenrichKey = process.env.FULLENRICH_API_KEY;
+    const bettercontactKey = process.env.BETTERCONTACT_API_KEY;
     const hasGoogle = Boolean(process.env.GOOGLE_PLACES_API_KEY);
 
     const crossCheck = (practiceId: string) =>
@@ -117,14 +122,17 @@ export async function GET(request: Request): Promise<Response> {
       }
     }
 
-    // The downstream cascade needs Anthropic (extract + brief voice) AND PDL (the verified-contact
-    // gap). Both truthy narrows each to `string` (no casts); without both, run the free sources only.
+    // The downstream cascade needs Anthropic (extract + brief voice) AND the coverage-first
+    // enrichment providers. PDL is intentionally excluded from the production waterfall.
     const pipelineClients: PipelineClients | undefined =
-      anthropicApiKey && pdlKey
+      anthropicApiKey && prospeoKey && fullenrichKey && bettercontactKey
         ? {
             scrape: (url: string) => scrapePractice({ fetch }, url),
             extract: anthropicExtractClient(anthropicApiKey),
-            pdl: pdlClient(pdlKey),
+            prospeo: createProspeoClient({ apiKey: prospeoKey }),
+            fullenrichPeople: createFullEnrichClient({ apiKey: fullenrichKey }),
+            fullenrichEmail: createFullEnrichClient({ apiKey: fullenrichKey }),
+            bettercontact: createBetterContactClient({ apiKey: bettercontactKey }),
             voice: anthropicVoiceClient(anthropicApiKey),
             // Plan B website lookup — only when Google is available; metered per practice.
             resolveWebsite: hasGoogle
@@ -133,7 +141,8 @@ export async function GET(request: Request): Promise<Response> {
             // agentic escalation OFF — cost discipline (matches scripts/run-pipeline.ts).
           }
         : undefined;
-    const briefLimit = pipelineClients ? resolveBriefLimit() : 0;
+    const briefLimit = pipelineClients ? resolveBriefLimit(request) : 0;
+    const force = new URL(request.url).searchParams.get("force") === "1";
 
     const summary = await runEngine({
       db,
@@ -145,6 +154,7 @@ export async function GET(request: Request): Promise<Response> {
       crossCheckLimit: briefLimit,
       pipelineClients,
       briefLimit,
+      force,
     });
 
     return NextResponse.json(summary);

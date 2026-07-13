@@ -326,8 +326,13 @@ export function normalizePersonSearchResponse(
     return { ...NO_DISCOVERY_MATCH, billedRecords, total: data.total ?? null };
   }
 
-  const [candidate] = data.data;
-  const confidence = scoreDiscoveryCandidate(candidate, request);
+  const ranked = data.data
+    .map((candidate) => ({
+      candidate,
+      confidence: scoreDiscoveryCandidate(candidate, request),
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
+  const { candidate, confidence } = ranked[0];
   const fullName = fieldValue(candidate.full_name);
   if (confidence < PDL_MIN_DISCOVERY_CONFIDENCE || !fullName) {
     return {
@@ -400,7 +405,7 @@ async function pdlGet(
 }
 
 function escapeSql(value: string): string {
-  return value.replaceAll("'", "''").toLowerCase();
+  return value.replaceAll("\\", "\\\\").replaceAll("'", "''").toLowerCase();
 }
 
 function personDiscoverySql(request: PdlPersonDiscoveryRequest): string {
@@ -416,6 +421,7 @@ function personDiscoverySql(request: PdlPersonDiscoveryRequest): string {
   const locationClauses = [
     "location_country='united states'",
     request.city ? `location_locality='${escapeSql(request.city)}'` : null,
+    request.state ? `location_region='${escapeSql(request.state)}'` : null,
   ].filter(Boolean);
 
   return [

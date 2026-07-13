@@ -293,3 +293,97 @@ export class AnthropicRequestError extends Error {
     this.name = "AnthropicRequestError";
   }
 }
+
+// ─── Coverage-first provider contracts ───────────────────────────────────────
+
+export type CoverageProvider =
+  | "website_scrape"
+  | "prospeo"
+  | "fullenrich"
+  | "bettercontact"
+  | "org_website";
+
+export type BuyerTier = "A" | "B" | "C" | "D" | "E" | "X" | "none";
+export type SelectedContactClassification =
+  | "best_buyer"
+  | "reachable_fallback"
+  | "weak_unrelated"
+  | "none";
+export type EmailQuality =
+  | "safe_work"
+  | "weak_work"
+  | "personal"
+  | "org_inbox"
+  | "none";
+
+export interface DiscoveredContactCandidate {
+  name: string | null;
+  role: string | null;
+  email?: string | null;
+  linkedinUrl?: string | null;
+  companyName?: string | null;
+  companyDomain?: string | null;
+  location?: string | null;
+  sourceProvider: CoverageProvider;
+  sourceUrl?: string | null;
+  confidence?: number | null;
+}
+
+export interface PersonSearchRequest {
+  companyName: string;
+  city?: string | null;
+  state?: string | null;
+  websiteDomain?: string | null;
+  targetRoles: readonly string[];
+}
+
+export interface PersonSearchResult {
+  candidates: DiscoveredContactCandidate[];
+  raw?: unknown;
+  credits?: number | null;
+}
+
+export interface ProspeoClient {
+  searchPerson(request: PersonSearchRequest): Promise<PersonSearchResult>;
+}
+
+export interface FullEnrichPeopleClient {
+  searchPeople(request: PersonSearchRequest): Promise<PersonSearchResult>;
+}
+
+export interface PersonEmailRequest {
+  fullName: string;
+  companyName: string;
+  role?: string | null;
+  linkedinUrl?: string | null;
+  websiteDomain?: string | null;
+}
+
+export interface PersonEmailResult {
+  email: string | null;
+  quality: EmailQuality;
+  provider: "fullenrich" | "bettercontact";
+  status?: string | null;
+  linkedinUrl?: string | null;
+  raw?: unknown;
+  credits?: number | null;
+}
+
+export interface FullEnrichEmailClient {
+  enrichEmail(request: PersonEmailRequest): Promise<PersonEmailResult>;
+}
+
+export interface BetterContactClient {
+  enrichEmail(request: PersonEmailRequest): Promise<PersonEmailResult>;
+}
+
+export class ProviderBlockedError extends Error {
+  constructor(
+    readonly provider: string,
+    readonly reason: "auth" | "credits" | "rate_limit" | "api_contract",
+    message: string,
+  ) {
+    super(`${provider} blocked: ${reason}: ${message}`);
+    this.name = "ProviderBlockedError";
+  }
+}

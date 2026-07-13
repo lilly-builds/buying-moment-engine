@@ -134,8 +134,8 @@ export const PDL_MIN_LIKELIHOOD = 6;
  */
 export const PDL_MIN_DISCOVERY_CONFIDENCE = 0.7;
 
-/** Cap Person Search spend: PDL bills per record returned, so one profile is enough. */
-export const PDL_PERSON_DISCOVERY_SIZE = 1;
+/** Cap Person Search spend: PDL bills per record returned; five profiles lets us score past a weak first result without opening an unbounded bill. */
+export const PDL_PERSON_DISCOVERY_SIZE = 5;
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 

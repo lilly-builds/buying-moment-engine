@@ -112,7 +112,15 @@ export const contactCardSchema = z.object({
   role: z.string().min(1),
   email: z.string().min(1).nullable(),
   /** Which half of the U5 waterfall supplied the email — the brief says where it came from. */
-  emailProvider: z.enum(["claude_research", "pdl"]).nullable(),
+  emailProvider: z.enum([
+    "claude_research",
+    "pdl",
+    "prospeo",
+    "fullenrich",
+    "bettercontact",
+    "website_scrape",
+    "org_website",
+  ]).nullable(),
   linkedinUrl: z.string().min(1).nullable(),
   bestChannel: z.string().min(1).nullable(),
   /** The page that named this person's role. Null only when the row predates provenance. */

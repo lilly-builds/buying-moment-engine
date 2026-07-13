@@ -417,3 +417,45 @@ describe("licence-gated fields (`false`) must not be read as 'no data'", () => {
     expect(r.billed).toBe(false);
   });
 });
+
+describe("PDL Person Search discovery ranking", () => {
+  it("scores all returned candidates instead of accepting a weak first result", () => {
+    const result = normalizePersonSearchResponse(
+      {
+        status: 200,
+        total: 2,
+        data: [
+          {
+            full_name: "Wrong Person",
+            job_title: "Sales Director",
+            job_company_name: "Other Company",
+            job_company_website: "other.example",
+            location_locality: "Miami",
+            location_region: "FL",
+            linkedin_url: "linkedin.com/in/wrong",
+          },
+          {
+            full_name: "Pat Manager",
+            job_title: "Senior Practice Manager",
+            job_company_name: "Sunshine Dermatology Associates",
+            job_company_website: "sunshinederm.example",
+            location_locality: "Miami",
+            location_region: "FL",
+            linkedin_url: "linkedin.com/in/pat-manager",
+          },
+        ],
+      },
+      {
+        companyName: "Sunshine Dermatology Associates",
+        city: "Miami",
+        state: "FL",
+        websiteDomain: "sunshinederm.example",
+        targetRoles: ["practice manager"],
+      },
+    );
+
+    expect(result.matched).toBe(true);
+    expect(result.fullName).toBe("Pat Manager");
+    expect(result.role).toBe("Senior Practice Manager");
+  });
+});

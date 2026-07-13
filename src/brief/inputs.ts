@@ -1,4 +1,5 @@
 import { asc, eq } from "drizzle-orm";
+import type { EnrichmentProvider } from "@/db/enrich";
 import { contacts, evidence, practiceFacts, practices, signals } from "@/db/schema";
 import type { Database } from "@/db/types";
 import { isFresh } from "@/src/engine/freshness";
@@ -35,7 +36,7 @@ export interface FactRow {
   /** `specialty` | `website` | `yearFounded` | `ehr` | `incumbent_tooling_N` | `buying_moment_N`. */
   field: string;
   value: string;
-  provider: "claude_research" | "pdl";
+  provider: EnrichmentProvider;
   evidence: EvidenceRef;
 }
 
@@ -53,7 +54,7 @@ export interface ContactRow {
   name: string | null;
   role: string;
   email: string | null;
-  emailProvider: "claude_research" | "pdl" | null;
+  emailProvider: EnrichmentProvider | null;
   linkedinUrl: string | null;
   bestChannel: string | null;
   sourceUrl: string | null;
