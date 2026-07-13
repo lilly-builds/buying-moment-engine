@@ -100,19 +100,35 @@ can trust it, so they don't waste time questioning the results of under-engineer
 
 ## The ROI scoreboard: what you measure improves. 
 
-The tool keeps score of its own impact. The scoreboard measures what this tool did, not some generic
-company dashboard, and it is written so anyone can read every number at a glance. The rule for what
-earns a spot: a number is on screen only if it helps someone decide what to do next.
+Every business has two goals: close more deals, and spend less to win each one. Those are the two numbers this tool is judged on. You can't steer by them directly, though, because they only show up later, after a deal is won or lost. So the scoreboard is built the way any operator would build it. The two end goals sit up top, and underneath them are the early signs that move them, each one tied to a decision it lets you make.
 
-It answers the questions that move revenue and the cost to land a customer (CAC): which signals turn
-into meetings, which specialties win fastest and cheapest, how many messages it takes to book a
-meeting, what each booked meeting costs, and whether the rep marked each lead as good or not. You can
-see every figure overall or broken down by specialty.
+The two end goals (lagging metrics):
+- Deals won. Are we closing more?
+- Cost to win a customer (CAC). Does each new customer cost less?
 
-The honesty labels do the real work here. Each number is tagged either measured (read straight from
-the tool's own activity and logged spend) or modeled (an honest estimate from public benchmarks,
-which turns into a measured number as real volume builds up). An estimate is never dressed up as a
-measurement. When there is no data yet, the number shows a dash instead of a made-up figure. The full
+The leading metrics that give data to guide optimizations that ultimately increase revenue and decrease CAC.
+┌────────────────────────────────────────────┬───────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────┐
+│                 The metric                 │        The question it answers        │                         The move it lets you make                         │
+├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ Per-signal conversion rate                 │ Which buying signals turn into        │ Keep the signals that pay off, kill the ones that do not, and re-rank the │
+│                                            │ meetings?                             │  feed around them                                                         │
+├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ Win rate, cost per meeting, and cycle      │ Which specialties win fastest and     │ Put reps and budget on the specialties that convert, and rework the pitch │
+│ time, by specialty                         │ cheapest?                             │  for the ones falling behind                                              │
+├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ Messages to land a meeting                 │ How many messages does it take to     │ Fix the sequences that are not landing                                    │
+│                                            │ land a meeting?                       │                                                                           │
+├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ Cost per meeting                           │ What does each booked meeting cost?   │ Put budget where meetings are cheapest                                    │
+├────────────────────────────────────────────┼───────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+│ Lead-quality feedback, thumbs up or down   │ Did the AE mark the lead good or not? │ Learn what a good lead looks like, so the engine finds more and wastes    │
+│                                            │                                       │ less                                                                      │
+└────────────────────────────────────────────┴───────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────┘
+
+Metrics per customer segment:
+Every number is viewable for the whole book of business or one specialty at a time, so you can see which vertical is carrying the result.
+  
+---- The full
 math behind every number is in [`docs/scoreboard-metrics.md`](docs/scoreboard-metrics.md).
 
 ![The ROI scoreboard, scrolling from the headline numbers through per-signal, per-specialty, feedback, and the big test](docs/screenshots/scoreboard.gif)
@@ -142,6 +158,7 @@ Until a company connects its own accounts, the whole tool runs on the builder's 
 evaluating it sees the full value first and gets new leads daily for a week. Connecting flips two features on. 
 
 (1) Emails can be sent and tracked through a company's CRM. 
+
 (2) AI-driven research and brief-writing continues beyond week one trial. Once the Anthropic key is connected, API calls now bill to the
 company's own account, so it shows up as real, measured cost in the scoreboard's CAC. 
 
