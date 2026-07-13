@@ -15,13 +15,14 @@ export interface BatchItem {
   /** null only when resolve never returned — i.e. the lead threw before a practice existed. */
   practiceId: string | null;
   name: string;
-  status: "briefed" | "skipped" | "failed" | "errored";
+  status: "enriched" | "briefed" | "skipped" | "failed" | "errored";
   result?: PipelineResult;
   error?: string;
 }
 
 export interface BatchSummary {
   total: number;
+  enriched: number;
   briefed: number;
   skipped: number;
   failed: number;
@@ -62,6 +63,7 @@ export async function runPipelineBatch(
 
   return {
     total: items.length,
+    enriched: count("enriched"),
     briefed: count("briefed"),
     skipped: count("skipped"),
     failed: count("failed"),

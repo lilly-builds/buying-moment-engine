@@ -301,6 +301,32 @@ describe("runEngine", () => {
     ).toBe(true);
   });
 
+
+  it("can run a real downstream enrichment-only batch without generating briefs", async () => {
+    await seedGoldenPractice(t.db);
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      pipelineClients: goldenClients(),
+      briefLimit: 1,
+      enrichOnly: true,
+      logger: quiet,
+    });
+
+    expect(summary.mode).toBe("enrich_only");
+    expect(summary.completedBriefLimit).toBe(1);
+    expect("total" in summary.downstream && summary.downstream.total).toBe(1);
+    expect("briefed" in summary.downstream && summary.downstream.briefed).toBe(0);
+    if ("items" in summary.downstream) {
+      expect(summary.downstream.items[0].result?.enrich).toBeDefined();
+      expect(summary.downstream.items[0].result?.brief).toBeUndefined();
+    }
+  });
+
   it("runs proactive cross-check before selecting the downstream brief cohort", async () => {
     const ids = await seedGoldenPractice(t.db); // starts with staffing + phone signals
 

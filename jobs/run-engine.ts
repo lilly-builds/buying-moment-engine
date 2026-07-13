@@ -94,6 +94,8 @@ export interface RunEngineDeps {
    * is explicit briefing-disabled mode and pending eligible leads are reported.
    */
   briefLimit: number;
+  /** Enrich contacts only and skip brief synthesis. Keeps provider canaries separate from brief gates. */
+  enrichOnly?: boolean;
   /** Regenerate already-briefed practices too (deliberate). Default false → skip briefed. */
   force?: boolean;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
@@ -122,6 +124,9 @@ export interface EngineRunSummary {
   finishedAt: string;
   /** Back-compat name for the invocation batch size. */
   briefLimit: number;
+  /** Repeated at completion so canary output always shows the configured brief cap after finishing. */
+  completedBriefLimit: number;
+  mode: "brief" | "enrich_only";
   /** Operational batch size used for external brief-building calls this invocation. */
   briefBatchSize: number;
   sources: {
@@ -271,6 +276,7 @@ export async function runEngine(
 
       const empty: BatchSummary = {
         total: 0,
+        enriched: 0,
         briefed: 0,
         skipped: 0,
         failed: 0,
@@ -286,6 +292,7 @@ export async function runEngine(
                 meter: deps.meter,
                 now: () => now,
                 logger: deps.logger,
+                enrichOnly: deps.enrichOnly ?? false,
                 force: deps.force ?? false,
                 ...clients,
               },
@@ -302,15 +309,25 @@ export async function runEngine(
       if (batchSummary.skipped > 0)
         skippedReasons.push("brief pipeline skipped attempted lead(s)");
       if (batchSummary.failed > 0)
-        skippedReasons.push("brief pipeline failed attempted lead(s)");
+        skippedReasons.push(
+          deps.enrichOnly
+            ? "enrichment pipeline failed attempted lead(s)"
+            : "brief pipeline failed attempted lead(s)",
+        );
       if (batchSummary.errored > 0)
-        skippedReasons.push("brief pipeline errored attempted lead(s)");
+        skippedReasons.push(
+          deps.enrichOnly
+            ? "enrichment pipeline errored attempted lead(s)"
+            : "brief pipeline errored attempted lead(s)",
+        );
 
       return {
         ...batchSummary,
         eligible: eligibleCount,
         attempted: batch.length,
-        pending: Math.max(eligibleCount - batchSummary.briefed, 0),
+        pending: deps.enrichOnly
+          ? Math.max(eligibleCount - batchSummary.enriched, 0)
+          : Math.max(eligibleCount - batchSummary.briefed, 0),
         skippedReasons,
       };
     });
@@ -323,6 +340,8 @@ export async function runEngine(
     eligible: "eligible" in downstream ? downstream.eligible : null,
     attempted: "attempted" in downstream ? downstream.attempted : null,
     pending: "pending" in downstream ? downstream.pending : null,
+    mode: deps.enrichOnly ? "enrich_only" : "brief",
+    completedBriefLimit: deps.briefLimit,
   });
 
   return {
@@ -330,6 +349,8 @@ export async function runEngine(
     startedAt,
     finishedAt,
     briefLimit: deps.briefLimit,
+    completedBriefLimit: deps.briefLimit,
+    mode: deps.enrichOnly ? "enrich_only" : "brief",
     briefBatchSize: deps.briefLimit,
     sources: { detectors, discovery },
     crossCheck,

@@ -141,8 +141,10 @@ const anthropicApiKey =
             // agentic escalation OFF — cost discipline (matches scripts/run-pipeline.ts).
           }
         : undefined;
+    const params = new URL(request.url).searchParams;
     const briefLimit = pipelineClients ? resolveBriefLimit(request) : 0;
-    const force = new URL(request.url).searchParams.get("force") === "1";
+    const force = params.get("force") === "1";
+    const enrichOnly = params.get("enrichOnly") === "1";
 
     const summary = await runEngine({
       db,
@@ -154,6 +156,7 @@ const anthropicApiKey =
       crossCheckLimit: briefLimit,
       pipelineClients,
       briefLimit,
+      enrichOnly,
       force,
     });
 

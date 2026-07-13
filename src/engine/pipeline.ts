@@ -74,6 +74,8 @@ export interface PipelineDeps {
   resolveWebsite?: WebsiteResolver;
   /** Optional targeted pass that attaches the other signal kinds before briefing. */
   crossCheck?: (practiceId: string) => Promise<unknown>;
+  /** Enrich and persist contacts only; skip brief synthesis for clean enrichment canaries. */
+  enrichOnly?: boolean;
   /** Regenerate even when a current brief exists (deliberate). Default false → skip. */
   force?: boolean;
   now?: () => Date;
@@ -114,10 +116,11 @@ export interface PipelineResult {
   website: string | null;
   /**
    * `skipped`  — a current brief already existed; nothing was spent.
+   * `enriched` — enrichment ran and persisted contact/fact fields; brief synthesis was skipped.
    * `briefed`  — a brief was generated or regenerated and persisted.
    * `failed`   — no brief could be produced (synthesis failed at some gate).
    */
-  status: "skipped" | "briefed" | "failed";
+  status: "skipped" | "enriched" | "briefed" | "failed";
   /** Present whenever the pipeline ran past the skip guard. */
   enrich?: EnrichSummary;
   /** Present only when `status === "briefed"`. */
@@ -218,6 +221,16 @@ export async function runLeadToBrief(
     escalated: enriched.escalated,
     reason: enriched.reason,
   };
+
+  if (deps.enrichOnly) {
+    return {
+      ...base,
+      website,
+      status: enriched.status === "enriched" ? "enriched" : "failed",
+      enrich,
+      reason: enriched.status === "failed" ? enriched.reason : undefined,
+    };
+  }
 
   // 6 — SYNTHESIZE + PERSIST (one call — synthesizeBrief upserts the brief internally).
   const synthDeps: SynthesizeDeps = {
