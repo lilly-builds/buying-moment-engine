@@ -139,8 +139,12 @@ There are three integrations:
   stored. These power the prospect enrichment, verification, research, and brief writing.
 
 Until a company connects its own accounts, the whole tool runs on the builder's demo keys (except for hubspot), so someone
-evaluating it sees the full value first and gets new leads daily for a week. Connecting flips two features on. (1) Emails can be sent and tracked through a company's CRM. (2) AI-driven research and brief-writing continues beyond week one trial. Once the Anthropic key is connected, API calls now bill to the
+evaluating it sees the full value first and gets new leads daily for a week. Connecting flips two features on. 
+
+(1) Emails can be sent and tracked through a company's CRM. 
+(2) AI-driven research and brief-writing continues beyond week one trial. Once the Anthropic key is connected, API calls now bill to the
 company's own account, so it shows up as real, measured cost in the scoreboard's CAC. 
+
 Step-by-step is in [`docs/revops-connections-guide.md`](docs/revops-connections-guide.md).
 
 ![The Connections page: HubSpot OAuth plus Anthropic and PDL key setup](docs/screenshots/integrations.gif)
