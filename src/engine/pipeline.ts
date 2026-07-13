@@ -15,7 +15,6 @@ import type {
   FullEnrichEmailClient,
   FullEnrichPeopleClient,
   PdlClient,
-  ProspeoClient,
 } from "@/src/enrich/types";
 import type { Meter } from "@/src/roi/cost-meter";
 import { resolvePractice, type PracticeCandidate } from "./resolver";
@@ -63,7 +62,6 @@ export interface PipelineDeps {
   extract: ExtractClient;
   /** Legacy PDL client. Omitted when coverage-first provider clients are wired. */
   pdl?: PdlClient;
-  prospeo?: ProspeoClient;
   fullenrichPeople?: FullEnrichPeopleClient;
   fullenrichEmail?: FullEnrichEmailClient;
   bettercontact?: BetterContactClient;
@@ -195,7 +193,6 @@ export async function runLeadToBrief(
     scrape: deps.scrape,
     extract: deps.extract,
     pdl: deps.pdl,
-    prospeo: deps.prospeo,
     fullenrichPeople: deps.fullenrichPeople,
     fullenrichEmail: deps.fullenrichEmail,
     bettercontact: deps.bettercontact,

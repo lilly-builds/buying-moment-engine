@@ -61,7 +61,6 @@ export type PipelineClients = Pick<
   | "scrape"
   | "extract"
   | "pdl"
-  | "prospeo"
   | "fullenrichPeople"
   | "fullenrichEmail"
   | "bettercontact"

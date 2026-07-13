@@ -20,7 +20,6 @@ import {
 } from "@/jobs/run-engine";
 import { scrapePractice } from "@/src/enrich/scrape";
 import { anthropicExtractClient } from "@/src/enrich/extract";
-import { createProspeoClient } from "@/src/enrich/prospeo-client";
 import { createFullEnrichClient } from "@/src/enrich/fullenrich-client";
 import { createBetterContactClient } from "@/src/enrich/bettercontact-client";
 import { anthropicVoiceClient } from "@/src/brief/voice";
@@ -106,7 +105,6 @@ export async function GET(request: Request): Promise<Response> {
     // BYOK (U17): stored EliseAI key first, env fallback — resolveProviderKey does both.
 const anthropicApiKey =
       (await resolveProviderKey(db, "anthropic")) ?? undefined;
-    const prospeoKey = process.env.PROSPEO_API_KEY;
     const fullenrichKey = process.env.FULLENRICH_API_KEY;
     const bettercontactKey = process.env.BETTERCONTACT_API_KEY;
     const hasGoogle = Boolean(process.env.GOOGLE_PLACES_API_KEY);
@@ -137,14 +135,14 @@ const anthropicApiKey =
       }
     }
 
-    // The downstream cascade needs Anthropic (extract + brief voice) AND the coverage-first
-    // enrichment providers. PDL is intentionally excluded from the production waterfall.
+    // The downstream cascade needs Anthropic (extract + brief voice) plus the two-provider
+    // trial enrichment stack: FullEnrich for people/email and BetterContact for email upgrade.
+    // Prospeo and PDL are intentionally excluded from this production trial waterfall.
     const pipelineClients: PipelineClients | undefined =
-      anthropicApiKey && prospeoKey && fullenrichKey && bettercontactKey
+      anthropicApiKey && fullenrichKey && bettercontactKey
         ? {
             scrape: (url: string) => scrapePractice({ fetch }, url),
             extract: anthropicExtractClient(anthropicApiKey),
-            prospeo: createProspeoClient({ apiKey: prospeoKey }),
             fullenrichPeople: createFullEnrichClient({ apiKey: fullenrichKey }),
             fullenrichEmail: createFullEnrichClient({ apiKey: fullenrichKey }),
             bettercontact: createBetterContactClient({ apiKey: bettercontactKey }),

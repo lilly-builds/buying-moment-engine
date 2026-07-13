@@ -4,7 +4,7 @@ import { contacts, practices } from "@/db/schema";
 import { upsertContact } from "@/db/enrich";
 import { resolvePractice } from "@/src/engine/resolver";
 import { enrichPractice, type Scraper, type WaterfallDeps } from "@/src/enrich/waterfall";
-import type { BetterContactClient, FullEnrichEmailClient, FullEnrichPeopleClient, ProspeoClient } from "@/src/enrich/types";
+import type { BetterContactClient, FullEnrichEmailClient, FullEnrichPeopleClient } from "@/src/enrich/types";
 import { createTestDb, type TestDb } from "../setup";
 import roleOnly from "./fixtures/anthropic-research-role-only.json";
 import { HARBOR_PAGES } from "./fixtures/held-pages";
@@ -36,34 +36,30 @@ describe("coverage-first waterfall production path", () => {
   beforeEach(async () => { t = await createTestDb(); });
   afterEach(async () => { await t.close(); });
 
-  it("uses Prospeo person search, skips FullEnrich people on a strong hit, and enriches email with FullEnrich first", async () => {
+  it("uses FullEnrich people search first and enriches email with FullEnrich before BetterContact", async () => {
     const { practiceId } = await resolvePractice(t.db, {
       name: "Harbor Vision Eye Care",
       geoKey: "portland-or",
     });
     const { meter } = recordingMeter();
 
-    const prospeoCalls: unknown[] = [];
     const fullPeopleCalls: unknown[] = [];
     const fullEmailCalls: unknown[] = [];
     const betterCalls: unknown[] = [];
 
-    const prospeo: ProspeoClient = {
-      async searchPerson(request) {
-        prospeoCalls.push(request);
+    const fullenrichPeople: FullEnrichPeopleClient = {
+      async searchPeople(request) {
+        fullPeopleCalls.push(request);
         return {
           candidates: [{
             name: "Dana Whitfield",
             role: "Practice Manager",
             linkedinUrl: "linkedin.com/in/dana-whitfield",
             companyDomain: "harborvision.example",
-            sourceProvider: "prospeo",
+            sourceProvider: "fullenrich",
           }],
         };
       },
-    };
-    const fullenrichPeople: FullEnrichPeopleClient = {
-      async searchPeople(request) { fullPeopleCalls.push(request); return { candidates: [] }; },
     };
     const fullenrichEmail: FullEnrichEmailClient = {
       async enrichEmail(request) {
@@ -79,7 +75,6 @@ describe("coverage-first waterfall production path", () => {
       db: t.db,
       scrape: scraperWithSocial(),
       extract: FakeExtractClient.fromFixture(roleOnly),
-      prospeo,
       fullenrichPeople,
       fullenrichEmail,
       bettercontact,
@@ -98,15 +93,14 @@ describe("coverage-first waterfall production path", () => {
 
     expect(result.status).toBe("enriched");
     expect(result.pdlCalls).toBe(0);
-    expect(result.providerCalls).toMatchObject({ prospeo: 1, fullenrichPeople: 0, fullenrichEmail: 1, bettercontact: 0 });
-    expect(prospeoCalls).toHaveLength(1);
-    expect(fullPeopleCalls).toHaveLength(0);
+    expect(result.providerCalls).toMatchObject({ prospeo: 0, fullenrichPeople: 1, fullenrichEmail: 1, bettercontact: 0 });
+    expect(fullPeopleCalls).toHaveLength(1);
     expect(fullEmailCalls).toHaveLength(1);
     expect(betterCalls).toHaveLength(0);
 
     const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
     expect(contact.name).toBe("Dana Whitfield");
-    expect(contact.personProvider).toBe("prospeo");
+    expect(contact.personProvider).toBe("fullenrich");
     expect(contact.emailProvider).toBe("fullenrich");
     expect(contact.emailQuality).toBe("safe_work");
     expect(contact.buyerTier).toBe("B");
@@ -133,21 +127,18 @@ describe("coverage-first waterfall production path", () => {
     });
 
     const { meter } = recordingMeter();
-    const prospeo: ProspeoClient = {
-      async searchPerson() {
+    const fullenrichPeople: FullEnrichPeopleClient = {
+      async searchPeople() {
         return {
           candidates: [{
             name: "Dana Whitfield",
             role: "Practice Manager",
             linkedinUrl: "linkedin.com/in/dana-whitfield",
             companyDomain: "harborvision.example",
-            sourceProvider: "prospeo",
+            sourceProvider: "fullenrich",
           }],
         };
       },
-    };
-    const fullenrichPeople: FullEnrichPeopleClient = {
-      async searchPeople() { return { candidates: [] }; },
     };
     const fullenrichEmail: FullEnrichEmailClient = {
       async enrichEmail() {
@@ -164,7 +155,6 @@ describe("coverage-first waterfall production path", () => {
       db: t.db,
       scrape: scraperWithSocial(),
       extract: FakeExtractClient.fromFixture(roleOnly),
-      prospeo,
       fullenrichPeople,
       fullenrichEmail,
       bettercontact,
@@ -180,24 +170,21 @@ describe("coverage-first waterfall production path", () => {
     });
 
     expect(result.status).toBe("enriched");
-    expect(result.providerCalls).toMatchObject({ prospeo: 1, fullenrichPeople: 0, fullenrichEmail: 1, bettercontact: 1 });
+    expect(result.providerCalls).toMatchObject({ prospeo: 0, fullenrichPeople: 1, fullenrichEmail: 1, bettercontact: 1 });
 
     const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
     expect(contact.email).toBe("dana.whitfield@harborvision.example");
     expect(contact.emailProvider).toBe("bettercontact");
     expect(contact.emailQuality).toBe("safe_work");
-    expect(contact.personProvider).toBe("prospeo");
+    expect(contact.personProvider).toBe("fullenrich");
   });
-  it("persists an honest no-contact marker after Prospeo and FullEnrich people both miss", async () => {
+  it("persists an honest no-contact marker after FullEnrich people misses", async () => {
     const { practiceId } = await resolvePractice(t.db, {
       name: "No Contact Eye Care",
       geoKey: "portland-or",
     });
     const { meter } = recordingMeter();
 
-    const prospeo: ProspeoClient = {
-      async searchPerson() { return { candidates: [] }; },
-    };
     const fullenrichPeople: FullEnrichPeopleClient = {
       async searchPeople() { return { candidates: [] }; },
     };
@@ -212,7 +199,6 @@ describe("coverage-first waterfall production path", () => {
       db: t.db,
       scrape: scraperWithSocial(),
       extract: FakeExtractClient.fromFixture(roleOnly),
-      prospeo,
       fullenrichPeople,
       fullenrichEmail,
       bettercontact,
@@ -229,7 +215,7 @@ describe("coverage-first waterfall production path", () => {
 
     expect(result.status).toBe("enriched");
     expect(result.contactVariant).toBe("none");
-    expect(result.providerCalls).toMatchObject({ prospeo: 1, fullenrichPeople: 1, fullenrichEmail: 0, bettercontact: 0 });
+    expect(result.providerCalls).toMatchObject({ prospeo: 0, fullenrichPeople: 1, fullenrichEmail: 0, bettercontact: 0 });
 
     const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
     expect(contact.name).toBeNull();

@@ -43,7 +43,6 @@ import type {
   PdlPersonDiscoveryResult,
   PdlPersonResult,
   PersonEmailResult,
-  ProspeoClient,
   ResearchClient,
   ResearchFindings,
 } from "./types";
@@ -93,7 +92,6 @@ export interface WaterfallDeps {
   extract: ExtractClient;
   /** Legacy PDL path kept only for older wiring/tests; coverage-first production uses the clients below. */
   pdl?: PdlClient;
-  prospeo?: ProspeoClient;
   fullenrichPeople?: FullEnrichPeopleClient;
   fullenrichEmail?: FullEnrichEmailClient;
   bettercontact?: BetterContactClient;
@@ -590,14 +588,12 @@ function logDrops(
 }
 
 function hasCoverageFirstDeps(deps: WaterfallDeps): deps is WaterfallDeps & {
-  prospeo: ProspeoClient;
   fullenrichPeople: FullEnrichPeopleClient;
   fullenrichEmail: FullEnrichEmailClient;
   bettercontact: BetterContactClient;
 } {
   return Boolean(
-    deps.prospeo &&
-      deps.fullenrichPeople &&
+    deps.fullenrichPeople &&
       deps.fullenrichEmail &&
       deps.bettercontact,
   );
@@ -624,7 +620,6 @@ function candidateFromWebsite(findings: ResearchFindings): DiscoveredContactCand
 
 async function runCoverageFirstPath(
   deps: WaterfallDeps & {
-    prospeo: ProspeoClient;
     fullenrichPeople: FullEnrichPeopleClient;
     fullenrichEmail: FullEnrichEmailClient;
     bettercontact: BetterContactClient;
@@ -645,30 +640,6 @@ async function runCoverageFirstPath(
   if (websiteCandidate) candidates.push(websiteCandidate);
 
   let selected = selectBestContact(candidates, { websiteDomain: domain, state: practice.state });
-  if (!selected || isWeakRole(selected.tier)) {
-    calls.prospeo += 1;
-    const prospeo = await deps.meter(
-      {
-        provider: "prospeo",
-        operation: "person.search",
-        pipelineStep: "enrich.person_discovery",
-        practiceId: practice.id,
-        units: 1,
-        unitCostUsd: 0,
-        meta: (result) => ({ candidates: result.candidates.length }),
-      },
-      () =>
-        deps.prospeo.searchPerson({
-          companyName: practice.name,
-          city: practice.city,
-          state: practice.state,
-          websiteDomain: domain,
-          targetRoles,
-        }),
-    );
-    candidates.push(...prospeo.candidates);
-    selected = selectBestContact(candidates, { websiteDomain: domain, state: practice.state });
-  }
 
   if (!selected || isWeakRole(selected.tier)) {
     calls.fullenrichPeople += 1;
@@ -787,7 +758,7 @@ async function runCoverageFirstPath(
 
   if (!candidate?.name && !email && !orgEmailFallback) {
     const fallbackReason =
-      "no usable named contact from Prospeo or FullEnrich; no organization inbox fallback found";
+      "no usable named contact from FullEnrich; no organization inbox fallback found";
     await upsertContact(deps.db, {
       practiceId: practice.id,
       role: findings.decisionMaker?.role.value ?? DEFAULT_DISCOVERY_ROLE,
