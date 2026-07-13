@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeBetterContactEmailResponse } from "@/src/enrich/bettercontact-client";
 import { normalizeFullEnrichEmailResponse, normalizeFullEnrichPeopleResponse } from "@/src/enrich/fullenrich-client";
-import { normalizeProspeoSearchResponse } from "@/src/enrich/prospeo-client";
+import { createProspeoClient, normalizeProspeoSearchResponse, prospeoSearchBody } from "@/src/enrich/prospeo-client";
 
 describe("coverage-first provider normalizers", () => {
   it("normalizes Prospeo NO_RESULTS as a clean miss", () => {
@@ -24,5 +24,50 @@ describe("coverage-first provider normalizers", () => {
 
   it("labels BetterContact deliverable as safe work", () => {
     expect(normalizeBetterContactEmailResponse({ data: [{ contact_email_address: "dana@practice.example", contact_email_address_status: "deliverable" }] }).quality).toBe("safe_work");
+  });
+});
+
+
+describe("Prospeo production client", () => {
+  it("uses the filtered search-person request shape that Prospeo accepts", () => {
+    expect(prospeoSearchBody({
+      companyName: "Texas Orthopedics",
+      websiteDomain: "https://www.txortho.com/locations/northwest-austin/",
+      targetRoles: ["practice manager", "office manager"],
+    })).toEqual({
+      page: 1,
+      filters: {
+        company: { websites: { include: ["txortho.com"] } },
+        person_job_title: {
+          boolean_search: "('practice manager' OR 'office manager') AND !sales AND !marketing AND !student AND !intern AND !recruiter AND !resident",
+        },
+        max_person_per_company: 10,
+      },
+    });
+  });
+
+  it("sends that request body to /search-person", async () => {
+    let sent: unknown = null;
+    const client = createProspeoClient({
+      apiKey: "test-key",
+      fetch: (async (_url, init) => {
+        sent = JSON.parse(String(init?.body));
+        return Response.json({ results: [] });
+      }) as typeof fetch,
+    });
+
+    await client.searchPerson({
+      companyName: "Texas Orthopedics",
+      websiteDomain: "txortho.com",
+      targetRoles: ["practice manager"],
+    });
+
+    expect(sent).toMatchObject({
+      page: 1,
+      filters: {
+        company: { websites: { include: ["txortho.com"] } },
+        max_person_per_company: 10,
+      },
+    });
   });
 });
