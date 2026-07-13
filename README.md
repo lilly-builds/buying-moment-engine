@@ -165,30 +165,66 @@ front-desk hiring spikes, GDELT for growth news, Google Places for phone-complai
 researches each practice and finds a real contact (the enrichment waterfall, below), then writes the
 cited two-tier brief and ranks it into the push feed and the ROI scoreboard (synthesis).
 
-The enrichment waterfall is coverage-first: the aim is a real, reachable contact at as many practices
-as possible, so it does the cheap step first and only pays for the next one when it has to.
+The diagram below is the whole engine, from the daily trigger to the ranked feed. The middle stage,
+enrichment, is coverage-first: it aims for a real, reachable contact at as many practices as possible,
+doing the cheap step first and only paying for the next one when it has to.
 
 ```mermaid
 flowchart TD
-    A[Practice with a website] --> B[Scrape the real site and hold the pages]
-    B --> C[Claude reads the pages and keeps<br/>only facts it can quote word-for-word]
-    B --> D[Grab the office inbox and the LinkedIn /<br/>Facebook pages as a backup]
+    CRON([Daily trigger:<br/>Vercel Cron, weekday mornings])
 
-    C --> E{Do we already have<br/>a strong buyer contact?}
-    E -->|Yes| I[Rank the candidates and pick the best buyer]
-    E -->|No or weak| F[Prospeo: search for the owner, manager, or admin]
-    F --> G{Found someone usable?}
-    G -->|Yes| I
-    G -->|No or weak| H[FullEnrich: run the same search as a fallback]
-    H --> I
+    subgraph DISC [1 - Discovery: catch a buying moment]
+        AD[Adzuna:<br/>front-desk hiring spikes]
+        GD[GDELT:<br/>growth and expansion news]
+        GP[Google Places:<br/>phone-complaint reviews]
+    end
 
-    I --> J[FullEnrich: find their work email]
-    J --> K{Safe work email?}
-    K -->|Yes| M[Save the contact with a buyer tier and an email grade]
-    K -->|No or weak| L[BetterContact: fill in or upgrade the email]
-    L --> M
-    D -.->|used only if no personal email| M
-    M --> N[Score how complete the contact is, and why]
+    subgraph ENR [2 - Research and enrichment: coverage-first]
+        SCRAPE[Scrape the real site,<br/>hold the pages]
+        RES[Claude researches the practice,<br/>keeps only facts it can quote word-for-word]
+        FB[Office inbox + LinkedIn / Facebook<br/>as a backup]
+        E{Strong buyer<br/>already?}
+        PR[Prospeo:<br/>owner / manager / admin]
+        G{Usable?}
+        FE[FullEnrich:<br/>fallback search]
+        RK[Rank, pick the best buyer]
+        EM[FullEnrich email]
+        K{Safe work email?}
+        BC[BetterContact:<br/>fill or upgrade]
+        CT[Save contact:<br/>buyer tier + email grade]
+        SCRAPE --> RES
+        SCRAPE --> FB
+        RES --> E
+        E -->|No or weak| PR
+        PR --> G
+        G -->|No or weak| FE
+        E -->|Yes| RK
+        G -->|Yes| RK
+        FE --> RK
+        RK --> EM
+        EM --> K
+        K -->|No or weak| BC
+        K -->|Yes| CT
+        BC --> CT
+        FB -.no personal email.-> CT
+    end
+
+    subgraph SYN [3 - Brief and outreach: written, then fact-checked]
+        FACT[Assemble the cited brief<br/>from verified facts]
+        VOICE[Claude writes the voice:<br/>headline, call opener, 3-touch email<br/>sequence, discovery questions, objections]
+        TG{Passes the<br/>truth gate?}
+        SAVE[Save the two-tier brief]
+        DROP[Discarded, never persisted]
+        FACT --> VOICE
+        VOICE --> TG
+        TG -->|Yes| SAVE
+        TG -->|No| DROP
+    end
+
+    CRON --> DISC
+    DISC --> SCRAPE
+    CT --> FACT
+    SAVE --> FEED[Ranked push feed<br/>+ ROI scoreboard]
 ```
 *Google Places phone complaints are live through the discovery path, and the standalone per-place
 review reader is also there for targeted cross-checks when a place's ID is already known.*
