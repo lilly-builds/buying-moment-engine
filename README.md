@@ -229,35 +229,39 @@ flowchart TD
 *Google Places phone complaints are live through the discovery path, and the standalone per-place
 review reader is also there for targeted cross-checks when a place's ID is already known.*
 
-- The stack (the main tools it is built on): Next.js and TypeScript for the app, a Supabase Postgres
-  database reached through Drizzle, Anthropic's Claude for the research and brief writing, a short
-  waterfall of contact-data providers (Prospeo, FullEnrich, and BetterContact) for finding and
-  verifying the decision-maker, and HubSpot for the CRM and email send, all on that one OAuth
-  connection.
-- The enrichment waterfall, kept honest. The chart above is the whole flow. What it does not show is
-  the labeling: every saved contact carries a buyer tier (how senior the person is, from owner down to
-  a reachable fallback) and an email grade (safe work, weak, personal, office inbox, or none). So
-  coverage-first never means dressing up a weak contact as a strong one, and a rep sees how good a
-  contact really is before spending a message on it.
-
-- The data layer. It is a tidy Postgres database that acts as the single source of truth. Every fact
-  carries its origin (the source URL and the moment it was spotted). Loading data is idempotent,
-  meaning you can run it twice without creating duplicates. Raw data is kept separate from anything
-  derived from it. Every table has row-level security (RLS), which are database-enforced walls so one
-  customer's data can never leak into another's. And there are built-in tag columns (specialty, which
-  signal, lead quality) so any scoreboard number can be sliced by specialty instantly. This is what
-  makes the cited briefs and the per-specialty ROI real instead of cosmetic.
-- Send, done right. The rep edits the drafted email in the dashboard. The full edited text rides along
-  on one HubSpot field into a Sequence enrollment, so it sends from the rep's own inbox with native
-  open, click, and reply tracking, while still shipping the exact words the rep wrote. That one OAuth
-  connection covers the CRM, the send, and the tracking. Every stored token and pasted key is
-  encrypted where it sits, using AES-256-GCM (a strong, standard encryption method).
-- Cost is a live number. Every paid API call (Claude, the contact-data providers, the detectors) is logged with its cost the
-  moment it happens, into a `cost_events` table. So the CAC on the scoreboard is real spend, not a
-  number someone tallied by hand.
-- Scheduled runs. A Vercel Cron timer (a scheduled job, set for 8am on weekdays) is wired up to fire
-  the whole engine each weekday morning. It is built and merged, but it stays asleep until its
-  `CRON_SECRET` is set in the deploy, so it cannot fire by accident.
+- **Stack:** Next.js (a customized build; see `AGENTS.md`) and TypeScript, Postgres on Supabase
+  through Drizzle, Anthropic Claude for research and brief synthesis (Opus 4.8 for the outreach voice,
+  Sonnet 5 and Haiku 4.5 for extraction), a Prospeo, FullEnrich, then BetterContact provider waterfall
+  for contact data, and HubSpot for CRM, send, and email analytics behind a single OAuth grant.
+- **Contact selection and grading:** every contact is written with a buyer tier (A through E,
+  owner-operator down to reachable fallback) and an email-quality grade (safe work, weak, unverified,
+  personal, org inbox, or none). A FullEnrich `HIGH_PROBABILITY` result is stored but counted as weak
+  until a second provider upgrades it, and the waterfall short-circuits on the first sufficient result,
+  so a practice whose own site already yields a named decision-maker never triggers a paid person search.
+- **Data layer:** a normalized Postgres schema is the system of record, with provenance on every fact
+  (its source URL plus the timestamp it was detected). Ingestion is idempotent, with upserts guarded by
+  `ON CONFLICT` and existence checks so re-runs neither duplicate nor overwrite real rows; raw scraped
+  input is kept separate from derived scores; row-level security is enforced on every table; and
+  vertical, signal-source, and lead-quality are first-class tag columns, which is what makes the
+  per-specialty scoreboard slices exact rather than estimated.
+- **Brief synthesis:** two stages. The factual tier (practice profile, incumbent tooling, proof point,
+  ROI range, contact) is assembled deterministically from the verified evidence rows. The voice tier
+  (headline, call opener, the editable 3-touch sequence, discovery questions, objections) is the only
+  text the model writes, and each of its claims must reference an evidence ID present in its own input.
+  A brief clears three gates before it persists: schema shape, citation closure, and a numeric-grounding
+  lint. One whose claims cannot be grounded is discarded, not stored.
+- **Send:** the rep-edited body is written to a single HubSpot custom contact property, and the contact
+  is enrolled in a Sequence whose template is one `{{custom_body}}` token, so the message sends from the
+  rep's own mailbox with native open, click, and reply tracking while shipping the exact edited text.
+  That one OAuth grant covers CRM writes, send, and analytics. Per-tenant OAuth tokens and pasted API
+  keys are encrypted at rest with AES-256-GCM.
+- **Cost metering:** every paid call (Claude, the contact providers, the detectors) is recorded at the
+  call site into a `cost_events` table with its provider, operation, and USD cost, so the scoreboard's
+  CAC is derived from metered spend rather than a manual tally.
+- **Scheduling:** a Vercel Cron job (`0 8 * * 1-5`) fires the whole engine on weekday mornings. It is
+  merged but stays inert until `CRON_SECRET` is set in the deployment (fail-closed), and its reliability
+  comes from the run being idempotent, bounded, and reconciliation-based rather than from the scheduler,
+  which neither retries nor alerts.
 
 ---
 
