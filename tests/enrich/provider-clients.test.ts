@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeBetterContactEmailResponse } from "@/src/enrich/bettercontact-client";
-import { normalizeFullEnrichEmailResponse, normalizeFullEnrichPeopleResponse } from "@/src/enrich/fullenrich-client";
+import { createFullEnrichClient, fullEnrichEmailBody, fullEnrichPeopleSearchBody, normalizeFullEnrichEmailResponse, normalizeFullEnrichPeopleResponse } from "@/src/enrich/fullenrich-client";
 import { createProspeoClient, normalizeProspeoSearchResponse, prospeoSearchBody } from "@/src/enrich/prospeo-client";
 
 describe("coverage-first provider normalizers", () => {
@@ -68,6 +68,79 @@ describe("Prospeo production client", () => {
         company: { websites: { include: ["txortho.com"] } },
         max_person_per_company: 10,
       },
+    });
+  });
+});
+
+
+describe("FullEnrich production client", () => {
+  it("uses object filters for people search", () => {
+    expect(fullEnrichPeopleSearchBody({
+      companyName: "Texas Orthopedics",
+      websiteDomain: "https://www.txortho.com/path",
+      targetRoles: ["practice manager"],
+    })).toMatchObject({
+      offset: 0,
+      limit: 10,
+      current_company_domains: [{ value: "txortho.com", exact_match: true, exclude: false }],
+      current_position_titles: [{ value: "practice manager", exact_match: false, exclude: false }],
+    });
+  });
+
+  it("uses the accepted bulk email enrichment fields", () => {
+    expect(fullEnrichEmailBody({
+      fullName: "Jennifer Hadley",
+      companyName: "Texas Orthopedics",
+      websiteDomain: "txortho.com",
+      linkedinUrl: "https://linkedin.com/in/jennifer",
+    })).toMatchObject({
+      data: [{
+        first_name: "Jennifer",
+        last_name: "Hadley",
+        domain: "txortho.com",
+        company_name: "Texas Orthopedics",
+        linkedin_url: "https://linkedin.com/in/jennifer",
+        enrich_fields: ["contact.work_emails"],
+      }],
+    });
+  });
+
+  it("polls bulk email enrichment and normalizes the finished row", async () => {
+    const calls: string[] = [];
+    const client = createFullEnrichClient({
+      apiKey: "test-key",
+      sleep: async () => {},
+      fetch: (async (url, init) => {
+        calls.push(`${init?.method ?? "GET"} ${url}`);
+        if (init?.method === "POST") return Response.json({ id: "bulk-1", status: "PENDING" });
+        return Response.json({
+          status: "FINISHED",
+          data: [{
+            contact_info: {
+              most_probable_work_email: {
+                email: "jennifer@txortho.com",
+                status: "DELIVERABLE",
+              },
+            },
+          }],
+        });
+      }) as typeof fetch,
+    });
+
+    const result = await client.enrichEmail({
+      fullName: "Jennifer Hadley",
+      companyName: "Texas Orthopedics",
+      websiteDomain: "txortho.com",
+    });
+
+    expect(calls).toEqual([
+      "POST https://app.fullenrich.com/api/v2/contact/enrich/bulk",
+      "GET https://app.fullenrich.com/api/v2/contact/enrich/bulk/bulk-1",
+    ]);
+    expect(result).toMatchObject({
+      email: "jennifer@txortho.com",
+      quality: "safe_work",
+      status: "DELIVERABLE",
     });
   });
 });
