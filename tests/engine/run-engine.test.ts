@@ -391,6 +391,87 @@ describe("runEngine", () => {
     expect("eligible" in summary.downstream && summary.downstream.eligible).toBe(2);
   });
 
+  it("targets named contacts that are still missing emails", async () => {
+    const namedNoEmail = await upsertPractice(t.db, {
+      name: "Named No Email Clinic",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+      websiteUrl: "https://named-no-email.example",
+    });
+    await tagVertical(t.db, namedNoEmail.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: namedNoEmail.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/named-no-email",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+    await upsertContact(t.db, {
+      practiceId: namedNoEmail.id,
+      role: "Practice Manager",
+      name: "Nora Manager",
+    });
+
+    const noName = await upsertPractice(t.db, {
+      name: "No Name Clinic",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+      websiteUrl: "https://no-name.example",
+    });
+    await tagVertical(t.db, noName.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: noName.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/no-name",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+
+    const namedWithEmail = await upsertPractice(t.db, {
+      name: "Named With Email Clinic",
+      geoKey: "austin-tx",
+      city: "Austin",
+      state: "TX",
+      websiteUrl: "https://named-with-email.example",
+    });
+    await tagVertical(t.db, namedWithEmail.id, "dermatology");
+    await attachSignal(t.db, {
+      practiceId: namedWithEmail.id,
+      kind: "phone_complaints",
+      sourceUrl: "https://maps.example.com/named-with-email",
+      detectedAt: NOW,
+      expiresAt: computeExpiresAt("phone_complaints", NOW),
+      signalSource: "test",
+    });
+    await upsertContact(t.db, {
+      practiceId: namedWithEmail.id,
+      role: "Practice Manager",
+      name: "Emma Email",
+      email: "emma@example.com",
+      emailQuality: "safe_work",
+      emailProvider: "website_scrape",
+    });
+
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: null,
+      pipelineClients: undefined,
+      briefLimit: 10,
+      downstreamCohort: "named_no_email",
+      logger: quiet,
+    });
+
+    expect("eligible" in summary.downstream && summary.downstream.eligible).toBe(1);
+  });
+
+
   it("can run a real downstream enrichment-only batch without generating briefs", async () => {
     await seedGoldenPractice(t.db);
 
