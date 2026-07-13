@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { contacts, practices } from "@/db/schema";
+import { upsertContact } from "@/db/enrich";
 import { resolvePractice } from "@/src/engine/resolver";
 import { enrichPractice, type Scraper, type WaterfallDeps } from "@/src/enrich/waterfall";
 import type { BetterContactClient, FullEnrichEmailClient, FullEnrichPeopleClient, ProspeoClient } from "@/src/enrich/types";
@@ -115,5 +116,76 @@ describe("coverage-first waterfall production path", () => {
     const [practice] = await t.db.select().from(practices).where(eq(practices.id, practiceId));
     expect(practice.companyLinkedinUrl).toBe("https://www.linkedin.com/company/harbor-vision-eye-care");
     expect(practice.companyFacebookUrl).toBe("https://www.facebook.com/harborvision");
+  });
+
+  it("persists a BetterContact safe-work upgrade over an existing weak FullEnrich email", async () => {
+    const { practiceId } = await resolvePractice(t.db, {
+      name: "Harbor Vision Eye Care",
+      geoKey: "portland-or",
+    });
+    await upsertContact(t.db, {
+      practiceId,
+      role: "Practice Manager",
+      name: "Dana Whitfield",
+      email: "dana@harborvision.example",
+      emailProvider: "fullenrich",
+      emailQuality: "weak_work",
+    });
+
+    const { meter } = recordingMeter();
+    const prospeo: ProspeoClient = {
+      async searchPerson() {
+        return {
+          candidates: [{
+            name: "Dana Whitfield",
+            role: "Practice Manager",
+            linkedinUrl: "linkedin.com/in/dana-whitfield",
+            companyDomain: "harborvision.example",
+            sourceProvider: "prospeo",
+          }],
+        };
+      },
+    };
+    const fullenrichPeople: FullEnrichPeopleClient = {
+      async searchPeople() { return { candidates: [] }; },
+    };
+    const fullenrichEmail: FullEnrichEmailClient = {
+      async enrichEmail() {
+        return { email: "dana@harborvision.example", quality: "weak_work", provider: "fullenrich", status: "UNKNOWN" };
+      },
+    };
+    const bettercontact: BetterContactClient = {
+      async enrichEmail() {
+        return { email: "dana.whitfield@harborvision.example", quality: "safe_work", provider: "bettercontact" };
+      },
+    };
+
+    const result = await enrichPractice({
+      db: t.db,
+      scrape: scraperWithSocial(),
+      extract: FakeExtractClient.fromFixture(roleOnly),
+      prospeo,
+      fullenrichPeople,
+      fullenrichEmail,
+      bettercontact,
+      meter,
+      now: () => NOW,
+      logger: SILENT,
+    }, {
+      id: practiceId,
+      name: "Harbor Vision Eye Care",
+      city: "Portland",
+      state: "OR",
+      websiteUrl: "https://harborvision.example",
+    });
+
+    expect(result.status).toBe("enriched");
+    expect(result.providerCalls).toMatchObject({ prospeo: 1, fullenrichPeople: 0, fullenrichEmail: 1, bettercontact: 1 });
+
+    const [contact] = await t.db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
+    expect(contact.email).toBe("dana.whitfield@harborvision.example");
+    expect(contact.emailProvider).toBe("bettercontact");
+    expect(contact.emailQuality).toBe("safe_work");
+    expect(contact.personProvider).toBe("prospeo");
   });
 });

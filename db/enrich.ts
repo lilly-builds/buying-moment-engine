@@ -5,9 +5,9 @@ import type { Database } from "./types";
 /**
  * Enrichment persistence (U5). Idempotent by construction (R17):
  *  - `practice_facts` upserts ON CONFLICT DO NOTHING against UNIQUE(practice_id, field).
- *  - `contacts` writes fill NULL columns only — a stored email is never clobbered
- *    by a later run. "Never blindly overwrite a real record" is enforced in the
- *    WHERE clause, not by convention.
+ *  - `contacts` writes fill NULL columns, except email can be upgraded when a
+ *    later provider returns a higher-quality address. "Never blindly overwrite a
+ *    real record" is enforced by quality ranking, not by convention.
  *
  * Every fact written here carries an `evidence` row (source URL + snippet +
  * detected_at). A fact with no evidence cannot be written: `practice_facts.evidence_id`
@@ -35,6 +35,27 @@ export type EmailQuality =
   | "personal"
   | "org_inbox"
   | "none";
+
+const EMAIL_QUALITY_RANK: Record<EmailQuality, number> = {
+  none: 0,
+  org_inbox: 1,
+  personal: 1,
+  weak_work: 2,
+  safe_work: 3,
+};
+
+function emailQualityRank(quality: EmailQuality | null | undefined): number {
+  return quality ? EMAIL_QUALITY_RANK[quality] : 0;
+}
+
+function shouldUpdateStoredEmail(
+  existing: Pick<StoredContact, "email" | "emailQuality">,
+  input: Pick<ContactInput, "email" | "emailQuality">,
+): boolean {
+  if (!input.email) return false;
+  if (existing.email === null) return true;
+  return emailQualityRank(input.emailQuality) > emailQualityRank(existing.emailQuality);
+}
 
 export interface FactInput {
   field: string;
@@ -174,9 +195,11 @@ export async function getContact(
  * constraint exists on `contacts`, so this is an explicit check-existence-then-write
  * inside a transaction — the same guarantee, stated where a reader can see it.
  *
- * On an existing contact only NULL columns are filled (`WHERE email IS NULL`).
- * That is the whole point of the waterfall: PDL is allowed to fill the email gap
- * Claude left, and is never allowed to replace an email Claude cited to a page.
+ * On an existing contact only NULL columns are filled, except email can be
+ * upgraded when a later provider returns a higher-quality address. That lets
+ * BetterContact replace a weak FullEnrich result with `safe_work`, while still
+ * preventing a safe work email from being overwritten by weaker/personal/org
+ * fallback addresses.
  */
 export async function upsertContact(
   db: Database,
@@ -219,7 +242,7 @@ export async function upsertContact(
     }
 
     const filled: string[] = [];
-    if (input.email && existing.email === null) {
+    if (shouldUpdateStoredEmail(existing, input)) {
       await tx
         .update(contacts)
         .set({
@@ -227,7 +250,7 @@ export async function upsertContact(
           emailProvider: input.emailProvider ?? null,
           emailQuality: input.emailQuality ?? null,
         })
-        .where(and(eq(contacts.id, existing.id), isNull(contacts.email)));
+        .where(eq(contacts.id, existing.id));
       filled.push("email");
     }
     if (input.linkedinUrl && existing.linkedinUrl === null) {

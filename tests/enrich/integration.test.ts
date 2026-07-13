@@ -1279,4 +1279,68 @@ describe("enrichment persistence primitives", () => {
     expect(row.linkedinUrl).toBe("linkedin.com/in/dana");
     expect(row.linkedinProvider).toBe("pdl");
   });
+
+  it("upsertContact upgrades a weak FullEnrich email when BetterContact returns safe work", async () => {
+    const { practiceId } = await resolvePractice(t.db, {
+      name: "Comprehensive Orthopaedics",
+      geoKey: "akron-oh",
+    });
+
+    await upsertContact(t.db, {
+      practiceId,
+      role: "Practice Manager",
+      name: "Danielle Kalinowski",
+      email: "dkalinowski@comportho.com",
+      emailProvider: "fullenrich",
+      emailQuality: "weak_work",
+    });
+
+    const second = await upsertContact(t.db, {
+      practiceId,
+      role: "Practice Manager",
+      email: "danielle.kalinowski@comportho.com",
+      emailProvider: "bettercontact",
+      emailQuality: "safe_work",
+    });
+
+    expect(second.created).toBe(false);
+    expect(second.filled).toEqual(["email"]);
+
+    const [row] = await t.db.select().from(contacts);
+    expect(row.email).toBe("danielle.kalinowski@comportho.com");
+    expect(row.emailProvider).toBe("bettercontact");
+    expect(row.emailQuality).toBe("safe_work");
+  });
+
+  it("upsertContact does not replace a safe work email with a weaker fallback", async () => {
+    const { practiceId } = await resolvePractice(t.db, {
+      name: "Safe Work Dermatology",
+      geoKey: "austin-tx",
+    });
+
+    await upsertContact(t.db, {
+      practiceId,
+      role: "Practice Administrator",
+      name: "Morgan Lee",
+      email: "morgan.lee@safe.example",
+      emailProvider: "bettercontact",
+      emailQuality: "safe_work",
+    });
+
+    const second = await upsertContact(t.db, {
+      practiceId,
+      role: "Practice Administrator",
+      email: "info@safe.example",
+      emailProvider: "org_website",
+      emailQuality: "org_inbox",
+    });
+
+    expect(second.created).toBe(false);
+    expect(second.filled).toEqual([]);
+
+    const [row] = await t.db.select().from(contacts);
+    expect(row.email).toBe("morgan.lee@safe.example");
+    expect(row.emailProvider).toBe("bettercontact");
+    expect(row.emailQuality).toBe("safe_work");
+  });
 });
