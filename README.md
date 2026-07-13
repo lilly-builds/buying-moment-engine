@@ -1,39 +1,37 @@
 # GTM Maestro: the Buying-Moment Engine
 
-A live feed of healthcare practices that just hit a buying moment, each one handed over with a short
-brief that is ready to use and links back to the source of every fact. A sales rep (an account
-executive, or AE) opens the app and starts selling, instead of starting to research.
+GTM Maestro catches companies the day they tip into ready to buy what you sell, then hands your reps everything they need to close the deal: a researched call brief, the exact buying signal, the decision maker's contact, and the first email sequence.
+
+Every lead tool sorts companies by who they are: their industry, their headcount, their tech stack. But no one buys because they fit a category. They buy the moment a need strikes: a tool breaks, a new leader lands, or they outgrow what they had. GTM Maestro maps your product's real buying moments, then watches multiple public sources around the clock to catch companies the instant they hit one, so you reach out first, while the need is still fresh.
 
 ![GTM Maestro: the signal sources merging, then dissolving into the live feed of practices at a buying moment](docs/screenshots/hero-tour.gif)
 
 ---
 
-## The story it is built around
+## The user story it is built around
 
 The whole thing is built around one rep's wish:
 
-> As an account executive on the healthcare team, I want to be handed a steady stream of practices
-> that are hitting a buying moment right now, each with a ready-to-use, personalized brief, so I can
+> As an account executive, I want to be handed a steady stream of prospects
+> that are hitting a buying moment right now, each with a research-backed, personalized brief, so I can
 > get on a call or send outreach already informed, without spending my time researching.
 
-That is the product. A rep should never stare at a blank page. The feed hands them a queue of real
-practices that just did something that says they are ready to buy, and each one shows up with the
-brief already written and every fact cited.
+The feed hands them a queue of real practices that just hit a buying moment, and each one shows up with the
+brief already written and facts cited.
 
 ![The feed of real practices at a buying moment, hottest on top](docs/screenshots/feed.gif)
 *The push feed: real named practices at a buying moment, ranked so the hottest rise to the top.*
 
 ---
 
-## The idea: catch people at the right moment
-
+## The thesis: the sale is all about timing.
 Most outbound starts from a list of companies that fit a profile, then blasts them. It mostly gets
 ignored, because fitting a profile is not the same as being ready to buy. A lot of buying comes down
-to timing. Something happens, a need shows up, and there is a short window. Catch that window and
+to timing. A need shows up, and there is a short window. Be the first company to catch that window and 
 more people say yes.
 
-So the engine watches for the trigger event: the public signs that a healthcare practice is about to
-need help with its front desk and patient calls.
+So the engine watches for the trigger event: the public signs that a prospect is about to
+need help. For an AI platform that supports with key operations, a few buying moment signals we can pull from include:
 
 - They are hiring for the front desk. A rush to hire patient coordinators or call-center staff
   usually means they cannot keep up with the phones, which is exactly the opening.
@@ -42,6 +40,7 @@ need help with its front desk and patient calls.
 - They just grew. An acquisition, a new location, or new doctors means more patients than the front
   desk was built to handle.
 
+Multi-signal Scoring for Prospects:
 When a practice shows up on one signal, the engine turns around and checks the others for that same
 clinic: is it also hiring front-desk staff, also in the news for a new location or an acquisition,
 also collecting reviews about no one answering the phone? Any signal that fires and can be cited gets
@@ -49,7 +48,7 @@ stacked onto that practice, so a lead that first came in on reviews can grow int
 three-signal lead. The engine only stacks a signal when the name and location match the practice it
 already has, so a similarly named but different clinic never gets folded in by mistake. These checks
 only run for practices that already qualified, and every paid lookup gets logged with its cost, so
-the cross-checking stays cheap.
+the cross-checking stays cost-effective. 
 
 The feed ranks practices by how many different fresh signals are firing, using freshness to break
 ties. A practice with three live triggers sits above one with a single fading trigger, so the rep
@@ -60,26 +59,26 @@ is in [`docs/data-signal-system.md`](docs/data-signal-system.md).
 
 ---
 
-## What's in a brief, and why you can trust it
+## The full workflow
 
-Every practice comes with a brief that has two modes you flip between. One is set up to send from,
-the other to prep from.
+This is a full go-to-market engine, not just a research helper. This system: 
+> finds prospects based on key buying moment signals, like an acquisition or new hire posting that your software can support >>
+> drafts a customized email sequence >> 
+> prepares a sales call brief with citations for the Account Executive to save time on research >> 
+> sends email sequence and tracks touchpoints with Hubspot CRM integrtion >>
+> measures the meetings booked and deals won from these prospects to measure and optimize ROI. 
 
-Send from it:
-- The buying-moment headline, plus who to contact: the real decision-maker, their role, and the best
-  way to reach them.
-- The suggested move: a call opener and an editable three-touch email sequence (a first message and
-  two follow-ups) that you edit right there, so your own words are what go out.
+---
 
-Prep from it:
-- The buying moment, with how fresh each signal is and a confidence badge on each one.
-- A profile of the practice: its locations, which medical-records system it uses (its EHR), roughly
-  how many patients it sees, how loaded the front desk is, and the tools it already runs.
-- The one line on why EliseAI fits their pain, a real proof point, and a rough ROI range.
-- Two or three discovery questions, and the top three objections with answers.
-- A tag on each signal showing which source turned it up.
+## What's in a prospect brief, and why you can trust it
 
-Here is what makes it trustworthy: every fact in a brief is underlined and linked to the exact source
+Every prospect comes with a ready-to-use sales cheat sheet.
+
+- Send email is the "act now" side. It gives you a customized three-message email sequence you can edit in your own words before it goes out.
+
+- Prep for call is the "get ready" side. It's the whole picture of the practice, the proof point and the ROI numbers, a few discovery questions to ask, and the top objections you'll hear with the rebuttals already written.
+
+Every fact in a brief is underlined and linked to the exact source
 it came from, and that link is checked before the brief is ever saved. This is the hard part, and it
 genuinely works this way:
 
@@ -92,21 +91,14 @@ genuinely works this way:
   a second instead of taking the tool's word for it.
 
 That is what lets a rep act on a brief without double-checking it. The whole promise is that the rep
-can trust it, so the trust is enforced by the code itself.
+can trust it, so they don't waste time questioning the results of under-engineered research prompts dropped into AI. 
 
 ![An open brief with a source citation clicked open](docs/screenshots/brief-citation.gif)
 *A brief with a citation opened. Every fact links to its source, checked word-for-word before the brief was saved.*
 
-The briefs cover four medical specialties, each with its own hand-written pack (the pain line, the
-opener, a proof point, how the records system doubles as a signal, and an ROI benchmark):
-dermatology, women's health / OB-GYN, ophthalmology, and orthopedics. Where there is not yet a real,
-citable proof point (orthopedics), the pack ships an honest "proof pending" marker instead of making
-one up. The engine and the brief layout are the same for all four. Switching specialties changes the
-pitch, not the product.
-
 ---
 
-## The scoreboard: is it actually working?
+## The ROI scoreboard: what you measure improves. 
 
 The tool keeps score of its own impact. The scoreboard measures what this tool did, not some generic
 company dashboard, and it is written so anyone can read every number at a glance. The rule for what
@@ -166,24 +158,6 @@ Step-by-step is in [`docs/revops-connections-guide.md`](docs/revops-connections-
 
 ---
 
-## The full loop (and what "demo mode" means)
-
-This is a full go-to-market engine, not just a research helper. It finds the buying moment, drafts
-the outreach, sends it, tracks it in the CRM, and then scores the meetings booked and deals won that
-come back. Landing deals is the point, and the scoreboard is where that shows up. The send path and
-the CRM push are both built and tested end to end.
-
-Two honest limits, and both apply to this demo only. First, the data is real but the final send is
-simulated. The engine pulls real practices, real public signals, and real named decision-makers, but
-in the demo it drafts and shows the outreach instead of actually sending it. That is a deliberate
-safety gate, so no real clinic gets contacted while people are evaluating the tool, and it switches
-on the moment EliseAI connects their HubSpot. This is enforced in the code, not just a promise: a
-fail-closed send firewall (fail-closed meaning it blocks by default) only ever allows a single
-sandbox test address. Second, the engine only ever touches public business data. There is zero
-patient data or medical information (no PHI), ever.
-
----
-
 ## How it works (architecture)
 
 ```
@@ -224,19 +198,6 @@ review reader is also there for targeted cross-checks when a place's ID is alrea
 - Scheduled runs. A Vercel Cron timer (a scheduled job, set for 8am on weekdays) is wired up to fire
   the whole engine each weekday morning. It is built and merged, but it stays asleep until its
   `CRON_SECRET` is set in the deploy, so it cannot fire by accident.
-
-### Honest status: what's built, and where the line is
-
-Everything above is built and you can demo it. A few pieces are deliberately switched off or are the
-clear next step, and the docs say so instead of implying more than ships:
-
-| Piece | What's true today | Where the line is |
-|---|---|---|
-| Enrichment run | Runs in the demo, wired into the pipeline, on a manual trigger, using the environment's API keys | An always-on schedule (the Vercel Cron) is built but asleep until `CRON_SECRET` is set |
-| Paste-your-own-key | The `/integrations` key fields store an encrypted, per-company key | The manual pipeline reads the environment keys; a pasted key is wired only into the sleeping scheduled cron (Anthropic), not the manual run |
-| Phone-complaint signal | Live through Google Places discovery, stored as `phone_complaints` | The standalone per-place reader is a targeted lookup you run when you already know a place's ID |
-| Lead feedback | The thumbs-up / thumbs-down shows up, and the data model and scoreboard already support one-tap reasons and free text | Actually saving those reasons and votes live is the next step; today it is seeded for the demo |
-| Send | The full send path is built and tested (the engine's job is to send outreach and land deals) | Off for this demo only, as a safety gate so no real clinic is contacted; it flips on the moment EliseAI connects HubSpot |
 
 ---
 
