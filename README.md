@@ -62,11 +62,11 @@ is in [`docs/data-signal-system.md`](docs/data-signal-system.md).
 ## The full workflow
 
 This is a full go-to-market engine, not just a research helper. This system: 
-> finds prospects based on key buying moment signals, like an acquisition or new hire posting that your software can support >>
-> drafts a customized email sequence >> 
-> prepares a sales call brief with citations for the Account Executive to save time on research >> 
-> sends email sequence and tracks touchpoints with Hubspot CRM integrtion >>
-> measures the meetings booked and deals won from these prospects to measure and optimize ROI. 
+- finds prospects based on key buying moment signals, like an acquisition or new hire posting that your software can support,
+- drafts a customized email sequence, 
+- prepares a sales call brief with citations for the Account Executive to save time on research,
+- sends email sequence and tracks touchpoints with Hubspot CRM integration
+- measures the meetings booked and deals won from these prospects to measure and optimize ROI. 
 
 ---
 
