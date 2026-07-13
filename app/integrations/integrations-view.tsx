@@ -15,6 +15,8 @@ import {
   TopNav,
 } from "@/design/components";
 import { gradients } from "@/design/tokens";
+import { KeySetupHelp } from "./key-setup-help";
+import { SequenceSetupHelp } from "./sequence-setup-help";
 
 /**
  * Integrations / Connections (U17) — where the tool binds to the stack the JD
@@ -154,7 +156,7 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
               ) : null}
             </div>
 
-            <p className="max-w-md font-sans text-base text-ink-body">
+            <p className="font-sans text-base text-ink-body">
               Track prospects that GTM Maestro finds in your HubSpot. Send
               AI-customized outreach emails.
             </p>
@@ -189,11 +191,14 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
 // ── Sequence setup (per-connection send config) ───────────────────────────────
 
 /**
- * The one manual step send needs after connecting: paste the HubSpot sequence id.
- * HubSpot has no create/list-sequence API, so the number can't be auto-discovered
- * (the sending inbox + user id DO auto-capture at connect). It's written onto the
- * active connection — each portal sends through its OWN sequence. Shows only when
- * HubSpot is connected; a saved id reads as done, so a returning user sees it's set.
+ * Step 2 of connecting HubSpot, shown only once the portal is connected: build the
+ * send sequence, then record its id. The build is the one send step no API can
+ * automate (HubSpot has no create/list-sequence endpoint), so `SequenceSetupHelp`
+ * hands the user a Claude-in-Chrome prompt that builds it AND writes the id into
+ * the field below for them (STEP D) — the input stays as the manual fallback.
+ * The id is written onto the active connection (each portal sends through its OWN
+ * sequence); the sending inbox + user id DO auto-capture at connect. A saved id
+ * reads as done, so a returning user sees it's set.
  */
 function SequenceSetupCard({ initialSequenceId }: { initialSequenceId: string | null }) {
   const [saved, setSaved] = useState<string | null>(initialSequenceId);
@@ -256,7 +261,12 @@ function SequenceSetupCard({ initialSequenceId }: { initialSequenceId: string | 
 
   return (
     <Card variant="outlined" padding="lg">
-      <form onSubmit={onSubmit} className="flex flex-col gap-5">
+      <form onSubmit={onSubmit} className="flex flex-col gap-6">
+        {/* Step 2 — build the sequence, the one send step no API can automate.
+            Claude can do it for you and write the ID into the field below (STEP D),
+            so most users never touch the input; it stays as the manual fallback. */}
+        <SequenceSetupHelp />
+        <div className="border-t border-line" />
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-3">
             <h3 className="font-display text-h5 font-book text-ink">
@@ -266,7 +276,7 @@ function SequenceSetupCard({ initialSequenceId }: { initialSequenceId: string | 
               {saved ? "Set" : "Needs setup"}
             </Badge>
           </div>
-          <p className="max-w-lg font-sans text-base text-ink-body">
+          <p className="font-sans text-base text-ink-body">
             After you set up your GTM Maestro sequence in HubSpot, paste its ID here.
             It&apos;s the number in the sequence&apos;s URL right after{" "}
             <span className="font-medium">/sequence/</span>. This is the one setting
@@ -515,6 +525,11 @@ function EngineKeyCard({
             </p>
           ) : null}
         </div>
+
+        {/* Optional guided help: the Claude-in-Chrome prompt + written manual
+            steps, behind a button so it never crowds someone who already has a key
+            (the "Find your key" link above stays the quick path for those who do). */}
+        <KeySetupHelp provider={meta.id} />
       </form>
     </Card>
   );
@@ -593,7 +608,7 @@ function RequestIntegrationCard() {
           <h3 className="font-display text-h5 font-book text-ink">
             Request an integration
           </h3>
-          <p className="max-w-lg font-sans text-base text-ink-body">
+          <p className="font-sans text-base text-ink-body">
             Salesforce, Outreach, Clay, a marketing tool. Tell me what your team
             runs and I&apos;ll wire it in next. Every request is logged.
           </p>
@@ -697,7 +712,7 @@ export function IntegrationsView({
             <h2 className="font-sans text-xl font-medium uppercase tracking-eyebrow text-white/90">
               Engine keys
             </h2>
-            <p className="max-w-2xl font-sans text-base text-white/80">
+            <p className="font-sans text-base text-white/80">
               These run the tool on your own account. Keys are encrypted and never shown again.
             </p>
             {/* data-tour hooks: the RevOps onboarding spotlights each key card (key-anthropic / key-pdl). */}
