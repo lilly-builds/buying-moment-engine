@@ -209,8 +209,11 @@ export const REVOPS_TOUR_STEPS: RevopsTourStep[] = [
       { text: "ROI Scoreboard", bold: true },
       { text: "." },
     ],
-    detail: [{ text: "It lives up here in your nav. Let's open it." }],
-    chip: "Up in your nav",
+    // Direction-neutral so it reads right in both navs (desktop top bar / mobile
+    // bottom bar). On desktop the spotlight lands on the nav button; on mobile the
+    // step drops its spotlight (the button sits behind the sheet) and Next opens it.
+    detail: [{ text: "Let's open it." }],
+    chip: "The results",
   },
   // ── Scoreboard: the ROI they'll prove once live (one beat, not a walkthrough) ─
   {

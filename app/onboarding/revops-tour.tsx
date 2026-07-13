@@ -119,6 +119,15 @@ export function RevopsTour() {
   const step = steps.find((s) => s.order === state.step) ?? null;
   const active = state.status === "active" && step != null && step.page === currentPage;
 
+  // The element this step spotlights — or null for a card with no spotlight. On a
+  // PHONE the Scoreboard nav lives in the fixed bottom bar, behind the tour sheet:
+  // spotlighting it would hide the ring under the card and try to scroll a fixed
+  // element into view. So on mobile this transition step drops its spotlight — the
+  // sheet explains and Next opens the Scoreboard. Desktop still spotlights the
+  // top-nav button (and lets the learner click it to advance).
+  const spotlightTarget =
+    step && !isDesktop && step.target === "nav-scoreboard" ? null : step?.target ?? null;
+
   const skip = useCallback(() => {
     store.write({ ...store.getSnapshot(), status: "skipped" });
   }, []);
@@ -158,13 +167,24 @@ export function RevopsTour() {
     if (navTo) router.push(navTo);
   }, [router, steps, isStyleguide]);
 
+  // Replay entry point: visiting any page with `?tour=replay` restarts the tour from
+  // step 1 on the feed (a "take the tour again" link points here). It resets
+  // progress, then lands on the feed where step 1 lives — on the styleguide previews
+  // too. The `?tour=replay` guard makes re-runs after the redirect a no-op (the param
+  // is gone), so no dependency needs excluding.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tour") !== "replay") return;
+    store.write({ status: "active", step: 1, completed: [] });
+    router.replace(isStyleguide ? "/styleguide/feed" : "/");
+  }, [router, isStyleguide]);
+
   // Flip the brief tier (if needed) and resolve this step's target on the page.
   useEffect(() => {
     if (!active || !step) return;
     if (step.briefMode) {
       window.dispatchEvent(new CustomEvent("bme:brief-mode", { detail: step.briefMode }));
     }
-    if (!step.target) {
+    if (!spotlightTarget) {
       // Centred card, full dim. Defer to a rAF so we never setState synchronously
       // in the effect body (cascading-render lint rule + matches the target path).
       const centre = requestAnimationFrame(() => setSpot({ order: step.order, rect: null }));
@@ -173,7 +193,7 @@ export function RevopsTour() {
 
     let raf = 0;
     const started = performance.now();
-    const selector = `[data-tour="${step.target}"]`;
+    const selector = `[data-tour="${spotlightTarget}"]`;
 
     const look = () => {
       const el = visibleTarget(selector);
@@ -216,12 +236,12 @@ export function RevopsTour() {
     raf = requestAnimationFrame(look);
 
     return () => cancelAnimationFrame(raf);
-  }, [active, step]);
+  }, [active, step, spotlightTarget]);
 
   // Keep the spotlight glued to the target as the page scrolls / resizes.
   useEffect(() => {
-    if (!active || !step || !step.target) return;
-    const selector = `[data-tour="${step.target}"]`;
+    if (!active || !step || !spotlightTarget) return;
+    const selector = `[data-tour="${spotlightTarget}"]`;
     const remeasure = () => {
       const el = visibleTarget(selector);
       if (el) setSpot({ order: step.order, rect: rectOf(el) });
@@ -232,16 +252,16 @@ export function RevopsTour() {
       window.removeEventListener("scroll", remeasure, { capture: true } as EventListenerOptions);
       window.removeEventListener("resize", remeasure);
     };
-  }, [active, step]);
+  }, [active, step, spotlightTarget]);
 
   // "Play it": clicking the spotlit element on a cross-page step advances the tour
   // AND takes it to the right page (we route it ourselves so it works on the
   // styleguide previews too, where the real link points at an auth-gated route).
   useEffect(() => {
-    if (!active || !step || !step.target || !step.engage) return;
+    if (!active || !step || !spotlightTarget || !step.engage) return;
     const onClick = (e: MouseEvent) => {
       const t = e.target as Element | null;
-      if (t?.closest(`[data-tour="${step.target}"]`)) {
+      if (t?.closest(`[data-tour="${spotlightTarget}"]`)) {
         e.preventDefault();
         e.stopPropagation();
         advance();
@@ -249,7 +269,7 @@ export function RevopsTour() {
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [active, step, advance]);
+  }, [active, step, spotlightTarget, advance]);
 
   // Measure the rendered card so placement uses its real height. useLayoutEffect
   // runs before paint, so the card lands in its correct (fully-visible) spot on the
