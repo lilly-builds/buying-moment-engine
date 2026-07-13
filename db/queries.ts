@@ -13,6 +13,7 @@ import {
 import type { Database } from "./types";
 import {
   briefs,
+  contacts,
   costEvents,
   crmLinks,
   evidence,
@@ -461,6 +462,45 @@ export async function feedPractices(
       b.signalCount - a.signalCount ||
       b.freshest.detectedAt.getTime() - a.freshest.detectedAt.getTime(),
   );
+}
+
+
+/**
+ * The public dashboard feed should show only action-ready leads. We still store every
+ * buying-moment lead for recovery/backfill, but the visible feed hides rows that cannot
+ * support the demo path: website → emailable contact → generated brief.
+ */
+export async function dashboardFeedPractices(
+  db: Database,
+  now: Date = new Date(),
+): Promise<FeedRow[]> {
+  const feed = await feedPractices(db, now);
+  if (feed.length === 0) return feed;
+
+  const readyRows = await db
+    .select({ id: practices.id })
+    .from(practices)
+    .innerJoin(briefs, eq(briefs.practiceId, practices.id))
+    .innerJoin(contacts, eq(contacts.practiceId, practices.id))
+    .where(
+      and(
+        inArray(
+          practices.id,
+          feed.map((row) => row.id),
+        ),
+        sql`${practices.websiteUrl} is not null and length(trim(${practices.websiteUrl})) > 0`,
+        sql`${contacts.email} is not null and length(trim(${contacts.email})) > 0`,
+        inArray(contacts.emailQuality, [
+          "safe_work",
+          "weak_work",
+          "personal",
+          "org_inbox",
+        ]),
+      ),
+    );
+
+  const readyIds = new Set(readyRows.map((row) => row.id));
+  return feed.filter((row) => readyIds.has(row.id));
 }
 
 export interface PracticeNeedingBrief {

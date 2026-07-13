@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "../setup";
 import { upsertPractice, upsertSignal } from "@/db/ingest";
 import {
+  dashboardFeedPractices,
   feedPractices,
   practicesNeedingBriefs,
   signalCount,
 } from "@/db/queries";
-import { briefs, evidence } from "@/db/schema";
+import { briefs, contacts, evidence } from "@/db/schema";
 
 const DETECTED = new Date("2026-07-01T00:00:00Z");
 
@@ -120,6 +121,56 @@ describe("derived signal-count queries", () => {
     expect(feed.map((r) => r.id)).toEqual([fired.id]);
     expect(feed.map((r) => r.name)).not.toContain("Quiet Derm");
   });
+
+  it("dashboardFeedPractices only shows leads with website, email, and brief", async () => {
+    const ready = await upsertPractice(t.db, {
+      name: "Ready Derm",
+      geoKey: "ready-derm",
+      vertical: "dermatology",
+      websiteUrl: "https://ready.example",
+    });
+    const noEmail = await upsertPractice(t.db, {
+      name: "No Email Derm",
+      geoKey: "no-email-derm",
+      vertical: "dermatology",
+      websiteUrl: "https://no-email.example",
+    });
+    const noBrief = await upsertPractice(t.db, {
+      name: "No Brief Derm",
+      geoKey: "no-brief-derm",
+      vertical: "dermatology",
+      websiteUrl: "https://no-brief.example",
+    });
+    const noWebsite = await upsertPractice(t.db, {
+      name: "No Website Derm",
+      geoKey: "no-website-derm",
+      vertical: "dermatology",
+    });
+
+    for (const practice of [ready, noEmail, noBrief, noWebsite]) {
+      await upsertSignal(t.db, {
+        practiceId: practice.id,
+        kind: "staffing_spike",
+        evidenceId: await makeEvidence(`https://signals.example.com/${practice.id}`),
+        detectedAt: DETECTED,
+      });
+    }
+
+    await t.db.insert(briefs).values([
+      { practiceId: ready.id, generatedAt: DETECTED },
+      { practiceId: noEmail.id, generatedAt: DETECTED },
+      { practiceId: noWebsite.id, generatedAt: DETECTED },
+    ]);
+    await t.db.insert(contacts).values([
+      { practiceId: ready.id, role: "Practice Manager", email: "ready@example.com", emailQuality: "safe_work" },
+      { practiceId: noBrief.id, role: "Practice Manager", email: "nobrief@example.com", emailQuality: "safe_work" },
+      { practiceId: noWebsite.id, role: "Practice Manager", email: "nowebsite@example.com", emailQuality: "safe_work" },
+    ]);
+
+    const feed = await dashboardFeedPractices(t.db, DETECTED);
+    expect(feed.map((row) => row.name)).toEqual(["Ready Derm"]);
+  });
+
 });
 
 describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
