@@ -336,15 +336,21 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Decide honestly whether these are in-demo or parked; if in-demo, build the webhook ingestion + feedback persistence and cover them with `analytics-tracking-testing` contract assertions (event captured with correct shape, deduped) and an API test for `/api/feedback`. If parked, update the spec/README so doc and code agree.
 - **qa-skill that closes it:** `analytics-tracking-testing` (+ `api-testing`)
 - **Effort:** M
-- **Status:** FIXED (doc reconciled to code); building the two inputs is a parked product decision
-- **Resolution:** Confirmed the mismatch is real: no webhook route under `app/api/hubspot/`, and
-  `app/api/feedback` persists nothing. Building them (HubSpot webhook ingestion needs app-side webhook
-  config; feedback persistence is small but a product-behavior decision) is feature work, not a QA
-  fix, so per the audit's own guidance I took the honest doc-reconciliation path: added a dated
-  "Implementation status vs this spec" note to the top of `docs/spec.md` stating both inputs are
-  specified-but-not-built and that the scoreboard's engagement/feedback columns therefore read
-  honestly empty (not fabricated). Spec and code now agree. Whether to build them is surfaced as a
-  product decision, not auto-actioned.
+- **Status:** FIXED — feedback persistence BUILT; webhook parked (doc reconciled)
+- **Resolution:** Confirmed the mismatch was real: no webhook route, and `app/api/feedback` persisted
+  nothing.
+  - **AE feedback persistence: built** (product go given 2026-07-14). Wired the full path test-first:
+    `db/feedback.ts` `recordFeedback` upserts per `(practice, AE)` so a re-vote updates, not
+    duplicates (`tests/db/feedback.test.ts`, 3); `app/api/feedback/route.ts` now validates the body
+    (zod) and persists with the session's AE email, failing 400 on a bad payload / dangling practice
+    and never swallowing the error; the `LeadFeedback` button now POSTs the vote and shows honest
+    saving/saved/error states (`tests/ui/lead-feedback.test.tsx`, 2). The scoreboard's `feedbackRows`
+    already reads this table (demo-excluded), so real votes now populate the feedback column with
+    genuine data, not fabricated numbers. Verified: 5 tests, typecheck + eslint clean.
+  - **HubSpot open/click/reply webhook ingestion: parked.** Building it needs HubSpot app-side webhook
+    configuration (a product/ops decision), so it stays parked; the `docs/spec.md` implementation
+    note now says feedback is built and only the engagement webhook remains unbuilt, so spec and code
+    agree.
 
 ---
 

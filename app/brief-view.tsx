@@ -492,7 +492,7 @@ function OutreachMode({
         </Card>
 
       {/* One-tap lead-quality vote — teaches the tool (tour step 5, `rate-lead`). */}
-      <LeadFeedback />
+      <LeadFeedback practiceId={practiceId} />
     </div>
   );
 }

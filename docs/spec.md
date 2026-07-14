@@ -3,17 +3,19 @@
 **Doc type:** Requirements spec *(in progress)* · **Date:** 2026-07-07
 **The rule:** every requirement in this doc must serve **User Story ①**. If it doesn't serve the story, it's out of scope.
 
-> **Implementation status vs this spec (2026-07-14, COV-11).** Two inputs this spec describes are
+> **Implementation status vs this spec (2026-07-14, COV-11).** One input this spec describes is
 > specified but **not yet built**, so the code is the source of truth here:
 > - **HubSpot open/click/reply webhook ingestion** (§ Stack, line ~314). There is no webhook route
 >   (`app/api/hubspot/` holds only `oauth`, `oauth/start`, `send-config`), so no email-engagement
 >   event is captured yet.
-> - **AE 👍/👎 feedback persistence.** `app/api/feedback` is an auth-gated **stub** that persists
->   nothing (the `feedback` table exists in the schema, but nothing writes to it).
 >
-> Consequence: the ROI scoreboard's *engagement* and *feedback* inputs have no ingestion path yet, so
-> those columns read honestly empty rather than fabricated. Both are parked pending a product decision
-> (build vs keep parked); this note keeps the spec and the code in agreement in the meantime.
+> **AE 👍/👎 feedback persistence is now built** (2026-07-14): the thumb vote POSTs to `/api/feedback`,
+> which upserts into the `feedback` table per (practice, AE), so a re-vote updates rather than
+> duplicates. The scoreboard's *feedback* column fills with real votes.
+>
+> Consequence: only the scoreboard's *engagement* input still lacks an ingestion path (webhook
+> parked), so that column reads honestly empty rather than fabricated. The webhook is parked pending a
+> product decision; this note keeps the spec and the code in agreement in the meantime.
 >
 > **Route names (code is source of truth, E2E-04):** the ranked feed is **`/`**, `/scoreboard` is the
 > **ROI scoreboard**, and `/signals` ships as the **Data-Sources intro** (Adzuna / Google / GDELT),

@@ -20,7 +20,9 @@ function loginPath(res: Response): string {
 
 describe("mutation routes reject an unauthenticated request (guardMutation)", () => {
   it("feedback POST -> 401", async () => {
-    const res = await feedbackPOST();
+    const res = await feedbackPOST(
+      new Request("http://localhost/api/feedback", { method: "POST" }),
+    );
     expect(res.status).toBe(401);
   });
   it("sequence POST -> 401", async () => {
