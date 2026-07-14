@@ -18,21 +18,25 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 function ThumbButton({
   value,
   active,
+  disabled,
   onClick,
 }: {
   value: Verdict;
   active: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-pressed={active}
       aria-label={value === "up" ? "Good lead" : "Not a good lead"}
       className={cn(
         "flex h-10 w-10 items-center justify-center rounded-pill border text-lg transition-colors",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+        "disabled:cursor-not-allowed disabled:opacity-60",
         active
           ? "border-brand bg-brand-50"
           : "border-line-outline bg-surface hover:border-line-outline-hover",
@@ -54,6 +58,7 @@ export function LeadFeedback({
   const [state, setState] = useState<SaveState>("idle");
 
   async function vote(thumb: Verdict) {
+    if (state === "saving") return; // ignore taps while a save is in flight (no double-fire)
     setVerdict(thumb);
     setState("saving");
     try {
@@ -90,8 +95,18 @@ export function LeadFeedback({
         {message}
       </span>
       <div className="flex items-center gap-2">
-        <ThumbButton value="up" active={verdict === "up"} onClick={() => vote("up")} />
-        <ThumbButton value="down" active={verdict === "down"} onClick={() => vote("down")} />
+        <ThumbButton
+          value="up"
+          active={verdict === "up"}
+          disabled={state === "saving"}
+          onClick={() => vote("up")}
+        />
+        <ThumbButton
+          value="down"
+          active={verdict === "down"}
+          disabled={state === "saving"}
+          onClick={() => vote("down")}
+        />
       </div>
     </div>
   );

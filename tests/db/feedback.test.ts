@@ -56,6 +56,33 @@ describe("recordFeedback", () => {
     expect(rows[0].reason).toBe("bad_timing");
   });
 
+  it("preserves a stored reason/freeText when a later thumb-only re-vote omits them", async () => {
+    const practiceId = await seedPractice();
+    await recordFeedback(t.db, {
+      practiceId,
+      aeEmail: "ae@opterra.com",
+      thumb: "down",
+      reason: "bad_timing",
+      freeText: "call back in Q3",
+    });
+    // A thumb-only re-vote (no reason/freeText) must not erase the earlier context.
+    await recordFeedback(t.db, { practiceId, aeEmail: "ae@opterra.com", thumb: "up" });
+
+    const [row] = await t.db.select().from(feedback);
+    expect(row.thumb).toBe("up");
+    expect(row.reason).toBe("bad_timing");
+    expect(row.freeText).toBe("call back in Q3");
+  });
+
+  it("clears a stored reason when the caller explicitly passes null", async () => {
+    const practiceId = await seedPractice();
+    await recordFeedback(t.db, { practiceId, aeEmail: "ae@opterra.com", thumb: "down", reason: "too_small" });
+    await recordFeedback(t.db, { practiceId, aeEmail: "ae@opterra.com", thumb: "down", reason: null });
+
+    const [row] = await t.db.select().from(feedback);
+    expect(row.reason).toBeNull();
+  });
+
   it("keeps two different AEs' votes on the same practice as separate rows", async () => {
     const practiceId = await seedPractice();
     await recordFeedback(t.db, { practiceId, aeEmail: "a@opterra.com", thumb: "up" });

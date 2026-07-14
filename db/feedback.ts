@@ -35,10 +35,12 @@ export async function recordFeedback(db: Database, input: FeedbackInput): Promis
     })
     .onConflictDoUpdate({
       target: [feedback.practiceId, feedback.aeEmail],
+      // Only overwrite reason/freeText when the caller actually supplied them, so a
+      // thumb-only re-vote preserves prior context; an explicit null still clears.
       set: {
         thumb: input.thumb,
-        reason: input.reason ?? null,
-        freeText: input.freeText ?? null,
+        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        ...(input.freeText !== undefined ? { freeText: input.freeText } : {}),
         updatedAt: sql`now()`,
       },
     });
