@@ -165,8 +165,20 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add `@axe-core/playwright` over all 6 pages + interactive states, plus a keyboard-nav spec and the manual checklist, gated in CI per `accessibility-testing`. Fix the login error announcement as the first concrete item.
 - **qa-skill that closes it:** `accessibility-testing`
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED (concrete defect + harness) — axe-over-all-pages folded into COV-01
+- **Resolution:** Fixed the live WCAG defect test-first. `app/login/login-form.tsx`: the error `<p>`
+  now has `id` + `role="alert"` (assertive live region, WCAG 4.1.3); the input gets
+  `aria-invalid` + `aria-describedby` pointing at it (WCAG 3.3.1); and focus moves to the field on
+  error so a keyboard/screen-reader user is not stranded. To test it I stood up the missing React
+  render harness (`@testing-library/react` + `jsdom`; vitest include now matches `*.test.tsx`,
+  jsdom via a per-file `@vitest-environment` docblock) — this closes the audit's "never renders a
+  component" gap and unblocks all future component tests. Red→green verified
+  (`findByRole("alert")` failed before the fix, passes after):
+  ```
+  tests/ui/login-form.test.tsx  2 passed  ·  typecheck clean · eslint clean
+  ```
+  Remaining a11y scope (axe over all 6 pages + keyboard-nav specs + manual checklist, gated in CI)
+  rides on the Playwright suite — tracked under COV-01, not silently dropped.
 
 ---
 

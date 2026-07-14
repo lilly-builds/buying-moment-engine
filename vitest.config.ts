@@ -6,7 +6,8 @@ const root = path.resolve(__dirname, ".");
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    // `.tsx` for component render tests (jsdom via a per-file `@vitest-environment` docblock).
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
 
     /**
      * Every data-layer suite calls `createTestDb()` in `beforeEach` — that boots a fresh
