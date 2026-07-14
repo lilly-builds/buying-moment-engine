@@ -10,7 +10,9 @@
 - High: 1
 - Medium: 2
 - Low: 1
-- Last updated: 2026-07-13 by the webapp-testing thread
+- Last updated: 2026-07-14 by Thread 3 (fix pass)
+- **Resolution (Thread 3):** E2E-02, E2E-03, E2E-04 FIXED. E2E-01 FLAGGED for a product decision
+  (the recommended fix would breach the D9 honesty guarantee; see the finding). Nothing OPEN.
 
 ### How this pass was run (so thread 3 can reproduce)
 - **App:** `next dev` (Next 16.2.10, Turbopack) on **:3100** (`env PORT=3100 pnpm dev` — the

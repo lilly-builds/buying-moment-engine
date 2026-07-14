@@ -10,7 +10,10 @@
 - High: 4
 - Medium: 8
 - Low: 4
-- Last updated: 2026-07-13 by Thread 1 (qa-skills coverage audit)
+- Last updated: 2026-07-14 by Thread 3 (fix pass)
+- **Resolution (Thread 3):** 16/16 worked. 11 FIXED, 2 PARTIAL (COV-06, COV-15), 3 DEFERRED
+  (COV-12, COV-14, COV-16). Nothing OPEN. Deferred items and the secrets/services they need are
+  listed in `3-fix-log.md`.
 
 **Scope of this pass.** Breadth, not depth: "Am I missing a whole *category* of quality a real
 team would expect before shipping?" Read-only. The repo tree was not clean at audit time (~34
