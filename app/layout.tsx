@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Inter_Tight, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { MobileTabBar } from "@/design/components/mobile-tab-bar";
-import { RevopsTour } from "./onboarding/revops-tour";
+import { Onboarding } from "./onboarding/onboarding";
 
 /**
  * EliseAI's three real families (U2 / R15). `document.fonts` on eliseai.com
@@ -62,12 +62,13 @@ export default function RootLayout({
             containing block can un-fix it (see MobileTabBar). Renders nothing at
             md:+ and on the auth / immersive screens. */}
         <MobileTabBar />
-        {/* The RevOps "connect your stack" coach-through (Thread 08) — the same
-            spotlight tour the AE gets, walking feed → brief → integrations. Mounted
-            here so it survives the cross-page walk; renders nothing unless active.
-            (Targeting follow-up: pick per archetype — AE → OnboardingTour, RevOps →
-            this. The AE tour component stays in ./onboarding/onboarding-tour.) */}
-        <RevopsTour />
+        {/* Onboarding front door. Asks once (AE vs RevOps) on the first visit to the
+            feed, then mounts the matching coach-through — the AE "work your first
+            lead" walk or the RevOps "connect your stack" walk. Mounted here so it
+            survives the cross-page walk; renders nothing unless a tour is active or
+            the chooser is showing. (Per-user role persistence is the follow-up;
+            today the choice lives in localStorage — see ./onboarding/onboarding.) */}
+        <Onboarding />
       </body>
     </html>
   );

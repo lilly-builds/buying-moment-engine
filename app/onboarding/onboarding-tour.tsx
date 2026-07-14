@@ -34,9 +34,11 @@ const CHANGE_EVENT = "bme:onboarding-change";
 /** Padding around the spotlit element, and gap between it and the card. */
 const SPOTLIGHT_PAD = 12;
 const CARD_GAP = 16;
-/** The card is a fixed width (`w-[32rem]`, a landscape rectangle); an estimate of its height suffices
- *  (generous, so the taller cards that carry a supporting sentence still clear the target). */
-const CARD_W = 512;
+/** The card's desktop width MUST track `StepCard`'s `sm:w-[40rem]` (640px). The mobile
+ *  redesign widened the shared card from 32rem to 40rem; the RevOps tour was updated to
+ *  match but this one wasn't, so right-anchored steps overflowed the viewport. An estimate
+ *  of the height suffices (generous, so a taller supporting-sentence card still clears). */
+const CARD_W = 640;
 const CARD_H_EST = 300;
 /** Keep the sticky nav clear when scrolling a target into place. */
 const NAV_OFFSET = 88;
