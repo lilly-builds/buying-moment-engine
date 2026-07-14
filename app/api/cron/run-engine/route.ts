@@ -87,18 +87,55 @@ export function resolveBriefLimit(request?: Request): number {
   return Math.min(Math.floor(n), MAX_ENGINE_BRIEF_LIMIT);
 }
 
-export const DEFAULT_DISCOVERY_METRO_LIMIT = 12;
+export const DEFAULT_DISCOVERY_METRO_LIMIT = 3;
 export const MAX_DISCOVERY_METRO_LIMIT = 50;
+export const DEFAULT_DISCOVERY_PER_CATEGORY_LIMIT = 2;
+export const MAX_DISCOVERY_PER_CATEGORY_LIMIT = 20;
+export const DEFAULT_DISCOVERY_REVIEW_LIMIT = 2;
+export const MAX_DISCOVERY_REVIEW_LIMIT = 5;
+
+function resolvePositiveIntLimit(
+  raw: string | null | undefined,
+  fallback: number,
+  max: number,
+): number {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(Math.floor(n), max);
+}
 
 export function resolveDiscoveryMetroLimit(request?: Request): number {
   const queryLimit = request
     ? new URL(request.url).searchParams.get("metroLimit")?.trim()
     : null;
-  const raw = queryLimit || process.env.DISCOVERY_METRO_LIMIT?.trim();
-  if (!raw) return DEFAULT_DISCOVERY_METRO_LIMIT;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return DEFAULT_DISCOVERY_METRO_LIMIT;
-  return Math.min(Math.floor(n), MAX_DISCOVERY_METRO_LIMIT);
+  return resolvePositiveIntLimit(
+    queryLimit || process.env.DISCOVERY_METRO_LIMIT?.trim(),
+    DEFAULT_DISCOVERY_METRO_LIMIT,
+    MAX_DISCOVERY_METRO_LIMIT,
+  );
+}
+
+export function resolveDiscoveryPerCategoryLimit(request?: Request): number {
+  const queryLimit = request
+    ? new URL(request.url).searchParams.get("discoveryLimit")?.trim()
+    : null;
+  return resolvePositiveIntLimit(
+    queryLimit || process.env.DISCOVERY_PER_CATEGORY_LIMIT?.trim(),
+    DEFAULT_DISCOVERY_PER_CATEGORY_LIMIT,
+    MAX_DISCOVERY_PER_CATEGORY_LIMIT,
+  );
+}
+
+export function resolveDiscoveryReviewLimit(request?: Request): number {
+  const queryLimit = request
+    ? new URL(request.url).searchParams.get("reviewLimit")?.trim()
+    : null;
+  return resolvePositiveIntLimit(
+    queryLimit || process.env.DISCOVERY_REVIEW_LIMIT?.trim(),
+    DEFAULT_DISCOVERY_REVIEW_LIMIT,
+    MAX_DISCOVERY_REVIEW_LIMIT,
+  );
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -139,8 +176,10 @@ const anthropicApiKey =
           now,
           resolveDiscoveryMetroLimit(request),
         );
-        discovery = metros.map((metro) =>
-          buildLiveDiscoveryDeps({
+        const discoveryLimit = resolveDiscoveryPerCategoryLimit(request);
+        const reviewLimit = resolveDiscoveryReviewLimit(request);
+        discovery = metros.map((metro) => ({
+          ...buildLiveDiscoveryDeps({
             db,
             now,
             tenant,
@@ -148,7 +187,9 @@ const anthropicApiKey =
             meter,
             anthropicApiKey,
           }),
-        );
+          limit: discoveryLimit,
+          reviewLimit,
+        }));
       } catch (err) {
         console.warn("engine.discovery.config_error", {
           error: err instanceof Error ? err.message : String(err),

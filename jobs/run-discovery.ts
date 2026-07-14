@@ -81,6 +81,8 @@ export interface RunDiscoveryDeps {
   classifyClient: ClassifyClient;
   /** Max places to consider per ICP category (bounds spend). */
   limit?: number;
+  /** Max reviews to classify per place (bounds Anthropic calls on broad metro scans). */
+  reviewLimit?: number;
   /** A review qualifies only at/above this confidence (default DEFAULT_CONFIDENCE_FLOOR). */
   confidenceFloor?: number;
   /** Optional targeted pass to stack other sources onto each qualified practice. */
@@ -140,6 +142,7 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
   const { db, meter, now, tenant, metro } = deps;
   const log = deps.logger ?? defaultLogger;
   const limit = deps.limit ?? DEFAULT_PER_CATEGORY_LIMIT;
+  const reviewLimit = deps.reviewLimit ?? Number.POSITIVE_INFINITY;
   const confidenceFloor = deps.confidenceFloor ?? DEFAULT_CONFIDENCE_FLOOR;
   const geoKey = metroToGeoKey(metro);
   const { city, state } = splitMetro(metro);
@@ -238,7 +241,7 @@ export async function runDiscovery(deps: RunDiscoveryDeps): Promise<DiscoverySum
     // 4. Qualify each review IN MEMORY against the tenant criterion (R3). A place
     //    qualifies if any review qualifies at/above the confidence floor; keep the
     //    strongest verdict's category for the citation.
-    const reviews = parsed.data.result.reviews ?? [];
+    const reviews = (parsed.data.result.reviews ?? []).slice(0, reviewLimit);
     let qualifies = false;
     let bestConfidence = 0;
     let bestCategory = "";

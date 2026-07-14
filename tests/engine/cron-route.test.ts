@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_DISCOVERY_METRO_LIMIT,
+  DEFAULT_DISCOVERY_PER_CATEGORY_LIMIT,
+  DEFAULT_DISCOVERY_REVIEW_LIMIT,
   GET,
   MAX_DISCOVERY_METRO_LIMIT,
+  MAX_DISCOVERY_PER_CATEGORY_LIMIT,
+  MAX_DISCOVERY_REVIEW_LIMIT,
   resolveBriefLimit,
   resolveDiscoveryMetroLimit,
+  resolveDiscoveryPerCategoryLimit,
+  resolveDiscoveryReviewLimit,
 } from "@/app/api/cron/run-engine/route";
 import { DEFAULT_ENGINE_BRIEF_LIMIT, MAX_ENGINE_BRIEF_LIMIT } from "@/jobs/run-engine";
 
@@ -126,5 +132,23 @@ describe("resolveDiscoveryMetroLimit", () => {
         new Request("https://app/api/cron/run-engine?metroLimit=999"),
       ),
     ).toBe(MAX_DISCOVERY_METRO_LIMIT);
+  });
+});
+
+
+describe("resolveDiscovery work limits", () => {
+  it("defaults and clamps candidate/review work caps", () => {
+    expect(resolveDiscoveryPerCategoryLimit()).toBe(DEFAULT_DISCOVERY_PER_CATEGORY_LIMIT);
+    expect(resolveDiscoveryReviewLimit()).toBe(DEFAULT_DISCOVERY_REVIEW_LIMIT);
+    expect(
+      resolveDiscoveryPerCategoryLimit(
+        new Request("https://app/api/cron/run-engine?discoveryLimit=999"),
+      ),
+    ).toBe(MAX_DISCOVERY_PER_CATEGORY_LIMIT);
+    expect(
+      resolveDiscoveryReviewLimit(
+        new Request("https://app/api/cron/run-engine?reviewLimit=999"),
+      ),
+    ).toBe(MAX_DISCOVERY_REVIEW_LIMIT);
   });
 });
