@@ -1,0 +1,58 @@
+name: Security
+
+# Supply-chain + SAST + secret scanning (COV-03). Runs on every push and PR, and
+# weekly so a newly-disclosed CVE in an unchanged dependency is still caught.
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Fails on high/critical advisories; moderate/low are reported, not blocking.
+      - name: pnpm audit (fail on high or critical)
+        run: pnpm audit --audit-level=high
+
+  sast:
+    name: Static analysis (Semgrep OWASP Top Ten)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      # No SEMGREP_APP_TOKEN needed: SEMGREP_RULES drives a token-less CI scan.
+      - name: Semgrep scan
+        run: semgrep ci
+        env:
+          SEMGREP_RULES: p/owasp-top-ten
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          # Auto-provided by Actions; not a manually-managed secret. NOTE: a private
+          # repo under a GitHub org additionally needs a GITLEAKS_LICENSE secret.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

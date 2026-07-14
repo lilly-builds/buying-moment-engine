@@ -1,0 +1,19 @@
+version: 2
+# Automated dependency-update PRs (COV-03): npm deps and the GitHub Actions used above.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Batch low-risk updates so the queue is a couple of PRs, not dozens.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

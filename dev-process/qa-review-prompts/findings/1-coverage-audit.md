@@ -114,8 +114,19 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add an OSV-Scanner (or `pnpm audit --audit-level=high`) job that fails on high/critical, a Semgrep `p/owasp-top-ten` job, a TruffleHog `--only-verified` secret scan, and a `dependabot.yml`. `security-testing` ships the ruleset (`references/scanning-and-ci.md`); `ci-cd-integration` wires it as a nightly/PR gate.
 - **qa-skill that closes it:** `security-testing` (+ `ci-cd-integration`)
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED
+- **Resolution:** Added `.github/workflows/security.yml` (push + PR + weekly cron, concurrency-cancel)
+  with three jobs and `.github/dependabot.yml`:
+  - **SCA:** `pnpm audit --audit-level=high` (fails on high/critical). Verified locally: current tree
+    has 2 moderate, 0 high/critical, so the gate is green today (`exit=0`).
+  - **SAST:** Semgrep `p/owasp-top-ten`, token-less (`semgrep ci` with `SEMGREP_RULES`, no secret).
+  - **Secret scan:** `gitleaks/gitleaks-action@v2` (uses the auto-provided `GITHUB_TOKEN`; a comment
+    notes a private-org repo would also need `GITLEAKS_LICENSE`).
+  - **Dependabot:** weekly npm (grouped minor/patch) + github-actions updates.
+  No app secrets/env touched. Verified: both YAMLs parse; audit gate exit 0. Honest limit: the
+  Semgrep and gitleaks *jobs* execute on the first push (GitHub Actions can't run locally here);
+  their invocations follow each tool's standard token-less pattern. `eslint-plugin-security` skipped
+  (would need tuning to avoid breaking the existing lint gate); Semgrep OWASP covers SAST.
 
 ---
 
