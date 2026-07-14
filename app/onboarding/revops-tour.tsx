@@ -59,6 +59,27 @@ import {
 const store = createTourStore("bme.revops-onboarding.v1");
 
 /**
+ * Restart this tour from step 1. Called by the role chooser the moment someone picks
+ * "RevOps". The chooser gates on its OWN key (`bme.onboarding-role.v1`), separate from
+ * this tour's progress key, so a browser carrying ANY stale progress from a prior
+ * session — `done`, `skipped`, or an `active` step parked mid-walk on a later page —
+ * still shows the chooser (e.g. after the role key was cleared, or on an account that
+ * onboarded before the chooser shipped; note the layout once mounted THIS walk for
+ * everyone, so that population exists). If the mounted tour read that stale state it
+ * would render nothing on the feed and strand the picker on a dead front door.
+ *
+ * We reset UNCONDITIONALLY rather than trying to resume: `writeRole` is only reachable
+ * from the chooser, and the chooser only appears when the role key is empty — a state in
+ * which no tour is on screen anyway — so a pick is always an explicit "start onboarding
+ * from the top." Step 1 lives on the feed (where the chooser is shown), so the fresh
+ * state renders immediately. (Resuming instead would re-strand any walk parked off the
+ * feed — the very bug this closes.)
+ */
+export function restartRevopsTour(): void {
+  store.write({ status: "active", step: 1, completed: [] });
+}
+
+/**
  * Resolve a `data-tour` selector to the element that's actually on screen. A hook
  * can render in two places across breakpoints — the Scoreboard link lives in both
  * the desktop top bar and the mobile bottom tab bar (one hidden at any width) — and
@@ -176,7 +197,7 @@ export function RevopsTour() {
   // is gone), so no dependency needs excluding.
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("tour") !== "replay") return;
-    store.write({ status: "active", step: 1, completed: [] });
+    restartRevopsTour();
     router.replace(isStyleguide ? "/styleguide/feed" : "/");
   }, [router, isStyleguide]);
 

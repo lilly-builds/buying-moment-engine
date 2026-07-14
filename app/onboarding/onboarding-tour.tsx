@@ -135,6 +135,28 @@ function writeState(next: TourState) {
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
+/**
+ * Restart this tour from step 1. Called by the role chooser the moment someone picks
+ * "AE". The chooser gates on its OWN key (`bme.onboarding-role.v1`), separate from this
+ * tour's progress key, so a browser carrying ANY stale progress from a prior session —
+ * `done`, `skipped`, or an `active` step parked mid-walk on the brief page — still shows
+ * the chooser (e.g. after the role key was cleared, or a returning user who already
+ * finished or skipped this walk). If the mounted tour read that stale state the pick
+ * would NOT surface the fresh walk it promised: `skipped` and off-feed `active` render
+ * nothing, while `done` flashes the celebration finale over the feed — either way a
+ * dead or misleading front door.
+ *
+ * We reset UNCONDITIONALLY rather than trying to resume: `writeRole` is only reachable
+ * from the chooser, and the chooser only appears when the role key is empty — a state in
+ * which no tour is on screen anyway — so a pick is always an explicit "start onboarding
+ * from the top." Step 1 lives on the feed (where the chooser is shown), so the fresh
+ * state renders immediately. (Resuming instead would re-strand any walk parked off the
+ * feed — the very bug this closes.)
+ */
+export function restartOnboardingTour(): void {
+  writeState(FRESH_STATE);
+}
+
 function pageForPath(pathname: string): StepPage | null {
   if (pathname === "/") return "feed";
   if (pathname.startsWith("/practice/")) return "brief";
