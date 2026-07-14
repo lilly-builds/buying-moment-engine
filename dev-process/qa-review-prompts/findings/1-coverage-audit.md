@@ -202,8 +202,19 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add error tracking (Sentry) + a `/api/health` endpoint; emit a structured run-summary and alert on a failed/empty cron run; add a `synthetic-monitoring` probe on the cron result and the login→feed path with an alert threshold. Use `observability-driven-testing` to turn the first real prod error into a regression test.
 - **qa-skill that closes it:** `observability-driven-testing` (+ `synthetic-monitoring`)
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** PARTIAL — health probe + cron failure signal done; Sentry/synthetic-monitoring deferred (need a service/secret)
+- **Resolution (done, no secrets):**
+  - Added `app/api/health/route.ts` (+ `src/lib/health.ts`, pure/injectable, TDD): an
+    unauthenticated liveness/readiness probe returning `{status, checks:{database}}`, 200 when the DB
+    ping succeeds and 503 when it fails (never leaks the error). Added `/api/health` to the auth
+    allowlist so a monitor can reach it in prod; it exposes only up/down, no row data. Tests:
+    `tests/lib/health.test.ts` (3) + an auth-path case. Verified: 6 passed, typecheck + eslint clean.
+  - Elevated the revenue cron's setup-failure from `console.warn` to `console.error` with a
+    structured, timestamped payload (`app/api/cron/run-engine/route.ts`), so a log-based alert can
+    key on it.
+- **Deferred (needs a service/secret, the prompt's stop-and-ask gate):** Sentry error tracking (a DSN
+  is a secret/env change), and a synthetic-monitoring probe wired to an alert channel. The `/health`
+  route is the seam a monitor plugs into; the alert destination is the human decision.
 
 ---
 

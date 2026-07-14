@@ -179,7 +179,9 @@ const anthropicApiKey =
     return NextResponse.json(summary);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.warn("engine.run.setup_error", { error });
+    // error-level (not warn): this is the revenue cron failing to run at all, the exact
+    // signal a log-based alert should page on (COV-06). Structured for a log drain.
+    console.error("engine.run.setup_error", { error, ranAt: new Date().toISOString() });
     return NextResponse.json(
       { ran: false, stage: "setup", error },
       { status: 500 },

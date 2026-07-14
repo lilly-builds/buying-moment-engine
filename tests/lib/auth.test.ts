@@ -10,4 +10,8 @@ describe("public auth paths", () => {
   it("does not open other API routes", () => {
     expect(isPublicPath("/api/send", true)).toBe(false);
   });
+
+  it("lets a synthetic monitor reach /api/health unauthenticated in production", () => {
+    expect(isPublicPath("/api/health", true)).toBe(true);
+  });
 });
