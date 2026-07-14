@@ -29,6 +29,7 @@ import type { Lead, PipelineDeps } from "@/src/engine/pipeline";
 import { anthropicExtractClient } from "@/src/enrich/extract";
 import { pdlClient } from "@/src/enrich/pdl-client";
 import { scrapePractice } from "@/src/enrich/scrape";
+import { dnsLookupAll } from "@/src/enrich/url-guard";
 import { teeRecorder } from "@/src/enrich/experiment-run";
 import { resolvePracticeWebsite } from "@/src/enrich/website";
 import { createMeter, type CostEventRecord } from "@/src/roi/cost-meter";
@@ -121,7 +122,7 @@ async function main(): Promise<void> {
   const deps: PipelineDeps = {
     db,
     meter,
-    scrape: (url) => scrapePractice({ fetch }, url),
+    scrape: (url) => scrapePractice({ fetch, lookup: dnsLookupAll }, url),
     extract: anthropicExtractClient(anthropicKey),
     pdl: pdlClient(pdlKey),
     voice: anthropicVoiceClient(anthropicKey),

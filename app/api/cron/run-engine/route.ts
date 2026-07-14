@@ -19,6 +19,7 @@ import {
   type PipelineClients,
 } from "@/jobs/run-engine";
 import { scrapePractice } from "@/src/enrich/scrape";
+import { dnsLookupAll } from "@/src/enrich/url-guard";
 import { anthropicExtractClient } from "@/src/enrich/extract";
 import { createFullEnrichClient } from "@/src/enrich/fullenrich-client";
 import { createBetterContactClient } from "@/src/enrich/bettercontact-client";
@@ -141,7 +142,7 @@ const anthropicApiKey =
     const pipelineClients: PipelineClients | undefined =
       anthropicApiKey && fullenrichKey && bettercontactKey
         ? {
-            scrape: (url: string) => scrapePractice({ fetch }, url),
+            scrape: (url: string) => scrapePractice({ fetch, lookup: dnsLookupAll }, url),
             extract: anthropicExtractClient(anthropicApiKey),
             fullenrichPeople: createFullEnrichClient({ apiKey: fullenrichKey }),
             fullenrichEmail: createFullEnrichClient({ apiKey: fullenrichKey }),
