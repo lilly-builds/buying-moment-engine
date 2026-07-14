@@ -160,6 +160,17 @@ function HubSpotCard({ status }: { status: HubSpotStatus }) {
               Track prospects that GTM Maestro finds in your HubSpot. Send
               AI-customized outreach emails.
             </p>
+
+            {/* Set the send requirement UP FRONT so a plan-level block reads as a
+                HubSpot limit, not an app error. Sending enrolls contacts into a
+                HubSpot Sequence, a paid feature: without an active seat on a plan
+                that includes Sequences, HubSpot rejects the enroll ("Sales
+                Subscription Status is not OK"). See docs/hubspot-send-setup.md. */}
+            <p className="font-sans text-sm text-ink-muted">
+              Sending needs a HubSpot plan that includes Sequences (Sales Hub or
+              Service Hub, Professional or higher) with a paid seat on the sending
+              inbox. Without it, HubSpot blocks the send.
+            </p>
           </div>
         </div>
 

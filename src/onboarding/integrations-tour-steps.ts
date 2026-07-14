@@ -278,8 +278,13 @@ export const REVOPS_TOUR_STEPS: RevopsTourStep[] = [
     ],
     detail: [
       {
-        text: "It sends every email from your team's own inbox, and tracks each lead, meeting, and deal in your CRM.",
+        text: "It sends every email from your team's own inbox, and tracks each lead, meeting, and deal in your CRM. ",
       },
+      {
+        text: "Sending needs a HubSpot plan that includes Sequences (Sales Hub or Service Hub, Professional or higher)",
+        bold: true,
+      },
+      { text: " with a paid seat on the sending inbox." },
     ],
     chip: "Go live",
   },
