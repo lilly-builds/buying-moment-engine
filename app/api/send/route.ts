@@ -108,9 +108,17 @@ export async function POST(request: NextRequest) {
       cta: body.cta,
       encryptionKey,
       sandbox,
+      // WHO is sending, from the auth guard — stamped on the shared send record so the
+      // dashboard shows "Sent by X" and a concurrent 2nd sender is told who beat them.
+      sentBy: auth.email,
     });
     if (!outcome.ok) {
-      return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+      // `alreadySent` tells the client this 409 is a claim-conflict (lock the button),
+      // not the other 409 (no connection — a normal retryable error).
+      return NextResponse.json(
+        { error: outcome.error, alreadySent: outcome.alreadySent ?? false },
+        { status: outcome.status },
+      );
     }
     return NextResponse.json({
       ok: true,
@@ -118,6 +126,8 @@ export async function POST(request: NextRequest) {
       touchNumber: outcome.touchNumber,
       touchesSent: outcome.touchesSent,
       enrolled: outcome.enrolled,
+      sentBy: outcome.sentBy,
+      sentAt: outcome.sentAt,
     });
   } catch {
     // Never echo the underlying error — HubSpot validation bodies can quote contact

@@ -78,6 +78,13 @@
       "when": 1783730000000,
       "tag": "0010_coverage_first_enrichment",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783977726011,
+      "tag": "0011_striped_iron_monger",
+      "breakpoints": true
     }
   ]
 }

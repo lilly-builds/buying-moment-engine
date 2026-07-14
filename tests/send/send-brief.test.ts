@@ -6,6 +6,7 @@ import { encrypt } from "@/src/crm/token-crypto";
 import { HUBSPOT_SEND_SCOPE } from "@/src/crm/hubspot-oauth";
 import type { OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
 import { sendBriefEmail } from "@/src/send/send-brief";
+import { claimSend, getSendState } from "@/db/outreach";
 import type { SandboxConfig } from "@/src/send/guard";
 import {
   CUSTOM_BODY_PROPERTY,
@@ -31,6 +32,8 @@ const SANDBOX: SandboxConfig = { allowedEmails: [SANDBOX_EMAIL] };
 // The per-connection send identity the seeded connection carries.
 const SEQUENCE_ID = "712515259";
 const SENDER_USER_ID = "95142122";
+// The AE whose session drives the send — stamped on the shared outreach_sends claim.
+const SENT_BY = "ae@opterra.test";
 
 function oauthDeps(fetchImpl: typeof fetch): OAuthHttpDeps {
   return {
@@ -70,6 +73,29 @@ function sendMock(): MockFetch {
     if (method === "POST" && path.endsWith("/enrollments")) {
       return { status: 201, body: { enrollmentId: "enr_1" } };
     }
+    return { status: 404, body: { path } };
+  });
+}
+
+/** A send mock whose CRM push succeeds but whose enrollment step returns `body` as a 400. */
+function enrollFailsMock(body: unknown): MockFetch {
+  return mockFetch((call) => {
+    const { method, path } = call;
+    if (method === "POST" && path === "/oauth/v1/token") {
+      return { body: { access_token: "at_fresh", refresh_token: "rt_2", expires_in: 1800 } };
+    }
+    if (method === "POST" && path.endsWith("/objects/companies")) return { body: { id: "co_1" } };
+    if (method === "POST" && path === "/crm/v3/objects/contacts/batch/upsert") {
+      return { body: { results: [{ id: "ct_1", new: true }] } };
+    }
+    if (method === "PUT" && /\/crm\/v4\/objects\/.+\/associations\/default\//.test(path)) {
+      return { status: 200, body: {} };
+    }
+    if (method === "POST" && path.endsWith("/objects/deals")) return { body: { id: "dl_1" } };
+    if (method === "PATCH" && path.startsWith("/crm/v3/objects/contacts/")) {
+      return { body: { id: "ct_1" } };
+    }
+    if (method === "POST" && path.endsWith("/enrollments")) return { status: 400, body };
     return { status: 404, body: { path } };
   });
 }
@@ -147,6 +173,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches,
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
 
     expect(out).toMatchObject({ ok: true, enrolled: true, touchNumber: 1, touchesSent: 3 });
@@ -183,6 +210,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "Just touch 1", body: "Hi Lilly." }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
 
     expect(out).toMatchObject({ ok: true, enrolled: true, touchesSent: 1 });
@@ -208,6 +236,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
 
     expect(out).toMatchObject({ ok: false, status: 403 });
@@ -224,6 +253,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
 
     expect(out).toMatchObject({ ok: false, status: 403 });
@@ -240,6 +270,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
     expect(out).toMatchObject({ ok: false, status: 422 });
   });
@@ -253,8 +284,11 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
+    // A 409, but NOT a claim-conflict — the UI must treat it as retryable, not "Sent".
     expect(out).toMatchObject({ ok: false, status: 409 });
+    if (!out.ok) expect(out.alreadySent).toBeFalsy();
   });
 
   it("403s when the connection lacks the Sequences send scope", async () => {
@@ -267,6 +301,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
     expect(out).toMatchObject({ ok: false, status: 403 });
     expect(calls).toHaveLength(0); // scope check is before any HubSpot call
@@ -288,6 +323,7 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
     expect(out).toMatchObject({
       ok: false,
@@ -313,10 +349,147 @@ describe("sendBriefEmail (U11 send orchestrator)", () => {
       touches: [{ touchNumber: 1, subject: "s", body: "b" }],
       encryptionKey: KEY,
       sandbox: SANDBOX,
+      sentBy: SENT_BY,
     });
     expect(out).toMatchObject({ ok: true, enrolled: true });
     const enroll = calls.find((c) => c.path.endsWith("/enrollments"));
     expect(enroll?.query.get("userId")).toBe("77");
     expect(enroll?.body).toMatchObject({ sequenceId: "999000111" });
+  });
+
+  it("records the shared 'sent' state (who + when) after a successful send", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED);
+    const { fetch: f } = sendMock();
+
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      encryptionKey: KEY,
+      sandbox: SANDBOX,
+      sentBy: SENT_BY,
+    });
+    expect(out).toMatchObject({ ok: true, sentBy: SENT_BY });
+    if (out.ok) expect(typeof out.sentAt).toBe("string");
+
+    // The shared record every AE's Send button reads is now 'sent', stamped with the AE.
+    const state = await getSendState(tdb.db, practiceId);
+    expect(state).toMatchObject({ status: "sent", sentBy: SENT_BY });
+    expect(state?.sentAt).toBeInstanceOf(Date);
+  });
+
+  it("turns away a concurrent 2nd send with 409 — BEFORE any HubSpot call (shared workspace)", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED);
+
+    // A first AE has already claimed this lead (mid-send or done).
+    const first = await claimSend(tdb.db, practiceId, "first@opterra.test");
+    expect(first.ok).toBe(true);
+
+    const { fetch: f, calls } = sendMock();
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      encryptionKey: KEY,
+      sandbox: SANDBOX,
+      sentBy: SENT_BY,
+    });
+    expect(out).toMatchObject({ ok: false, status: 409, alreadySent: true });
+    if (!out.ok) expect(out.error).toContain("first@opterra.test");
+    expect(calls).toHaveLength(0); // the loser never reached HubSpot — no duplicate enroll
+  });
+
+  it("releases the claim when the send FAILS, so the lead can be retried", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED);
+
+    // A mock whose push succeeds but whose enrollment step 400s.
+    const failing = mockFetch((call) => {
+      const { method, path } = call;
+      if (method === "POST" && path === "/oauth/v1/token") {
+        return { body: { access_token: "at_fresh", refresh_token: "rt_2", expires_in: 1800 } };
+      }
+      if (method === "POST" && path.endsWith("/objects/companies")) return { body: { id: "co_1" } };
+      if (method === "POST" && path === "/crm/v3/objects/contacts/batch/upsert") {
+        return { body: { results: [{ id: "ct_1", new: true }] } };
+      }
+      if (method === "PUT" && /\/crm\/v4\/objects\/.+\/associations\/default\//.test(path)) {
+        return { status: 200, body: {} };
+      }
+      if (method === "POST" && path.endsWith("/objects/deals")) return { body: { id: "dl_1" } };
+      if (method === "PATCH" && path.startsWith("/crm/v3/objects/contacts/")) {
+        return { body: { id: "ct_1" } };
+      }
+      if (method === "POST" && path.endsWith("/enrollments")) {
+        return { status: 400, body: { category: "VALIDATION_ERROR" } };
+      }
+      return { status: 404, body: { path } };
+    });
+
+    await expect(
+      sendBriefEmail(tdb.db, oauthDeps(failing.fetch), {
+        practiceId,
+        touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+        encryptionKey: KEY,
+        sandbox: SANDBOX,
+        sentBy: SENT_BY,
+      }),
+    ).rejects.toBeTruthy();
+
+    // The failed send left NO stuck claim — the lead is free again, so a retry can
+    // re-claim it (vs. a lead permanently stuck "sending" after one bad send).
+    expect(await getSendState(tdb.db, practiceId)).toBeNull();
+    const reclaim = await claimSend(tdb.db, practiceId, SENT_BY);
+    expect(reclaim.ok).toBe(true);
+  });
+
+  it("surfaces a fixable message and releases the claim when the Sales seat is inactive", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED);
+    // HubSpot's real rejection when the sending user has no active Sales Hub seat.
+    const { fetch: f } = enrollFailsMock({
+      status: "error",
+      message: "Sales Subscription Status is not OK",
+      errorType: "SequenceError.OTHER_SEND_REJECTED",
+    });
+
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      encryptionKey: KEY,
+      sandbox: SANDBOX,
+      sentBy: SENT_BY,
+    });
+
+    // A clear, user-fixable message (not the generic 502), and NOT a lock (alreadySent).
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(422);
+      expect(out.error).toMatch(/Sales Hub/i);
+      expect(out.alreadySent).toBeFalsy();
+    }
+    // Nothing shipped: the claim is released so the AE can retry after fixing HubSpot.
+    expect(await getSendState(tdb.db, practiceId)).toBeNull();
+  });
+
+  it("surfaces a fixable message when the sending inbox is not connected", async () => {
+    const practiceId = await seedPractice(tdb, { geoKey: "demo:sandbox-lilly", email: SANDBOX_EMAIL });
+    await seedConnection(tdb, GRANTED);
+    const { fetch: f } = enrollFailsMock({ category: "PUBLIC_ENROLL_NO_CONNECTED_EMAILS" });
+
+    const out = await sendBriefEmail(tdb.db, oauthDeps(f), {
+      practiceId,
+      touches: [{ touchNumber: 1, subject: "s", body: "b" }],
+      encryptionKey: KEY,
+      sandbox: SANDBOX,
+      sentBy: SENT_BY,
+    });
+
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.status).toBe(422);
+      expect(out.error).toMatch(/inbox/i);
+    }
+    expect(await getSendState(tdb.db, practiceId)).toBeNull();
   });
 });
