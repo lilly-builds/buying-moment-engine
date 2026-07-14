@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import type { Database } from "@/db/types";
 import { contacts, practices } from "@/db/schema";
 import { getActiveConnection } from "@/db/crm";
+import { claimSend, confirmSend, releaseSend } from "@/db/outreach";
 import { practiceSignalRows } from "@/db/queries";
 import type { LeadInput } from "@/src/crm/adapter";
 import { createHubSpotAdapter } from "@/src/crm/hubspot";
@@ -67,6 +68,12 @@ export interface SendBriefEmailArgs {
   /** The D9 sandbox allowlist (env — the firewall). The sequence + sender identity
    *  are NOT passed in; they're read from the resolved connection, server-side. */
   sandbox: SandboxConfig;
+  /**
+   * WHO is sending — the allowlisted session email from the route's auth guard. Stamped
+   * on the shared `outreach_sends` claim so the dashboard can show "Sent by X" and so a
+   * concurrent second sender is told who beat them. Server-supplied, never from the body.
+   */
+  sentBy: string;
   provider?: string;
 }
 
@@ -78,11 +85,18 @@ export interface SendBriefEmailSuccess {
   /** How many touches' copy was shipped in the enroll. */
   touchesSent: number;
   enrolled: boolean;
+  /** WHO sent it — echoes back the session email for the "Sent by X" label. */
+  sentBy: string;
+  /** When the send was confirmed (ISO) — the "on <date>" in the shared Sent label. */
+  sentAt: string;
 }
 
 export type SendBriefEmailResult =
   | SendBriefEmailSuccess
-  | { ok: false; status: number; error: string };
+  // `alreadySent` marks the ONE 409 that means "another AE already claimed/sent this
+  // lead" — distinct from the other 409 ("No HubSpot connection"). The UI locks the
+  // Send button only on the former; the latter stays a normal retryable error.
+  | { ok: false; status: number; error: string; alreadySent?: boolean };
 
 interface ResolvedRecipient {
   email: string;
@@ -223,55 +237,100 @@ export async function sendBriefEmail(
     };
   }
 
+  // ── CLAIM the send BEFORE any HubSpot mutation (shared-workspace concurrency
+  //    guard). All the checks above are read-only, so it is safe to run them twice on
+  //    two concurrent clicks; the enroll is NOT — a second one overwrites the draft
+  //    then 400s CONTACT_ALREADY_ENROLLED. The atomic claim lets exactly ONE click
+  //    reach HubSpot; the loser returns here with who holds it, before touching a
+  //    thing. Placed after the config gates so an unconfigured send leaves no claim. ──
+  const claim = await claimSend(db, args.practiceId, args.sentBy);
+  if (!claim.ok) {
+    const who = claim.existing.sentBy;
+    return {
+      ok: false,
+      status: 409,
+      error:
+        claim.existing.status === "sent"
+          ? `Already sent by ${who}.`
+          : `${who} is sending this right now.`,
+      alreadySent: true,
+    };
+  }
+
   const getAccessToken = createDbTokenProvider(db, deps, {
     portalId: active.connection.portalId, // server-resolved, never client-supplied
     encryptionKey: args.encryptionKey,
     provider,
   });
 
-  // Ensure the contact exists in HubSpot (idempotent) and get its provider id.
-  const pushed = await pushPracticeLead(
-    db,
-    createHubSpotAdapter({ fetch: deps.fetch, getAccessToken }),
-    { practiceId: args.practiceId, lead: resolved.lead, provider },
-  );
+  let result;
+  try {
+    // Ensure the contact exists in HubSpot (idempotent) and get its provider id.
+    const pushed = await pushPracticeLead(
+      db,
+      createHubSpotAdapter({ fetch: deps.fetch, getAccessToken }),
+      { practiceId: args.practiceId, lead: resolved.lead, provider },
+    );
 
-  // Enroll: writes each touch's edited subject + body into its property pair and
-  // sends the token steps through the rep's connected inbox. The sender re-runs the
-  // D9 firewall with the real contactId (belt and suspenders).
-  const sender = createHubSpotSender({
-    fetch: deps.fetch,
-    getAccessToken,
-    baseUrl: deps.baseUrl,
-    sequenceId: sendConfig.sequenceId,
-    senderEmail: sendConfig.senderEmail,
-    userId: sendConfig.userId,
-    sandbox: args.sandbox,
-    // The custom properties are provisioned at CONNECT (`completeHubSpotConnect` →
-    // `ensureSendProperties`, now that `crm.schemas.contacts.write` is a required
-    // scope), so the send path only writes + enrolls. The sender's default would
-    // provision on first send; false keeps the hot path to two calls (PATCH + enroll).
-    provisionProperty: false,
-  });
+    // Enroll: writes each touch's edited subject + body into its property pair and
+    // sends the token steps through the rep's connected inbox. The sender re-runs the
+    // D9 firewall with the real contactId (belt and suspenders).
+    const sender = createHubSpotSender({
+      fetch: deps.fetch,
+      getAccessToken,
+      baseUrl: deps.baseUrl,
+      sequenceId: sendConfig.sequenceId,
+      senderEmail: sendConfig.senderEmail,
+      userId: sendConfig.userId,
+      sandbox: args.sandbox,
+      // The custom properties are provisioned at CONNECT (`completeHubSpotConnect` →
+      // `ensureSendProperties`, now that `crm.schemas.contacts.write` is a required
+      // scope), so the send path only writes + enrolls. The sender's default would
+      // provision on first send; false keeps the hot path to two calls (PATCH + enroll).
+      provisionProperty: false,
+    });
 
-  const recipient: Recipient = {
-    contactId: pushed.contactId,
-    email: resolved.email,
-    classification: resolved.classification,
-  };
-  // Launch the whole cadence in ONE enroll: each touch's copy lands in the property
-  // pair for its touchNumber, so the Sequence's step-N email renders touch N's own
-  // copy. The named CTA rides the touches (rendered as the sequence's link in the
-  // HubSpot template — see onboarding/hubspot-setup-handoff.md).
-  const result = await sender.sendSequence({
-    recipient,
-    touches: args.touches.map((t) => ({
-      touchNumber: t.touchNumber,
-      subject: t.subject,
-      body: t.body,
-      cta: args.cta ?? null,
-    })),
-  });
+    const recipient: Recipient = {
+      contactId: pushed.contactId,
+      email: resolved.email,
+      classification: resolved.classification,
+    };
+    // Launch the whole cadence in ONE enroll: each touch's copy lands in the property
+    // pair for its touchNumber, so the Sequence's step-N email renders touch N's own
+    // copy. The named CTA rides the touches (rendered as the sequence's link in the
+    // HubSpot template — see onboarding/hubspot-setup-handoff.md).
+    result = await sender.sendSequence({
+      recipient,
+      touches: args.touches.map((t) => ({
+        touchNumber: t.touchNumber,
+        subject: t.subject,
+        body: t.body,
+        cta: args.cta ?? null,
+      })),
+    });
+  } catch (err) {
+    // The send FAILED after we claimed it — release the claim so this lead can be
+    // retried and is never left falsely marked "sent". Re-throw so the route maps it
+    // to its 502 (release is best-effort cleanup, not a swallow of the real error).
+    await releaseSend(db, args.practiceId);
+    throw err;
+  }
+
+  // Send succeeded — flip the claim to `sent` so the shared button locks with "Sent by
+  // X" for everyone. The enrollment already shipped, so a failure of THIS audit write
+  // must NOT surface as a failed send — that would make the AE retry an email that went
+  // out. Deliberate suppression: log it loudly server-side and still return success. The
+  // row stays `sending` (still locked, so NO duplicate) until a later read reconciles —
+  // a rare, fail-safe edge (a post-enroll DB blip on one UPDATE).
+  const sentAt = new Date();
+  try {
+    await confirmSend(db, args.practiceId, sentAt);
+  } catch (err) {
+    console.error(
+      `[send] enrollment shipped but outreach_sends flip to 'sent' failed for practice ${args.practiceId} — row left 'sending' (still locked):`,
+      err,
+    );
+  }
 
   return {
     ok: true,
@@ -279,5 +338,7 @@ export async function sendBriefEmail(
     touchNumber: result.touchNumber,
     touchesSent: args.touches.length,
     enrolled: result.enrolled,
+    sentBy: args.sentBy,
+    sentAt: sentAt.toISOString(),
   };
 }

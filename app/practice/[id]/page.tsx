@@ -1,6 +1,7 @@
 import { getDb } from "@/db/client";
 import { getBrief } from "@/db/brief";
 import { getActiveConnection } from "@/db/crm";
+import { getSendState } from "@/db/outreach";
 import { hasSendScope } from "@/src/crm/hubspot-oauth";
 import { isSendInfraConfigured, readConnectionSendConfig } from "@/src/send/config";
 import { practiceSignalRows } from "@/db/queries";
@@ -8,7 +9,7 @@ import { renderBrief } from "@/src/brief/render";
 import type { SignalRow } from "@/src/brief/inputs";
 import { ButtonLink, Card, PageContainer, SectionHeader, TopNav } from "@/design/components";
 import { gradients } from "@/design/tokens";
-import { BriefView } from "../../brief-view";
+import { BriefView, type SentStateProp } from "../../brief-view";
 
 // Read the stored brief at request time — never at build time — so `next build` and a
 // keyless clone both succeed and the (designed) "no brief yet" state renders instead of
@@ -106,6 +107,25 @@ export default async function PracticeBriefPage({
     sendConnected = false;
   }
 
+  // The SHARED "Sent" state (U11 concurrency): if any AE has already launched outreach
+  // for this practice, the Send button reads "Sent by X" and is locked for EVERYONE, not
+  // just the sender's tab. Read server-side and passed as primitives (like `nowMs`) — the
+  // date is formatted here so the client island never re-formats a Date (no hydration TZ
+  // drift). Degrades to null (a live button) on any DB hiccup — same contract as above.
+  let sentState: SentStateProp | null = null;
+  try {
+    const state = await getSendState(getDb(), id);
+    if (state) {
+      sentState = {
+        status: state.status,
+        sentBy: state.sentBy,
+        sentAtLabel: state.sentAt ? formatSentAt(state.sentAt) : null,
+      };
+    }
+  } catch {
+    sentState = null;
+  }
+
   const rendered = renderBrief(result.brief, signalRows, now);
   return (
     <BriefView
@@ -113,8 +133,18 @@ export default async function PracticeBriefPage({
       nowMs={now.getTime()}
       practiceId={id}
       sendConnected={sendConnected}
+      sentState={sentState}
     />
   );
+}
+
+/** "Jul 13, 2026" — the friendly date on the shared "Sent by X on ..." label. */
+function formatSentAt(sentAt: Date): string {
+  return sentAt.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 /**

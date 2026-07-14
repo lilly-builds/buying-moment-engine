@@ -309,15 +309,75 @@ function WhoToContact({
   );
 }
 
+/**
+ * The SHARED "Sent" state for this practice, as render-safe primitives from the server
+ * (`app/practice/[id]/page.tsx`). Its presence is what locks the Send button for EVERY
+ * signed-in AE — not just the tab that sent — so the shared workspace can't double-send.
+ */
+export interface SentStateProp {
+  status: "sending" | "sent";
+  sentBy: string;
+  /** Server-formatted date, e.g. "Jul 13, 2026"; null while still `sending`. */
+  sentAtLabel: string | null;
+}
+
+/**
+ * The button's opening state, derived from the shared send record. Already-sent → the
+ * button starts locked and labelled with who/when; mid-send by another AE → locked too;
+ * never sent → the normal idle button.
+ */
+function initialLaunch(sentState: SentStateProp | null | undefined): {
+  status: SendStatus;
+  message: string | null;
+} {
+  if (!sentState) return { status: "idle", message: null };
+  if (sentState.status === "sent") {
+    return {
+      status: "sent",
+      message: `Sent by ${sentState.sentBy}${
+        sentState.sentAtLabel ? ` on ${sentState.sentAtLabel}` : ""
+      }.`,
+    };
+  }
+  // Claimed by someone but not yet confirmed — lock it so a 2nd AE can't pile on.
+  return {
+    status: "sending",
+    message: `${sentState.sentBy} is sending this right now.`,
+  };
+}
+
+/** The confirmation line after a successful send — who sent it and when, D9-safe. */
+function sentSummary(sentBy?: string, sentAtIso?: string): string {
+  const who = sentBy ? ` by ${sentBy}` : "";
+  const label = sentAtIso ? formatSentDate(sentAtIso) : "";
+  const when = label ? ` on ${label}` : "";
+  return `Sent${who}${when}. The first email is on its way; the follow-ups send automatically through the connected inbox.`;
+}
+
+/** "Jul 13, 2026" from a send-response ISO string. Formatted client-side — this runs
+ *  only after a click, never during initial render, so there's no hydration concern. */
+function formatSentDate(sentAtIso: string): string {
+  const d = new Date(sentAtIso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+}
+
 /** ⚡ Outreach mode — the message that goes out, full width. */
 function OutreachMode({
   brief,
   practiceId,
   sendConnected,
+  sentState,
 }: {
   brief: RenderedBrief;
   practiceId: string;
   sendConnected: boolean;
+  sentState?: SentStateProp | null;
 }) {
   const { factual, voice } = brief;
   const contact = factual.contact;
@@ -339,10 +399,11 @@ function OutreachMode({
   );
   // ONE launch state for the whole sequence — a contact enrolls once, so there is a
   // single button + status, never one per touch (a 2nd enroll 400s ALREADY_ENROLLED).
-  const [launch, setLaunch] = useState<{ status: SendStatus; message: string | null }>({
-    status: "idle",
-    message: null,
-  });
+  // Seeded from the SHARED send record so an already-sent lead opens locked for everyone,
+  // not just the tab that sent it (U11 shared-workspace guard).
+  const [launch, setLaunch] = useState<{ status: SendStatus; message: string | null }>(
+    () => initialLaunch(sentState),
+  );
 
   function updateTouch(touchNumber: number, patch: Partial<EditableTouch>) {
     setTouches((prev) =>
@@ -390,12 +451,23 @@ function OutreachMode({
           cta: voice.sequence.namedCta,
         }),
       });
-      const data: { error?: string } = await res.json().catch(() => ({}));
+      const data: {
+        error?: string;
+        sentBy?: string;
+        sentAt?: string;
+        alreadySent?: boolean;
+      } = await res.json().catch(() => ({}));
       if (res.ok) {
+        setLaunch({ status: "sent", message: sentSummary(data.sentBy, data.sentAt) });
+      } else if (data.alreadySent) {
+        // Another AE claimed or sent this lead first (shared workspace). Not an error
+        // the sender can fix — the outreach already went out — so LOCK the button with
+        // the honest "already sent by X" message instead of a red failure. Keyed on the
+        // server's `alreadySent` flag, NOT the bare 409 (a no-connection 409 must stay a
+        // retryable error, not a false "Sent").
         setLaunch({
           status: "sent",
-          message:
-            "Sent. The first email is on its way, and the follow-ups will send automatically through your connected inbox.",
+          message: data.error ?? "This lead has already been sent.",
         });
       } else {
         setLaunch({ status: "error", message: data.error ?? "Launch failed." });
@@ -682,11 +754,13 @@ export function BriefView({
   nowMs,
   practiceId,
   sendConnected,
+  sentState,
 }: {
   brief: RenderedBrief;
   nowMs: number;
   practiceId: string;
   sendConnected: boolean;
+  sentState?: SentStateProp | null;
 }) {
   const [mode, setMode] = useState<BriefMode>("outreach");
   const { factual } = brief;
@@ -769,7 +843,12 @@ export function BriefView({
           {/* Who to contact — full-width strip below the hero, shown in both modes. */}
           <WhoToContact contact={factual.contact} />
           {mode === "outreach" ? (
-            <OutreachMode brief={brief} practiceId={practiceId} sendConnected={sendConnected} />
+            <OutreachMode
+              brief={brief}
+              practiceId={practiceId}
+              sendConnected={sendConnected}
+              sentState={sentState}
+            />
           ) : (
             <PrepMode brief={brief} nowMs={nowMs} />
           )}
