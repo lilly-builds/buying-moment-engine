@@ -347,7 +347,7 @@ export async function sendBriefEmail(
     // replace `err` and the AE would see the wrong cause). A claim left `sending` by a
     // failed release still self-heals via claimSend's stale-claim TTL on a later attempt.
     try {
-      await releaseSend(db, args.practiceId);
+      await releaseSend(db, claim.id);
     } catch (releaseErr) {
       console.error(
         `[send] releaseSend failed for practice ${args.practiceId} — claim left 'sending' (auto-recovers via claimSend's stale-claim TTL):`,
@@ -374,7 +374,7 @@ export async function sendBriefEmail(
   // killed before this line).
   const sentAt = new Date();
   try {
-    const confirmed = await confirmSend(db, args.practiceId, sentAt);
+    const confirmed = await confirmSend(db, claim.id, sentAt);
     if (!confirmed) {
       // No row updated — the claim vanished between enroll and confirm (a stale-claim
       // steal, or a manual release). The email shipped, so still succeed, but log it:
