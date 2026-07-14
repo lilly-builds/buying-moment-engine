@@ -10,9 +10,12 @@
 - High: 1
 - Medium: 2
 - Low: 1
-- Last updated: 2026-07-14 by Thread 3 (fix pass)
-- **Resolution (Thread 3):** E2E-02, E2E-03, E2E-04 FIXED. E2E-01 FLAGGED for a product decision
-  (the recommended fix would breach the D9 honesty guarantee; see the finding). Nothing OPEN.
+- Last updated: 2026-07-14 (E2E-01 closed after a product decision by Lilly)
+- **Resolution:** E2E-02, E2E-03, E2E-04 FIXED. E2E-01 FIXED 2026-07-14 via **Option 1** (Lilly's
+  call): the empty scoreboard is correct because no real measured data flows through the system yet,
+  so the board stays honestly demo-excluded (no fabricated ROI shown as measured); the misleading
+  seed docstring is corrected and the board now shows an honest "no measured outcomes yet" note
+  instead of reading as broken. Nothing OPEN.
 
 ### How this pass was run (so thread 3 can reproduce)
 - **App:** `next dev` (Next 16.2.10, Turbopack) on **:3100** (`env PORT=3100 pnpm dev` — the
@@ -94,8 +97,8 @@ Playwright script; no flow is marked PASS on inspection alone.
   Query used (re-runnable against `DATABASE_URL`): join `roi_events`→`practices`, split by `geo_key LIKE 'demo:%'`.
 - **What is wrong:** The scoreboard is one of the three product pillars (Req #3) and has its own README shot, but after the exact documented populate step it shows a dead, all-zero dashboard. The feed *should* exclude `demo:` practices (they aren't real prospects), but the scoreboard applies the **same** filter to the funnel/cost/feedback tables — so the only data that exists (the seed's) is filtered straight back out. There is no other documented path that fills it. An EliseAI reviewer opening `/scoreboard` sees zeros everywhere.
 - **Recommended fix:** Make the seed's funnel reach the scoreboard. Cleanest: **drop `excludeDemoPractices` from the four scoreboard read helpers** (`roiEventRows` / `costByVertical` / `feedbackRows` / `cycleRows`) — the scoreboard is a demo-impact surface, and the seed exists precisely to populate it. (Alternative: attach the seed's funnel/cost/feedback/crm rows to non-`demo:` practices — but that changes what "demo" means and risks polluting the feed, so the query change is safer.) Add a test that a seeded DB yields non-zero Deals/Meetings on `/scoreboard`.
-- **Status:** FLAGGED FOR PRODUCT DECISION (fix not auto-applied)
-- **Resolution:** I deliberately did **not** apply the recommended fix, because it collides with a
+- **Status:** FIXED (Option 1 — product decision by Lilly, 2026-07-14)
+- **Resolution (original flag):** I deliberately did **not** apply the recommended fix, because it collides with a
   deliberate honesty guarantee. `db/queries.ts:38-71` documents that `excludeDemoPractices` is the
   single source of truth keeping fabricated seed data out of *both* the feed and the scoreboard, to
   honor **D9** ("fabricated seed ROI rendered as real would violate D9"). Dropping it from the
@@ -111,6 +114,30 @@ Playwright script; no flow is marked PASS on inspection alone.
   3. Wire real outcome ingestion (COV-11) so the board fills with genuine measured data.
   Surfaced for a human decision; not auto-actioned, per the rule that honesty-affecting product calls
   belong to a person.
+- **Resolution (fix pass, 2026-07-14 — after Lilly's product decision):** Decision = **Option 1**
+  (keep the scoreboard honestly demo-excluded; never render seeded ROI as measured). Lilly confirmed
+  the empty board is correct precisely because no real measured data flows through the system yet.
+  The real inconsistency (the seed's docstring claiming it fills the scoreboard while the queries
+  exclude what it writes) is fixed, and the empty board no longer reads as broken. Implemented
+  test-first (systematic-debugging → TDD → verification-before-completion):
+  1. **Corrected the misleading seed docstring** (`db/seed-demo.ts`): it no longer claims the demo
+     funnel populates the live scoreboard. It now states the demo rows are excluded
+     (`excludeDemoPractices`, D9) and the funnel exists for the feed/brief demo and for
+     `tests/scoreboard/plumbing.test.ts` (which relabels it as real to exercise the aggregation math).
+  2. **Honest empty state on the board** (`app/scoreboard-view.tsx` + `app/scoreboard/data.ts`): added
+     `hasMeasuredData` to `ScoreboardData` (computed as `inputs.events.length > 0`) and a new exported
+     `ScoreboardEmptyNote` ("No measured outcomes yet ... the board reads zero by design") rendered
+     when `!hasMeasuredData`. An empty board now reads as intentional, not broken, and no seeded
+     number is ever shown as measured. The populated styleguide fixture (`demoScoreboard()`) sets
+     `hasMeasuredData: true`, so it never shows the note.
+  - **Verification (fresh):** red→green confirmed (assertions failed with `undefined` before the
+     field/component existed, pass after). `tests/scoreboard/plumbing.test.ts` proves `hasMeasuredData`
+     is false when demo-excluded and false on an empty DB, and true for a real cohort (through the real
+     PGlite query layer). `tests/ui/scoreboard-empty-state.test.tsx` proves the note renders and the
+     demo fixture flag is true. Run: **15 passed** across those two files plus the E2E-02/03 regression
+     (no regression). `pnpm typecheck`: no TS errors. `eslint` on all changed files: exit 0. Not
+     re-driven in a live browser this pass; the data path is exercised end-to-end through the real
+     query layer and the view wiring is a single `!hasMeasuredData` conditional.
 
 ---
 

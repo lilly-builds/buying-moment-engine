@@ -48,13 +48,19 @@ deferred), COV-15 (coverage measurement + KPIs landed; dashboard/quarantine-lane
 
 ## Live E2E (2-live-e2e.md): 4 findings
 
-**Fixed (3):** E2E-02 (no "Measured" badge over a pending proof), E2E-03 (honest empty state on the
-incumbent-tooling card), E2E-04 (route-name drift noted in the spec).
+**Fixed (4):** E2E-02 (no "Measured" badge over a pending proof), E2E-03 (honest empty state on the
+incumbent-tooling card), E2E-04 (route-name drift noted in the spec), and E2E-01 (below).
 
-**Flagged for a product decision (1):** E2E-01. The recommended fix (drop `excludeDemoPractices` from
-the scoreboard) was **not** auto-applied: it would render fabricated seed numbers as measured ROI,
-the exact D9 honesty violation the code deliberately prevents, on a product whose pitch is honesty.
-Honest options are recorded in the finding for a human to choose.
+**E2E-01 — resolved 2026-07-14 after a product decision (Lilly chose Option 1).** The recommended
+fix (drop `excludeDemoPractices` from the scoreboard) was correctly **not** applied: it would render
+fabricated seed numbers as measured ROI, the exact D9 honesty violation the code deliberately
+prevents. Lilly confirmed the empty board is correct because no real measured data flows through the
+system yet. So the board stays honestly demo-excluded, and instead we fixed the real inconsistency,
+test-first: (1) corrected the misleading seed docstring in `db/seed-demo.ts` (it no longer claims the
+demo funnel fills the scoreboard), and (2) added an honest "no measured outcomes yet" note
+(`ScoreboardEmptyNote` + a `hasMeasuredData` flag) so an empty board reads as intentional, not broken,
+without ever showing seeded numbers as measured. Verified: 15 tests passed (new + E2E-02/03
+regression), typecheck clean, eslint exit 0 on all changed files.
 
 ## What needs you (secrets / services / product calls)
 
@@ -62,5 +68,5 @@ These are the deferred halves, gated on a human decision per the session ground 
 - **Secrets/env:** Sentry DSN (COV-06), the Supabase service-role key for the authed Playwright smoke
   and its CI job (COV-01), live API keys for contract tests and the AI CI eval (COV-14, COV-10).
 - **Services:** a mail-capture tool (COV-12), an alert channel for the health probe (COV-06).
-- **Product:** whether to build HubSpot webhook + feedback persistence (COV-11), and how to resolve
-  the scoreboard demo-data honesty question (E2E-01).
+- **Product:** whether to build HubSpot webhook + feedback persistence (COV-11). The scoreboard
+  demo-data honesty question (E2E-01) is now decided (Option 1) and closed.

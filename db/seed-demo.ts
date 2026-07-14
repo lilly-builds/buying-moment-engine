@@ -33,8 +33,14 @@ import { demoBrief } from "@/app/styleguide/demo-fixtures";
  * What it populates: one fully-briefed hero (`Cedarline`, reusing the approved `demoBrief`
  * so the real brief route renders pixel-identical to `/styleguide/brief`), five more
  * fresh-signal practices for the feed, and a modest, honestly-sized funnel of
- * `roi_events` / `cost_events` / `feedback` / `crm_links` for the scoreboard. Every number
- * the scoreboard shows is aggregated from these rows — nothing is hardcoded in the view.
+ * `roi_events` / `cost_events` / `feedback` / `crm_links`.
+ *
+ * This funnel does NOT populate the live ROI scoreboard (E2E-01). Every seeded practice
+ * carries a `demo:` geo key, and the scoreboard read helpers exclude those keys
+ * (`excludeDemoPractices` in `db/queries.ts`), so fabricated ROI never renders as
+ * measured (D9). The live board stays honestly all-zero until real outcomes flow through.
+ * The funnel exists to demo the feed + brief, and to let `tests/scoreboard/plumbing.test.ts`
+ * relabel it as real and exercise the aggregation math against data the board counts.
  */
 
 const DAY = 24 * 60 * 60 * 1000;

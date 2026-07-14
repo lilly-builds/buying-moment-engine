@@ -528,5 +528,7 @@ export function demoScoreboard(): ScoreboardData {
       buyingMoment: { meetings: 322, deals: 89 },
       cold: { meetings: 18, deals: 3 },
     },
+    // This fixture IS a populated demo board, so it never shows the honest empty note.
+    hasMeasuredData: true,
   };
 }

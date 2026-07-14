@@ -91,6 +91,13 @@ export interface ScoreboardData {
   scopes: Record<string, ScopeData>;
   verticals: VerticalRow[];
   bigTest: BigTest;
+  /**
+   * True once the tool has measured a real outcome (E2E-01). False on a keyless clone,
+   * an empty DB, or a live system with no real deals yet — when it's false the board is
+   * honestly all-zero and the view shows `<ScoreboardEmptyNote>` so the zeros read as
+   * intentional, never as a broken dashboard (and seeded ROI is never dropped in to fake it).
+   */
+  hasMeasuredData: boolean;
 }
 
 type Loop = "tool" | "gtm";
@@ -147,6 +154,32 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className="font-sans text-sm text-ink-muted">{children}</span>;
 }
 
+/**
+ * The honest empty state (E2E-01). The live board excludes seeded demo rows (D9), so a
+ * real system with no measured outcomes yet reads all-zero. This says why, so the zeros
+ * read as intentional rather than as a broken dashboard, and it never dresses the board
+ * up with fabricated numbers to look busier.
+ */
+export function ScoreboardEmptyNote() {
+  return (
+    <Card variant="elevated" padding="lg">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <SectionHeader title="No measured outcomes yet" size="h3" as="h2" />
+          <Badge tone="neutral" size="sm">
+            Measured only
+          </Badge>
+        </div>
+        <p className="max-w-2xl font-sans text-sm text-ink-muted">
+          Every number below is measured from live tool activity, never seeded or
+          projected. Until real meetings and deals flow through, the board reads zero by
+          design. That is the honest state, not a broken dashboard.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
 export function ScoreboardView({ data }: { data: ScoreboardData }) {
   const [scope, setScope] = useState<FeedFilterValue>("all");
   const active = data.scopes[scope] ?? data.scopes.all;
@@ -181,6 +214,9 @@ export function ScoreboardView({ data }: { data: ScoreboardData }) {
       <main className="flex flex-1 flex-col">
         <PageContainer className="pb-12 pt-6">
           <div className="flex flex-col gap-6">
+            {/* E2E-01: when nothing has been measured yet, say so up front so the
+                all-zero board below reads as honest, not broken. */}
+            {!data.hasMeasuredData && <ScoreboardEmptyNote />}
             {/* ── The two lagging outcomes ─────────────────────────────── */}
             {/* `roi-scoreboard` = the RevOps tour's spotlight for its ROI-preview step. */}
             <div data-tour="roi-scoreboard" className="grid gap-6 md:grid-cols-2">
