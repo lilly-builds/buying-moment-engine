@@ -84,8 +84,24 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add a `build` job (`pnpm build`) as a required check. Add `@vitest/coverage-v8` + a `coverage.thresholds` floor in `vitest.config.ts` so the runner exits non-zero below the floor (never scrape stdout — `ci-cd-integration` Core Principle 6); wire coverage-as-ratchet per `coverage-analysis`. Add `concurrency` + `cancel-in-progress`.
 - **qa-skill that closes it:** `ci-cd-integration` (+ `coverage-analysis`)
 - **Effort:** S
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED
+- **Resolution:** `.github/workflows/ci.yml` now runs: typecheck → lint → **test:coverage** →
+  **build**, plus a workflow-level `concurrency` (cancel-in-progress). Two gaps closed:
+  - **Build gate:** added a `Build` step (`pnpm build`) so a change that typechecks/lints/tests but
+    breaks `next build` fails CI instead of only failing later on Vercel. Verified `pnpm build` ✓
+    (20/20 pages).
+  - **Coverage gate:** installed `@vitest/coverage-v8`, added a scoped `coverage` block +
+    `thresholds` in `vitest.config.ts`, and a `test:coverage` script wired into CI. Measured
+    baseline (business logic `src`/`db`/`jobs`): **lines 87.1% · statements 85.0% · functions 86.6%
+    · branches 77.0%**; floors set just under (85/83/84/74) as a ratchet. Proven the gate exits
+    non-zero below floor (not a stdout scrape):
+    ```
+    $ vitest run <one file> --coverage --coverage.thresholds.lines=100
+    ERROR: Coverage for lines (0.07%) does not meet global threshold (100%)
+    EXIT_CODE=1
+    ```
+  Deferred (secondary, noted in the audit): `actionlint`, artifact upload. Security scanning is its
+  own finding (COV-03).
 
 ---
 

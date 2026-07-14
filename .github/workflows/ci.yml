@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# Only the newest run per ref matters; cancel superseded ones (COV-02).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -29,6 +34,12 @@ jobs:
         run: pnpm lint
 
       # Data-layer + integration tests run against in-process PGlite (real SQL,
-      # no service container needed).
-      - name: Test
-        run: pnpm test
+      # no service container needed). Runs with the v8 coverage gate: the run exits
+      # non-zero if coverage falls below the floor in vitest.config.ts (COV-02).
+      - name: Test (with coverage gate)
+        run: pnpm test:coverage
+
+      # A change can typecheck + lint + test green but still break `next build`
+      # (server/client boundary, static-generation failure). Gate it (COV-02).
+      - name: Build
+        run: pnpm build
