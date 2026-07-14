@@ -316,8 +316,15 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Decide honestly whether these are in-demo or parked; if in-demo, build the webhook ingestion + feedback persistence and cover them with `analytics-tracking-testing` contract assertions (event captured with correct shape, deduped) and an API test for `/api/feedback`. If parked, update the spec/README so doc and code agree.
 - **qa-skill that closes it:** `analytics-tracking-testing` (+ `api-testing`)
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED (doc reconciled to code); building the two inputs is a parked product decision
+- **Resolution:** Confirmed the mismatch is real: no webhook route under `app/api/hubspot/`, and
+  `app/api/feedback` persists nothing. Building them (HubSpot webhook ingestion needs app-side webhook
+  config; feedback persistence is small but a product-behavior decision) is feature work, not a QA
+  fix, so per the audit's own guidance I took the honest doc-reconciliation path: added a dated
+  "Implementation status vs this spec" note to the top of `docs/spec.md` stating both inputs are
+  specified-but-not-built and that the scoreboard's engagement/feedback columns therefore read
+  honestly empty (not fabricated). Spec and code now agree. Whether to build them is surfaced as a
+  product decision, not auto-actioned.
 
 ---
 
@@ -330,8 +337,15 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add an `email-testing` inbox-capture flow: assert the magic-link login email arrives, is addressed/templated correctly, and its link completes auth; and (in dev, key-gated) that an outreach send produces the expected body/recipient. Keep SPF/DKIM/DMARC deliverability in a separate non-blocking suite.
 - **qa-skill that closes it:** `email-testing`
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** DEFERRED
+- **Resolution:** True value here is inbox-level verification (the magic-link email and the outreach
+  send actually arrive, addressed/templated correctly), which needs a mail-capture service
+  (Mailpit/Mailosaur) plus live SMTP, i.e. infrastructure and a service decision this hermetic pass
+  cannot stand up. The send *logic* is already well unit-tested (`tests/send/*`, `tests/outreach/*`),
+  and the magic-link `emailRedirectTo` is exercised by the COV-05 login test. Deferred with a clear
+  plan: add a dev-only Mailpit capture flow asserting the login link completes auth and an outreach
+  send produces the expected recipient/body; keep deliverability (SPF/DKIM/DMARC) in a separate
+  non-blocking suite.
 
 ---
 
@@ -371,8 +385,15 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Centralize external mocking with MSW (`service-virtualization`) and add a thin contract layer — one test per provider parsing a committed recorded real response through the production parser; optionally a nightly canary outside CI.
 - **qa-skill that closes it:** `contract-testing` (+ `service-virtualization`)
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** DEFERRED
+- **Resolution:** A contract test only earns its keep when it parses a *recorded real* provider
+  response, so it turns red when the real envelope drifts. Capturing those responses needs live API
+  access (HubSpot/Anthropic/PDL/Adzuna/Google/GDELT keys + calls + cost), which is exactly the
+  secrets/cost gate this pass stops at. Hand-authoring fixtures to match the parser would be circular
+  (green by construction) and give false confidence. The parsers already have hermetic unit tests
+  with fetch stubs. Deferred with the mechanism named: centralize mocking with MSW, then add one test
+  per provider parsing a committed recorded 200 through the production parser, plus an optional
+  nightly canary outside CI.
 
 ---
 
@@ -385,8 +406,13 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Once coverage exists (COV-02), track the `qa-metrics` core set from CI artifacts; add a `test-reliability` `@flaky` quarantine lane so a flake is visible and non-blocking rather than silently retried.
 - **qa-skill that closes it:** `qa-metrics` (+ `test-reliability`, `qa-dashboard`)
 - **Effort:** S
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** PARTIAL — measurement + KPIs landed; dashboard/quarantine-lane deferred
+- **Resolution:** The precondition (coverage measurement) now exists and is gated (COV-02), and the
+  KPI set (coverage floor + ratchet, flake < 2%, PR CI < 5 min, zero High security/a11y at release)
+  is documented in `docs/qa-strategy.md` (COV-08). The existing flakiness episode is already
+  mitigated and documented (`vitest.config.ts` `maxWorkers:4`). Deferred: a metrics dashboard and a
+  formal `@flaky` quarantine lane that reads CI artifacts (needs CI-artifact plumbing, low value at
+  solo/demo stage). Noted, not silently dropped.
 
 ---
 
@@ -399,8 +425,12 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Sequence after the P0/P1 items: add visual + cross-browser on top of the Playwright suite (COV-01); add a chaos/fault-injection test for provider-outage handling; adopt AI-augmented QA skills as team process matures.
 - **qa-skill that closes it:** `visual-testing`, `cross-browser-testing`, `chaos-engineering`, `ai-qa-review`/`ai-test-generation`, `test-case-management`
 - **Effort:** M (spread across items)
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** DEFERRED (correctly lower priority, per the audit's own sequencing)
+- **Resolution:** These are intentionally sequenced after the P0/P1 work. Visual-regression and
+  cross-browser both ride on the Playwright suite (COV-01) and become cheap once it lands;
+  chaos/fault-injection, AI-augmented QA tooling, and test-case management are stage-driven (relevant
+  as team/scale grows, not at solo/demo). `test-migration` and `payment-testing` remain N/A. Deferred
+  as a documented, prioritized backlog rather than padded with low-value work now.
 
 ---
 

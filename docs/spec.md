@@ -3,6 +3,18 @@
 **Doc type:** Requirements spec *(in progress)* · **Date:** 2026-07-07
 **The rule:** every requirement in this doc must serve **User Story ①**. If it doesn't serve the story, it's out of scope.
 
+> **Implementation status vs this spec (2026-07-14, COV-11).** Two inputs this spec describes are
+> specified but **not yet built**, so the code is the source of truth here:
+> - **HubSpot open/click/reply webhook ingestion** (§ Stack, line ~314). There is no webhook route
+>   (`app/api/hubspot/` holds only `oauth`, `oauth/start`, `send-config`), so no email-engagement
+>   event is captured yet.
+> - **AE 👍/👎 feedback persistence.** `app/api/feedback` is an auth-gated **stub** that persists
+>   nothing (the `feedback` table exists in the schema, but nothing writes to it).
+>
+> Consequence: the ROI scoreboard's *engagement* and *feedback* inputs have no ingestion path yet, so
+> those columns read honestly empty rather than fabricated. Both are parked pending a product decision
+> (build vs keep parked); this note keeps the spec and the code in agreement in the meantime.
+
 ---
 
 ## User Stories
