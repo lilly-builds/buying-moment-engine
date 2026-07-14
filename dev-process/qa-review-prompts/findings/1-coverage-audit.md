@@ -205,8 +205,12 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Adopt the `release-readiness` go/no-go checklist as a versioned artifact; define the smoke suite (rides on COV-01's Playwright), the rollback procedure (forward-fix, since migrations are irreversible), and post-deploy verification. See Appendix C below for the initial go/no-go call this audit produces.
 - **qa-skill that closes it:** `release-readiness`
 - **Effort:** S–M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED
+- **Resolution:** Added `docs/release-readiness.md`: a repeatable go/no-go checklist tied to
+  evidence, the under-5-minute smoke-suite definition (rides on the Playwright suite, COV-01), the
+  rollback procedure (forward-fix, since migrations are up-only), post-deploy verification, and the
+  two-bar readiness call (send-with-application vs deploy-in-a-real-team) updated to reflect that
+  COV-02/04/05/13 have landed. Verified: file present, zero em dashes, structure complete.
 
 ---
 
@@ -219,8 +223,14 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Create `.agents/qa-project-context.md` (a filled draft is in **Appendix A** below — lift it verbatim), then produce a right-sized (startup-tier) `docs/qa-strategy.md` (essentials drafted in **Appendix B**) after running `risk-based-testing` to score the feature areas.
 - **qa-skill that closes it:** `qa-project-context` → `risk-based-testing` → `test-strategy`
 - **Effort:** S–M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED
+- **Resolution:** Created `.agents/qa-project-context.md` (the source-of-truth file QA tooling reads
+  first: product, stack, test stack, CI/CD, environments, quality goals, the scored risk matrix,
+  team, conventions) and `docs/qa-strategy.md` (startup-tier: target pyramid, PR/merge/deploy
+  entry-exit gates, a named-threshold quality-gate table, KPIs). Both were reconciled against the
+  live code, not the audit's snapshot: they document the now-gated CI (build + coverage + concurrency
+  from COV-02) and the corrected coverage baseline (87.1/85.0/86.6/77.0, floors 85/83/84/74) rather
+  than Appendix A's stale "no gates" claim. Verified: files present, zero em dashes, accurate to code.
 
 ---
 
