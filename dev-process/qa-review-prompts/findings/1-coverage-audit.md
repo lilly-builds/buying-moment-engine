@@ -261,8 +261,21 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add an `async headers()` block to `next.config.ts` (HSTS, nosniff, frame-deny, a starter CSP) and a `security-testing` header assertion.
 - **qa-skill that closes it:** `security-testing`
 - **Effort:** S
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED
+- **Resolution:** Added `src/lib/security-headers.ts` (`SECURITY_HEADERS`) and wired
+  `async headers()` in `next.config.ts` to apply them to every route (`/(.*)`): HSTS
+  (2y, includeSubDomains, preload), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy`, and a starter CSP
+  (`base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'`). The CSP
+  intentionally omits `script-src`/`default-src` — tightening those risks breaking the app's inline
+  runtime and needs live Playwright verification (folded into COV-01). Tested first:
+  `tests/lib/security-headers.test.ts` pins the policy AND that `next.config.headers()` returns it.
+  Verified:
+  ```
+  tests/lib/security-headers.test.ts  7 passed
+  pnpm build  ✓ (20/20 pages, config valid) · pnpm typecheck  clean · eslint  clean
+  ```
+  Follow-up: assert the live header on a response in the COV-01 smoke; add a nonce-based script-src CSP.
 
 ---
 
