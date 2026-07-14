@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectMetro } from "@/src/discovery/rotation";
+import { selectMetro, selectMetroBatch } from "@/src/discovery/rotation";
 import { tenantProfileSchema, type TenantProfile } from "@/src/discovery/tenants";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -51,5 +51,27 @@ describe("selectMetro", () => {
   it("handles a `now` before the anchor without a negative index", () => {
     expect(selectMetro(THREE, at(-7))).toBe("Charlotte, NC");
     expect(selectMetro(THREE, at(-1))).toBe("Charlotte, NC");
+  });
+
+  it("selects a rotating daily batch without exceeding the metro list", () => {
+    const daily = tenant([
+      "New York, NY",
+      "Los Angeles, CA",
+      "Chicago, IL",
+      "Houston, TX",
+      "Phoenix, AZ",
+    ]);
+    daily.rotation.cadenceDays = 1;
+    expect(selectMetroBatch(daily, at(0), 3)).toEqual([
+      "New York, NY",
+      "Los Angeles, CA",
+      "Chicago, IL",
+    ]);
+    expect(selectMetroBatch(daily, at(1), 3)).toEqual([
+      "Houston, TX",
+      "Phoenix, AZ",
+      "New York, NY",
+    ]);
+    expect(selectMetroBatch(daily, at(2), 99)).toHaveLength(5);
   });
 });

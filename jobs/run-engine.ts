@@ -27,7 +27,7 @@ import type { PipelineDeps } from "@/src/engine/pipeline";
  *
  *   SOURCES (fan out)                       DOWNSTREAM (bounded cascade)
  *   ├─ detectors  (Adzuna · GDELT · Google)   practicesNeedingBriefs()
- *   └─ discovery  (one rotated metro)      →  runPipelineBatch → enrich → synthesize → persist
+ *   └─ discovery  (rotating metro batch)   →  runPipelineBatch → enrich → synthesize → persist
  *
  * PROPERTIES (each already proven in the units this composes — nothing re-implemented here):
  *  - METERED (R19): ONE injected meter threads through every paid stage; the engine itself
@@ -80,11 +80,11 @@ export interface RunEngineDeps {
   /** The signal sources fired every run (the detector registry in prod). */
   detectors: Detector[];
   /**
-   * This run's discovery deps (its single rotated metro, already assembled by the caller), or
+   * This run's discovery deps (rotating metro batch, already assembled by the caller), or
    * `null` to skip discovery — e.g. its Google/Anthropic creds are absent. When present it MUST
    * share this run's `db` + `meter` + `now` so spend and timestamps stay consistent.
    */
-  discovery: RunDiscoveryDeps | null;
+  discovery: RunDiscoveryDeps | RunDiscoveryDeps[] | null;
   /** Optional proactive cross-check stage. Runs after sources and before brief selection. */
   crossCheck?: (practiceId: string) => Promise<unknown>;
   /** Max practices to cross-check this run. Defaults to the brief batch size, then the normal default. */
@@ -160,6 +160,40 @@ function defaultLogger(event: string, meta?: Record<string, unknown>): void {
   console.warn(event, meta ?? {});
 }
 
+async function runDiscoveryBatch(
+  discovery: RunDiscoveryDeps | RunDiscoveryDeps[],
+): Promise<DiscoverySummary> {
+  const batch = Array.isArray(discovery) ? discovery : [discovery];
+  if (batch.length === 1) return runDiscovery(batch[0]);
+
+  const results: DiscoverySummary[] = [];
+  for (const deps of batch) {
+    results.push(await runDiscovery(deps));
+  }
+
+  const [first] = results;
+  return {
+    ran: true,
+    tenantId: first.tenantId,
+    metro: results.map((result) => result.metro).join(" | "),
+    geoKey: "multi-metro",
+    startedAt: first.startedAt,
+    finishedAt: results.at(-1)?.finishedAt ?? first.finishedAt,
+    enumerated: results.reduce((sum, result) => sum + result.enumerated, 0),
+    funneledOut: results.reduce((sum, result) => sum + result.funneledOut, 0),
+    cached: results.reduce((sum, result) => sum + result.cached, 0),
+    checked: results.reduce((sum, result) => sum + result.checked, 0),
+    qualified: results.reduce((sum, result) => sum + result.qualified, 0),
+    archived: results.reduce((sum, result) => sum + result.archived, 0),
+    errored: results.reduce((sum, result) => sum + result.errored, 0),
+    calls: {
+      search: results.reduce((sum, result) => sum + result.calls.search, 0),
+      details: results.reduce((sum, result) => sum + result.calls.details, 0),
+      classify: results.reduce((sum, result) => sum + result.calls.classify, 0),
+    },
+    qualifiedPlaces: results.flatMap((result) => result.qualifiedPlaces),
+  };
+}
 
 async function filterDownstreamCohort<T extends { id: string; websiteUrl?: string | null }>(
   db: Database,
@@ -269,7 +303,7 @@ export async function runEngine(
 
   const discovery: DiscoverySummary | Skipped | Errored = deps.discovery
     ? await runStage("discovery", log, () =>
-        runDiscovery(deps.discovery as RunDiscoveryDeps),
+        runDiscoveryBatch(deps.discovery as RunDiscoveryDeps | RunDiscoveryDeps[]),
       )
     : {
         skipped: true,

@@ -11,7 +11,8 @@ describe("getTenantProfile — the EliseAI profile", () => {
   it("parses, and every ICP vertical is a feed-reachable (non-unclassified) vertical (K7)", () => {
     const profile = getTenantProfile("eliseai");
     expect(profile.id).toBe("eliseai");
-    expect(profile.metros.length).toBeGreaterThan(0);
+    expect(profile.metros.length).toBeGreaterThanOrEqual(50);
+    expect(profile.rotation.cadenceDays).toBe(1);
     for (const entry of profile.icp) {
       expect(PACK_VERTICALS).toContain(entry.vertical);
     }

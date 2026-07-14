@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { GET, resolveBriefLimit } from "@/app/api/cron/run-engine/route";
+import {
+  DEFAULT_DISCOVERY_METRO_LIMIT,
+  GET,
+  MAX_DISCOVERY_METRO_LIMIT,
+  resolveBriefLimit,
+  resolveDiscoveryMetroLimit,
+} from "@/app/api/cron/run-engine/route";
 import { DEFAULT_ENGINE_BRIEF_LIMIT, MAX_ENGINE_BRIEF_LIMIT } from "@/jobs/run-engine";
 
 /**
@@ -91,5 +97,34 @@ describe("manual cron canary controls", () => {
 
   it("query limit is still clamped", () => {
     expect(resolveBriefLimit(new Request("https://app/api/cron/run-engine?limit=999"))).toBe(MAX_ENGINE_BRIEF_LIMIT);
+  });
+});
+
+
+describe("resolveDiscoveryMetroLimit", () => {
+  const original = process.env.DISCOVERY_METRO_LIMIT;
+  afterEach(() => {
+    if (original === undefined) delete process.env.DISCOVERY_METRO_LIMIT;
+    else process.env.DISCOVERY_METRO_LIMIT = original;
+  });
+
+  it("defaults to the production metro batch size", () => {
+    delete process.env.DISCOVERY_METRO_LIMIT;
+    expect(resolveDiscoveryMetroLimit()).toBe(DEFAULT_DISCOVERY_METRO_LIMIT);
+  });
+
+  it("honors env and one-off query overrides with a ceiling", () => {
+    process.env.DISCOVERY_METRO_LIMIT = "7";
+    expect(resolveDiscoveryMetroLimit()).toBe(7);
+    expect(
+      resolveDiscoveryMetroLimit(
+        new Request("https://app/api/cron/run-engine?metroLimit=3"),
+      ),
+    ).toBe(3);
+    expect(
+      resolveDiscoveryMetroLimit(
+        new Request("https://app/api/cron/run-engine?metroLimit=999"),
+      ),
+    ).toBe(MAX_DISCOVERY_METRO_LIMIT);
   });
 });

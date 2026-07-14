@@ -432,9 +432,9 @@ export function buildLiveDiscoveryDeps(params: {
 
 /**
  * Which tenant the scheduled engine run drives discovery for (config-level tenancy, K2). The metro
- * is picked per run by `selectMetro` (U6 rotation); with `cadenceDays: 7` the SAME metro is returned
- * all week, so the engine's weekday runs re-scan ONE metro ~5×/week (the cheap Text Search SKU — the
- * expensive Details+LLM step is gated by the 90-day re-pull cache), and the metro rotates weekly.
+ * is picked per run by the cron route's `selectMetroBatch` (U6 rotation); production checks a
+ * daily rotating batch of major metros. Text Search is intentionally broader, while the expensive
+ * Details+LLM step is still gated by the rating funnel and 90-day re-pull cache.
  * There is no separate discovery cron: the whole engine runs on one schedule (`vercel.json`).
  */
 export const DEFAULT_DISCOVERY_TENANT_ID = "eliseai";

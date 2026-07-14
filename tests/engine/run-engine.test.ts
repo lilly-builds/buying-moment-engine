@@ -497,6 +497,29 @@ describe("runEngine", () => {
     }
   });
 
+  it("runs a discovery metro batch and aggregates source counts", async () => {
+    const summary = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [],
+      discovery: [
+        emptyDiscoveryDeps(t, meter),
+        { ...emptyDiscoveryDeps(t, meter), metro: "Tampa, FL" },
+      ],
+      pipelineClients: undefined,
+      briefLimit: 0,
+      logger: quiet,
+    });
+
+    expect("ran" in summary.sources.discovery && summary.sources.discovery.ran).toBe(true);
+    if ("ran" in summary.sources.discovery) {
+      expect(summary.sources.discovery.metro).toBe("Austin, TX | Tampa, FL");
+      expect(summary.sources.discovery.calls.search).toBe(2);
+    }
+  });
+
+
   it("runs proactive cross-check before selecting the downstream brief cohort", async () => {
     const ids = await seedGoldenPractice(t.db); // starts with staffing + phone signals
 
@@ -686,7 +709,6 @@ describe("runEngine", () => {
         ),
     ).toBe(true);
   });
-
   it("runs proactive cross-check before selecting the downstream brief cohort", async () => {
     const ids = await seedGoldenPractice(t.db); // starts with staffing + phone signals
 

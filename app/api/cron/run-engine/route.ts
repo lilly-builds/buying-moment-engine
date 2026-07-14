@@ -9,7 +9,7 @@ import {
   type RunDiscoveryDeps,
 } from "@/jobs/run-discovery";
 import { getTenantProfile } from "@/src/discovery/tenants";
-import { selectMetro } from "@/src/discovery/rotation";
+import { selectMetroBatch } from "@/src/discovery/rotation";
 import { resolveProviderKey } from "@/src/keys/provider-keys";
 import {
   runEngine,
@@ -87,6 +87,20 @@ export function resolveBriefLimit(request?: Request): number {
   return Math.min(Math.floor(n), MAX_ENGINE_BRIEF_LIMIT);
 }
 
+export const DEFAULT_DISCOVERY_METRO_LIMIT = 12;
+export const MAX_DISCOVERY_METRO_LIMIT = 50;
+
+export function resolveDiscoveryMetroLimit(request?: Request): number {
+  const queryLimit = request
+    ? new URL(request.url).searchParams.get("metroLimit")?.trim()
+    : null;
+  const raw = queryLimit || process.env.DISCOVERY_METRO_LIMIT?.trim();
+  if (!raw) return DEFAULT_DISCOVERY_METRO_LIMIT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_DISCOVERY_METRO_LIMIT;
+  return Math.min(Math.floor(n), MAX_DISCOVERY_METRO_LIMIT);
+}
+
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -116,19 +130,25 @@ const anthropicApiKey =
     // Discovery is the paid Google source. Skip it (don't crash the whole run) when its creds are
     // absent. Its dep assembly is isolated too: a malformed tenant profile (once it becomes
     // DB-editable) must degrade to discovery-off, never sink the free detector sources.
-    let discovery: RunDiscoveryDeps | null = null;
+    let discovery: RunDiscoveryDeps[] | null = null;
     if (anthropicApiKey && hasGoogle) {
       try {
         const tenant = getTenantProfile(DEFAULT_DISCOVERY_TENANT_ID);
-        const metro = selectMetro(tenant, now); // rotation picks this run's single metro (U6)
-        discovery = buildLiveDiscoveryDeps({
-          db,
-          now,
+        const metros = selectMetroBatch(
           tenant,
-          metro,
-          meter,
-          anthropicApiKey,
-        });
+          now,
+          resolveDiscoveryMetroLimit(request),
+        );
+        discovery = metros.map((metro) =>
+          buildLiveDiscoveryDeps({
+            db,
+            now,
+            tenant,
+            metro,
+            meter,
+            anthropicApiKey,
+          }),
+        );
       } catch (err) {
         console.warn("engine.discovery.config_error", {
           error: err instanceof Error ? err.message : String(err),
