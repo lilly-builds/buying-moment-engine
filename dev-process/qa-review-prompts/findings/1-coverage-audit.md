@@ -70,8 +70,25 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Stand up Playwright (`playwright-automation`); start with a <5-min smoke of the 5 real pages (loads, no console errors, feed renders ≥1 card, brief expands, login form submits) per `release-readiness`'s smoke design; add `agentic-browser-testing` for exploratory journey coverage. Do **not** pad with throwaway assertions — cover the real journeys.
 - **qa-skill that closes it:** `playwright-automation` (+ `agentic-browser-testing`, `release-readiness` for smoke selection)
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED (public smoke committed + verified live); authed pages + CI wiring deferred (secret)
+- **Resolution:** Stood up a real, committed Playwright suite (`@playwright/test`,
+  `playwright.config.ts`, `e2e/smoke.spec.ts`, `pnpm test:e2e`) that boots the actual app (`next dev`,
+  `PORT=` per the handoff's `-p` gotcha) and drives the public surface. **Verified live, 4 passed in
+  14s:** login page renders the sign-in form, an unauthenticated protected route fails closed to
+  `/login`, the COV-13 security headers are present on a real response, and the COV-06 `/api/health`
+  probe is public and returns a valid status. So this also end-to-end-confirms COV-13 and COV-06.
+  ```
+  Running 4 tests using 4 workers
+    ✓ security headers are present (COV-13, live)
+    ✓ unauthenticated protected route fails closed to /login
+    ✓ the health probe is public and returns a status (COV-06, live)
+    ✓ login page renders the sign-in form
+    4 passed (14.2s)
+  ```
+  Deferred (secrets/infra decision): the authed-journey smoke (feed renders ≥1 card, brief expands)
+  needs the Supabase service-role key to mint a headless session, and gating this in CI needs env
+  secrets + a DB in CI. The suite is the seam; wiring authed + CI is the human/secrets decision.
+  Visual-regression and a11y-axe over all pages (COV-05/COV-16) now have their host and ride on this.
 
 ---
 
