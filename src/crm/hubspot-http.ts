@@ -67,6 +67,65 @@ export function isTolerated(v: unknown): v is ToleratedResponse {
   return typeof v === "object" && v !== null && "tolerated" in v;
 }
 
+/**
+ * A normalized, D9-safe reason for a failed HubSpot request. These are the ONLY send
+ * failures a user can fix on their side; everything else stays a generic error. The raw
+ * HubSpot message/body is NEVER surfaced (it can quote submitted contact values) — only
+ * this enum crosses back out.
+ */
+export type HubSpotErrorReason =
+  | "sales_subscription_inactive"
+  | "no_connected_inbox"
+  | "already_enrolled";
+
+/**
+ * Derive a normalized reason from a HubSpot error body. Reads the machine codes
+ * (`errorType` / `category`) and the message, but returns ONLY the enum — the raw body
+ * is discarded here so it can never leak past this boundary (D9). Returns null for
+ * anything unrecognized (which the caller treats as a generic, dev-only failure).
+ */
+export function classifyHubSpotError(body: unknown): HubSpotErrorReason | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as { errorType?: unknown; category?: unknown; message?: unknown };
+  const code = `${typeof b.errorType === "string" ? b.errorType : ""} ${
+    typeof b.category === "string" ? b.category : ""
+  }`.toUpperCase();
+  const msg = typeof b.message === "string" ? b.message : "";
+  if (code.includes("NO_CONNECTED_EMAIL") || /connected (personal )?email/i.test(msg)) {
+    return "no_connected_inbox";
+  }
+  if (code.includes("ALREADY_ENROLLED") || /already enrolled/i.test(msg)) {
+    return "already_enrolled";
+  }
+  // "Sales Subscription Status is not OK" comes back as errorType OTHER_SEND_REJECTED
+  // (a catch-all), so it's the message that pins it — matched here, never surfaced raw.
+  if (/sales subscription/i.test(msg)) return "sales_subscription_inactive";
+  return null;
+}
+
+/**
+ * A failed HubSpot request. Carries the status and a normalized, PII-free `reason` (never
+ * the raw body) so the send layer can map a user-fixable failure to a clear message while
+ * everything else degrades to a generic error.
+ */
+export class HubSpotRequestError extends Error {
+  readonly status: number;
+  readonly reason: HubSpotErrorReason | null;
+  constructor(
+    method: string,
+    path: string,
+    status: number,
+    reason: HubSpotErrorReason | null,
+  ) {
+    super(
+      `HubSpot ${method} ${path} failed with ${status}${reason ? ` (${reason})` : ""}`,
+    );
+    this.name = "HubSpotRequestError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
 /** Build the shared request function bound to one set of deps. */
 export function createHubSpotRequest(deps: HubSpotHttpDeps): HubSpotRequest {
   const base = deps.baseUrl ?? HUBSPOT_API_BASE;
@@ -108,9 +167,16 @@ export function createHubSpotRequest(deps: HubSpotHttpDeps): HubSpotRequest {
         return { tolerated: true, status: res.status };
       }
       if (!res.ok) {
-        // Never echo the response body — HubSpot validation errors quote the
-        // submitted property values, which can carry contact data (D9).
-        throw new Error(`HubSpot ${method} ${path} failed with ${res.status}`);
+        // Never echo the response body — HubSpot validation errors quote the submitted
+        // property values, which can carry contact data (D9). Read it ONLY to derive a
+        // normalized, PII-free reason for user-fixable failures; the raw body is dropped.
+        let reason: HubSpotErrorReason | null = null;
+        try {
+          reason = classifyHubSpotError(await res.json());
+        } catch {
+          // Non-JSON / empty body — no reason to derive.
+        }
+        throw new HubSpotRequestError(method, path, res.status, reason);
       }
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;

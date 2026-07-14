@@ -8,6 +8,7 @@ import type { LeadInput } from "@/src/crm/adapter";
 import { createHubSpotAdapter } from "@/src/crm/hubspot";
 import { hasSendScope, type OAuthHttpDeps } from "@/src/crm/hubspot-oauth";
 import { createDbTokenProvider, pushPracticeLead } from "@/src/crm/sync";
+import { HubSpotRequestError } from "@/src/crm/hubspot-http";
 import type { Recipient, RecipientClassification } from "./adapter";
 import { readConnectionSendConfig } from "./config";
 import type { SandboxConfig } from "./guard";
@@ -171,6 +172,36 @@ async function resolveRecipient(
 }
 
 /**
+ * Map a caught send error to a USER-actionable result, or null to let it propagate to
+ * the route's generic 502 (a dev-only failure the AE can only retry). We surface only the
+ * failures a user can actually fix on their HubSpot side, each with our OWN wording — the
+ * raw HubSpot message is never used (D9); we key off the normalized, PII-free `reason`.
+ * `already_enrolled` is intentionally NOT mapped here: with the claim guard it should not
+ * occur, and handling it correctly is a separate change (the ambiguous-retry path).
+ */
+function userActionableSendError(
+  err: unknown,
+): { status: number; error: string } | null {
+  if (!(err instanceof HubSpotRequestError)) return null;
+  switch (err.reason) {
+    case "sales_subscription_inactive":
+      return {
+        status: 422,
+        error:
+          "HubSpot can't send right now: your Sales Hub subscription or seat looks inactive. Reactivate it in HubSpot, then try again.",
+      };
+    case "no_connected_inbox":
+      return {
+        status: 422,
+        error:
+          "HubSpot can't send yet: connect your sending inbox in HubSpot (Settings, then Email), then try again.",
+      };
+    default:
+      return null;
+  }
+}
+
+/**
  * Wire Send → push contact → enroll, guarded to the sandbox address. Returns a
  * status the route maps to an HTTP response; throws only on a genuinely unexpected
  * failure (a HubSpot 5xx), which the route surfaces as 502.
@@ -322,6 +353,13 @@ export async function sendBriefEmail(
         `[send] releaseSend failed for practice ${args.practiceId} — claim left 'sending' (auto-recovers via claimSend's stale-claim TTL):`,
         releaseErr,
       );
+    }
+    // If HubSpot rejected the send for a reason the AE can FIX (an inactive Sales seat,
+    // no connected inbox), return that clear, retryable message instead of a generic 502.
+    // Nothing shipped and the claim is now released, so retrying after the fix is safe.
+    const actionable = userActionableSendError(err);
+    if (actionable) {
+      return { ok: false, status: actionable.status, error: actionable.error };
     }
     throw err;
   }
