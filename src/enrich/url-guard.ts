@@ -192,7 +192,10 @@ export async function assertFetchableUrl(rawUrl: string, opts: UrlGuardOptions =
     try {
       addresses = await opts.lookup(host);
     } catch {
-      return; // DNS failure: let the real fetch fail naturally rather than block a flaky lookup.
+      // Fail CLOSED: if a resolver is configured but cannot verify the host is public,
+      // refuse rather than fetch an unverifiable target. A genuine DNS failure would fail
+      // the real fetch anyway, so this costs no availability while closing a fail-open gap.
+      throw new BlockedUrlError(`could not resolve host "${host}" to verify it is public`);
     }
     for (const address of addresses) {
       if (isBlockedAddress(address)) {

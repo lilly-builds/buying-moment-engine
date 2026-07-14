@@ -184,6 +184,9 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
   - Residual (documented, accepted): full DNS-rebinding immunity would need connect-time IP pinning;
     the injected-`fetch` architecture validates at the URL layer instead. Given DB-sourced,
     cron-gated inputs this matches the audit's second-order risk rating.
+  - Post-review hardening (ce-code-review M1): the guard now fails **closed** when a configured
+    resolver errors (previously it allowed the fetch), with a test locking it. IP-pinning against
+    the TOCTOU remains the documented fast-follow.
 
 ---
 

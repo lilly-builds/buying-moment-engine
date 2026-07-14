@@ -87,6 +87,15 @@ describe("assertFetchableUrl — rejects before any request is made", () => {
       assertFetchableUrl("https://example.com/", { lookup: publicLookup }),
     ).resolves.toBeUndefined();
   });
+
+  it("fails CLOSED when a configured resolver errors (an unverifiable host is refused)", async () => {
+    const brokenLookup = async () => {
+      throw new Error("SERVFAIL");
+    };
+    await expect(
+      assertFetchableUrl("https://unresolvable.example/", { lookup: brokenLookup }),
+    ).rejects.toBeInstanceOf(BlockedUrlError);
+  });
 });
 
 describe("guardedFetch — validates the initial URL and every redirect hop", () => {
