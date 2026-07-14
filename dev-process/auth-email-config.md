@@ -47,16 +47,23 @@ Supabase: Authentication > URL Configuration
 - Redirect URLs include the production wildcard and `http://localhost:3000/**` for local dev,
   so a local magic link returns to localhost and a production one returns to production.
 
-### 4. Branded email templates
+### 4. Email templates (transactional, kept out of Gmail Promotions)
 
-The default "Confirm your email address" copy was replaced with a branded GTM Maestro
-welcome on both templates the magic-link flow can send:
+The default "Confirm your email address" copy was first replaced with a branded
+"Welcome to GTM Maestro" design (styled button, marketing tagline). That version looked
+promotional, and Gmail filed it under the Promotions tab instead of Primary. Since a
+sign-in email a reviewer has to find must land in Primary, both templates were then
+rewritten to a plain transactional style: short text, a single underlined text link
+(no filled button), and no marketing copy.
 
-- **Confirm sign up** (new reviewers, first sign-in) - subject:
-  `Welcome to GTM Maestro. Here's your sign-in link.`
-- **Magic link or OTP** (returning users) - subject: `Your GTM Maestro sign-in link.`
+Both templates (Confirm sign up, and Magic link or OTP) now use the same body and the
+subject `Sign in to GTM Maestro`. The exact HTML is archived in `./auth-email-templates/`.
 
-The exact HTML for each is archived in `./auth-email-templates/`.
+Note on Gmail tabs: Resend only handles delivery. Whether Gmail files a message under
+Primary or Promotions is Gmail's own content-based classification, so the lever is the
+email content, not the sending service. Gmail also learns per sender, so an inbox that
+already received the branded version may keep filing new ones under Promotions out of
+habit; a fresh recipient sees the transactional version classified from scratch.
 
 ## Verified (2026-07-14)
 
@@ -64,7 +71,8 @@ The exact HTML for each is archived in `./auth-email-templates/`.
   "email rate limit exceeded" (Resend > Emails, all showed "Delivered").
 - A real sign-in on the production site, requesting and clicking in the same normal
   browser, signs in and lands on the feed.
-- The branded email renders correctly in a real inbox.
+- The transactional email renders correctly in a real inbox and reads as a system
+  message rather than a promotion.
 
 ## Known gotcha: magic-link reliability
 
