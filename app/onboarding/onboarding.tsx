@@ -4,8 +4,8 @@ import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { Button } from "@/design/components";
 import { gradients } from "@/design/tokens";
-import { RevopsTour } from "./revops-tour";
-import { OnboardingTour } from "./onboarding-tour";
+import { RevopsTour, restartRevopsTour } from "./revops-tour";
+import { OnboardingTour, restartOnboardingTour } from "./onboarding-tour";
 
 /**
  * Onboarding orchestrator — the single front door to onboarding (D14 archetypes).
@@ -77,6 +77,14 @@ function subscribeRole(onChange: () => void): () => void {
 }
 
 function writeRole(role: OnboardingRole): void {
+  // Picking a role is the front door to onboarding, so start the chosen tour from the
+  // top. Each tour keeps its progress under a SEPARATE key from this chooser, and a
+  // prior session may have left it `done`/`skipped` (or parked mid-walk on a later
+  // page) — any of which would make the mounted tour render nothing and the pick appear
+  // to do nothing. Restart it BEFORE we flip the role, so the tour reads a fresh step-1
+  // state when it mounts. "Skipped" starts no tour, so it needs no restart.
+  if (role === "ae") restartOnboardingTour();
+  if (role === "revops") restartRevopsTour();
   // Record in memory FIRST, so the choice holds even if persistence throws below.
   memoryRole = role;
   try {
