@@ -310,9 +310,19 @@ export async function sendBriefEmail(
     });
   } catch (err) {
     // The send FAILED after we claimed it — release the claim so this lead can be
-    // retried and is never left falsely marked "sent". Re-throw so the route maps it
-    // to its 502 (release is best-effort cleanup, not a swallow of the real error).
-    await releaseSend(db, args.practiceId);
+    // retried and is never left falsely marked "sent". Re-throw so the route maps it to
+    // its 502. releaseSend is best-effort cleanup, GUARDED in its own try/catch so a
+    // failed release can never SHADOW the real HubSpot error (its own throw would
+    // replace `err` and the AE would see the wrong cause). A claim left `sending` by a
+    // failed release still self-heals via claimSend's stale-claim TTL on a later attempt.
+    try {
+      await releaseSend(db, args.practiceId);
+    } catch (releaseErr) {
+      console.error(
+        `[send] releaseSend failed for practice ${args.practiceId} — claim left 'sending' (auto-recovers via claimSend's stale-claim TTL):`,
+        releaseErr,
+      );
+    }
     throw err;
   }
 
@@ -320,14 +330,24 @@ export async function sendBriefEmail(
   // X" for everyone. The enrollment already shipped, so a failure of THIS audit write
   // must NOT surface as a failed send — that would make the AE retry an email that went
   // out. Deliberate suppression: log it loudly server-side and still return success. The
-  // row stays `sending` (still locked, so NO duplicate) until a later read reconciles —
-  // a rare, fail-safe edge (a post-enroll DB blip on one UPDATE).
+  // row stays `sending` (still locked, so NO duplicate); it does NOT self-correct on its
+  // own, so it is recovered by claimSend's stale-claim TTL steal on a later attempt — a
+  // rare, fail-safe edge (a post-enroll DB blip on one UPDATE, or the request being
+  // killed before this line).
   const sentAt = new Date();
   try {
-    await confirmSend(db, args.practiceId, sentAt);
+    const confirmed = await confirmSend(db, args.practiceId, sentAt);
+    if (!confirmed) {
+      // No row updated — the claim vanished between enroll and confirm (a stale-claim
+      // steal, or a manual release). The email shipped, so still succeed, but log it:
+      // this is the only signal that a sent lead is not marked `sent`.
+      console.error(
+        `[send] enrollment shipped but confirmSend updated 0 rows for practice ${args.practiceId} — 'sent' state not recorded`,
+      );
+    }
   } catch (err) {
     console.error(
-      `[send] enrollment shipped but outreach_sends flip to 'sent' failed for practice ${args.practiceId} — row left 'sending' (still locked):`,
+      `[send] enrollment shipped but outreach_sends flip to 'sent' failed for practice ${args.practiceId} — row left 'sending' (auto-recovers via claimSend's stale-claim TTL):`,
       err,
     );
   }
