@@ -14,6 +14,10 @@
 > Consequence: the ROI scoreboard's *engagement* and *feedback* inputs have no ingestion path yet, so
 > those columns read honestly empty rather than fabricated. Both are parked pending a product decision
 > (build vs keep parked); this note keeps the spec and the code in agreement in the meantime.
+>
+> **Route names (code is source of truth, E2E-04):** the ranked feed is **`/`**, `/scoreboard` is the
+> **ROI scoreboard**, and `/signals` ships as the **Data-Sources intro** (Adzuna / Google / GDELT),
+> not the full "Signal Catalog" table this spec implies.
 
 ---
 

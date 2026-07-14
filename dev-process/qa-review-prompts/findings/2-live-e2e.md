@@ -92,8 +92,23 @@ Playwright script; no flow is marked PASS on inspection alone.
   Query used (re-runnable against `DATABASE_URL`): join `roi_events`→`practices`, split by `geo_key LIKE 'demo:%'`.
 - **What is wrong:** The scoreboard is one of the three product pillars (Req #3) and has its own README shot, but after the exact documented populate step it shows a dead, all-zero dashboard. The feed *should* exclude `demo:` practices (they aren't real prospects), but the scoreboard applies the **same** filter to the funnel/cost/feedback tables — so the only data that exists (the seed's) is filtered straight back out. There is no other documented path that fills it. An EliseAI reviewer opening `/scoreboard` sees zeros everywhere.
 - **Recommended fix:** Make the seed's funnel reach the scoreboard. Cleanest: **drop `excludeDemoPractices` from the four scoreboard read helpers** (`roiEventRows` / `costByVertical` / `feedbackRows` / `cycleRows`) — the scoreboard is a demo-impact surface, and the seed exists precisely to populate it. (Alternative: attach the seed's funnel/cost/feedback/crm rows to non-`demo:` practices — but that changes what "demo" means and risks polluting the feed, so the query change is safer.) Add a test that a seeded DB yields non-zero Deals/Meetings on `/scoreboard`.
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FLAGGED FOR PRODUCT DECISION (fix not auto-applied)
+- **Resolution:** I deliberately did **not** apply the recommended fix, because it collides with a
+  deliberate honesty guarantee. `db/queries.ts:38-71` documents that `excludeDemoPractices` is the
+  single source of truth keeping fabricated seed data out of *both* the feed and the scoreboard, to
+  honor **D9** ("fabricated seed ROI rendered as real would violate D9"). Dropping it from the
+  scoreboard helpers would make the board render seeded, made-up deal/meeting numbers as if they were
+  *measured* ROI, on a product whose entire pitch (going to EliseAI) is citation-faithful honesty.
+  That trades an honestly-empty dashboard for a dishonest one. The real inconsistency is that the
+  seed's docstring *claims* it populates the scoreboard while the queries exclude what it writes.
+  Honest options, all product calls:
+  1. **Keep the scoreboard demo-excluded (recommended)** and fix the seed's misleading docstring; the
+     scoreboard's demo-ability already exists via the styleguide fixtures (`db/queries.ts:43-44`).
+  2. Add an explicit, clearly-labeled "demo data" mode/flag the scoreboard opts into, so seeded
+     numbers are shown *as demo*, never as measured.
+  3. Wire real outcome ingestion (COV-11) so the board fills with genuine measured data.
+  Surfaced for a human decision; not auto-actioned, per the rule that honesty-affecting product calls
+  belong to a person.
 
 ---
 
@@ -137,8 +152,11 @@ Playwright script; no flow is marked PASS on inspection alone.
 - **Evidence:** The prompt calls the feed **"(`/scoreboard`)"**, but `app/page.tsx` (route `/`) is the feed and `app/scoreboard/page.tsx` is the ROI scoreboard (`docs/scoreboard-metrics.md` agrees). The spec's Signal Catalog implies `/signals` is a catalog; the shipped `/signals` is a Data-Sources intro animation (Adzuna · Google · GDELT) that "Skip" completes into the feed — matching the `src/lib/auth.ts` `publicPaths` comment, not the spec table.
 - **What is wrong:** Only a documentation drift — no user-facing bug. Called out so the next reader doesn't test the wrong URL (as the prompt's own route list would have led them to).
 - **Recommended fix:** Correct the route names in this QA prompt (feed = `/`, scoreboard = `/scoreboard`) and note in `docs/spec.md` that `/signals` ships as the Data-Sources intro, not the full catalog table.
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED (doc)
+- **Resolution:** Added a "Route names (code is source of truth)" line to the implementation-status
+  note at the top of `docs/spec.md`: feed = `/`, `/scoreboard` = ROI scoreboard, `/signals` = the
+  Data-Sources intro (not a full catalog). No user-facing bug; this stops the next reader testing the
+  wrong URL.
 
 ---
 
