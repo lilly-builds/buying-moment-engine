@@ -233,8 +233,17 @@ Legend: 🟢 Covered · 🟡 Partial · 🔴 Blind spot.
 - **Recommended fix:** Add a constraint-rejection test (NOT NULL / UNIQUE / dangling-FK each rejects with the DB error), an `information_schema` assertion on the provenance-critical columns, a journal-consistency test, and `drizzle-kit check` in CI. Add indexes on `roi_events.practice_id` / `cost_events.practice_id` with one `EXPLAIN` teeth-test. Document the up-only/no-rollback recovery posture.
 - **qa-skill that closes it:** `database-testing`
 - **Effort:** M
-- **Status:** OPEN
-- **Resolution:**
+- **Status:** FIXED (constraint-enforcement + information_schema); indexes/`drizzle-kit check` deferred
+- **Resolution:** Added `tests/db/constraints.test.ts` (6 tests, real PGlite, raw SQL so it asserts on
+  actual Postgres rejection, not Drizzle's compile-time types): provenance NOT NULL rejects
+  (`signals.detected_at`, `evidence.detected_at`), de-dup UNIQUE rejects (`raw_signals.dedupe_hash`,
+  `signals(practice_id,kind,evidence_id)`), provenance FK rejects (dangling `signals.practice_id`),
+  plus an `information_schema` assertion pinning the provenance columns as NOT NULL. Each has teeth:
+  the helper flattens Drizzle's wrapped error to prove the RIGHT constraint fired (a dropped
+  constraint would let the insert succeed → test red). Verified: 6 passed.
+  Deferred (lower-value, background paths): perf indexes on `roi_events`/`cost_events.practice_id`
+  (needs a new migration on the released line) + an EXPLAIN teeth-test, `drizzle-kit check` in CI,
+  and the journal-consistency test. Noted, not silently dropped.
 
 ---
 
