@@ -6,7 +6,8 @@ const root = path.resolve(__dirname, ".");
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    // `.tsx` for component render tests (jsdom via a per-file `@vitest-environment` docblock).
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
 
     /**
      * Every data-layer suite calls `createTestDb()` in `beforeEach` — that boots a fresh
@@ -30,6 +31,35 @@ export default defineConfig({
     hookTimeout: 30_000,
     testTimeout: 20_000,
     maxWorkers: 4,
+
+    /**
+     * Code-coverage gate (COV-02). Scoped to the business-logic layers that the
+     * unit/integration suite is responsible for — `src`, `db`, `jobs`. UI render
+     * coverage (`app/**`) is a different instrument (E2E/Playwright, COV-01) and is
+     * deliberately not counted here, so this floor measures what these tests actually
+     * own. `thresholds` make the runner exit non-zero below the floor (a ratchet, not
+     * a stdout scrape). Raise the floor as coverage climbs; never lower it silently.
+     */
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary", "json-summary"],
+      // Setting `include` measures every matching file, tested or not (honest baseline).
+      include: ["src/**/*.ts", "db/**/*.ts", "jobs/**/*.ts"],
+      exclude: [
+        "**/*.d.ts",
+        "**/*.config.*",
+        "db/migrations/**",
+        "src/**/*.types.ts",
+      ],
+      // Floors set just under the 2026-07-13 measured baseline (lines 87.1 / statements
+      // 85.0 / functions 86.6 / branches 77.0), leaving a small noise margin. Ratchet up.
+      thresholds: {
+        lines: 85,
+        statements: 83,
+        functions: 84,
+        branches: 74,
+      },
+    },
   },
   resolve: {
     // Mirror the tsconfig `@/*` -> repo-root alias. Regex avoids matching

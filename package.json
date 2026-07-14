@@ -14,7 +14,9 @@
     "db:seed": "npx tsx scripts/seed-demo.ts",
     "db:seed:sandbox": "npx tsx scripts/seed-sandbox.ts",
     "db:backfill:send-config": "npx tsx scripts/backfill-send-config.ts",
-    "pipeline": "npx tsx scripts/run-pipeline.ts"
+    "pipeline": "npx tsx scripts/run-pipeline.ts",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -29,14 +31,20 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "4.1.10",
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^5",

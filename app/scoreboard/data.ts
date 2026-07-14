@@ -340,7 +340,13 @@ export function buildScoreboardData(inputs: ScoreboardInputs): ScoreboardData {
     cold: cohortTally("cold"),
   };
 
-  return { scopes, verticals, bigTest };
+  // E2E-01: the board only ever shows outcomes the tool actually measured. Seeded demo
+  // rows are excluded (D9), so a keyless clone, an empty DB, or a live system with no
+  // real deals yet has no funnel rows and every metric reads zero. This flag lets the
+  // view say that honestly instead of rendering a dashboard of zeros that looks broken.
+  const hasMeasuredData = inputs.events.length > 0;
+
+  return { scopes, verticals, bigTest, hasMeasuredData };
 }
 
 /** An honest all-zero scoreboard for a keyless clone or an unreachable DB. */

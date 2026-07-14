@@ -77,7 +77,9 @@ export function isAllowlisted(
  * it from this list.
  */
 export function publicPaths(isProduction: boolean): string[] {
-  const paths = ["/login", "/auth/callback", "/api/cron/run-engine"];
+  // `/api/health` is intentionally public in prod: a synthetic monitor cannot
+  // authenticate, and the route exposes only an up/down status, never row data.
+  const paths = ["/login", "/auth/callback", "/api/cron/run-engine", "/api/health"];
   if (!isProduction) paths.push("/styleguide", "/signals");
   return paths;
 }

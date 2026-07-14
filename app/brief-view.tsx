@@ -492,7 +492,7 @@ function OutreachMode({
         </Card>
 
       {/* One-tap lead-quality vote — teaches the tool (tour step 5, `rate-lead`). */}
-      <LeadFeedback />
+      <LeadFeedback practiceId={practiceId} />
     </div>
   );
 }
@@ -543,16 +543,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
       </Card>
 
       {/* Incumbent tooling */}
-      <Card variant="elevated" padding="lg">
-        <div data-tour="incumbent-tooling" className="flex flex-col gap-5">
-          <SectionHeader title="Incumbent tooling" size="h3" as="h3" />
-          <div className="flex flex-col gap-4">
-            {factual.incumbentTooling.map((c) => (
-              <ClaimRow key={c.label} {...c} />
-            ))}
-          </div>
-        </div>
-      </Card>
+      <IncumbentToolingPanel tooling={factual.incumbentTooling} />
 
       {/* EliseAI fit + proof + ROI — the tour's `why-fits` spotlights the header + pain. */}
       <Card variant="elevated" padding="lg" className="lg:col-span-2">
@@ -564,37 +555,7 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
 
           <div className="grid gap-6 md:grid-cols-2">
             {/* Proof point */}
-            <div className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-5">
-              <div className="flex items-center gap-2">
-                <span className="font-sans text-sm text-ink-muted">
-                  Proof point
-                </span>
-                <Badge tone="neutral" size="sm">
-                  Measured
-                </Badge>
-              </div>
-              {factual.proofPoint.tag === "real" ? (
-                <>
-                  <p className="font-display text-h5 text-ink">
-                    {factual.proofPoint.caseStudy}
-                  </p>
-                  <ul className="flex flex-col gap-1.5">
-                    {factual.proofPoint.metrics.map((m) => (
-                      <li key={m} className="font-sans text-sm text-ink-body">
-                        {m}
-                      </li>
-                    ))}
-                  </ul>
-                  <SourceLink href={factual.proofPoint.href} className="w-fit text-sm">
-                    Read the customer story
-                  </SourceLink>
-                </>
-              ) : (
-                <p className="font-sans text-sm text-ink-muted">
-                  Proof pending. No customer-success metric found for this vertical yet.
-                </p>
-              )}
-            </div>
+            <ProofPointPanel proofPoint={factual.proofPoint} />
 
             {/* ROI range */}
             <div className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-5">
@@ -655,6 +616,64 @@ function PrepMode({ brief, nowMs }: { brief: RenderedBrief; nowMs: number }) {
       </Card>
 
     </div>
+  );
+}
+
+type FactualBrief = RenderedBrief["factual"];
+
+/** Proof-point card. Exported for render tests (E2E-02). */
+export function ProofPointPanel({ proofPoint }: { proofPoint: FactualBrief["proofPoint"] }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-panel bg-surface-subtle p-5">
+      <div className="flex items-center gap-2">
+        <span className="font-sans text-sm text-ink-muted">Proof point</span>
+        {/* D10: "Measured" only over a real metric; a pending proof carries "Pending", */}
+        {/* never a measurement badge over an absence (E2E-02). */}
+        <Badge tone="neutral" size="sm">
+          {proofPoint.tag === "real" ? "Measured" : "Pending"}
+        </Badge>
+      </div>
+      {proofPoint.tag === "real" ? (
+        <>
+          <p className="font-display text-h5 text-ink">{proofPoint.caseStudy}</p>
+          <ul className="flex flex-col gap-1.5">
+            {proofPoint.metrics.map((m) => (
+              <li key={m} className="font-sans text-sm text-ink-body">
+                {m}
+              </li>
+            ))}
+          </ul>
+          <SourceLink href={proofPoint.href} className="w-fit text-sm">
+            Read the customer story
+          </SourceLink>
+        </>
+      ) : (
+        <p className="font-sans text-sm text-ink-muted">
+          Proof pending. No customer-success metric found for this vertical yet.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Incumbent-tooling card. Exported for render tests (E2E-03). */
+export function IncumbentToolingPanel({ tooling }: { tooling: FactualBrief["incumbentTooling"] }) {
+  return (
+    <Card variant="elevated" padding="lg">
+      <div data-tour="incumbent-tooling" className="flex flex-col gap-5">
+        <SectionHeader title="Incumbent tooling" size="h3" as="h3" />
+        <div className="flex flex-col gap-4">
+          {tooling.length > 0 ? (
+            tooling.map((c) => <ClaimRow key={c.label} {...c} />)
+          ) : (
+            // E2E-03: an honest empty state, not a bare heading over blank space.
+            <p className="font-sans text-sm text-ink-muted">
+              No incumbent front-desk, phone, or scheduling tool identified yet.
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 

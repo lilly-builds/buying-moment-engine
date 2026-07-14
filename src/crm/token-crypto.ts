@@ -48,7 +48,9 @@ export function decrypt(payload: string, key: Buffer): string {
   const iv = buf.subarray(0, IV_BYTES);
   const authTag = buf.subarray(IV_BYTES, IV_BYTES + AUTH_TAG_BYTES);
   const ciphertext = buf.subarray(IV_BYTES + AUTH_TAG_BYTES);
-  const decipher = createDecipheriv(ALGORITHM, key, iv);
+  // Pin the GCM auth-tag length so a shorter-than-expected tag is rejected, not
+  // silently accepted (the tag is already sliced to AUTH_TAG_BYTES above).
+  const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_BYTES });
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString(
     "utf8",

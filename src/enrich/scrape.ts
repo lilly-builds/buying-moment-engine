@@ -12,6 +12,7 @@ import {
 } from "./page-parse";
 import { isAllowed, parseRobotsTxt, type RobotsPolicy } from "./robots";
 import { extractCompanySocialLinks, type CompanySocialLinks } from "./social-links";
+import { guardedFetch, type DnsLookupAll } from "./url-guard";
 
 /**
  * Fetch a practice's OWN pages and hold their text, keyed by absolute URL.
@@ -78,6 +79,12 @@ export interface ScrapeDeps {
   sleep?: (ms: number) => Promise<void>;
   jitter?: () => number;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
+  /**
+   * SSRF defence (COV-04). When supplied, a hostname is resolved and every address
+   * range-checked before the fetch. Literal internal addresses and `localhost` are
+   * always refused regardless. Omitted in hermetic tests so no real DNS is done.
+   */
+  lookup?: DnsLookupAll;
 }
 
 type Logger = NonNullable<ScrapeDeps["logger"]>;
@@ -122,15 +129,18 @@ async function fetchOnce(
   url: string,
   timeoutMs: number,
 ): Promise<RawPage> {
-  const res = await deps.fetch(url, {
-    headers: SCRAPE_HEADERS,
-    redirect: "follow",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (isTransientStatus(res.status)) throw new TransientHttpError(res.status, url);
-  // A real `fetch` always populates `res.url`; a hand-built `new Response()` does not.
-  // Falling back to the requested URL means "no redirect", which is the honest reading.
-  return { status: res.status, html: res.ok ? await res.text() : "", finalUrl: res.url || url };
+  // `guardedFetch` validates `url` and every redirect hop against the SSRF block-list
+  // BEFORE the request is made, and follows redirects manually so an off-origin hop to
+  // an internal address is refused, not merely discarded after the bytes arrive.
+  const { response, finalUrl } = await guardedFetch(
+    deps.fetch,
+    url,
+    { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(timeoutMs) },
+    { lookup: deps.lookup },
+  );
+  if (isTransientStatus(response.status)) throw new TransientHttpError(response.status, url);
+  // `finalUrl` is the end of the redirect chain — the host the bytes ACTUALLY came from.
+  return { status: response.status, html: response.ok ? await response.text() : "", finalUrl };
 }
 
 /** `null` when the response carried no usable final URL. */
@@ -179,13 +189,14 @@ async function fetchRobots(
   log: Logger,
 ): Promise<RobotsPolicy | null> {
   try {
-    const res = await deps.fetch(`${origin}/robots.txt`, {
-      headers: SCRAPE_HEADERS,
-      redirect: "follow",
-      signal: AbortSignal.timeout(ROBOTS_FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    return parseRobotsTxt(await res.text());
+    const { response } = await guardedFetch(
+      deps.fetch,
+      `${origin}/robots.txt`,
+      { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(ROBOTS_FETCH_TIMEOUT_MS) },
+      { lookup: deps.lookup },
+    );
+    if (!response.ok) return null;
+    return parseRobotsTxt(await response.text());
   } catch (err) {
     log("scrape.robots_unreachable", {
       origin,

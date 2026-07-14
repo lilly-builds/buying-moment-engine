@@ -200,6 +200,10 @@ async function enrichArticleFromPublisher(url: string): Promise<Pick<GdeltArticl
 }
 
 async function fetchRecentGkgArticles(maxRecords: number, recentFiles: number): Promise<GdeltSearchResponse> {
+  // Server-side read of a PUBLIC GDELT data feed that GDELT serves over HTTP only; no
+  // credentials or user data are sent, and this is a Node cron detector, not a React
+  // browser request (the react-insecure-request rule misfires on server code).
+  // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
   const master = await fetch(GDELT_MASTER_FILE_LIST, {
     signal: AbortSignal.timeout(DETECTOR_FETCH_TIMEOUT_MS),
   });

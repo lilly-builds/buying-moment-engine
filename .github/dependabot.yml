@@ -1,0 +1,25 @@
+version: 2
+# Automated dependency-update PRs (COV-03): npm deps and the GitHub Actions used above.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    # Wait 7 days before proposing a newly published version; a brand-new release
+    # can be malicious or unstable (supply-chain hardening).
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      # Batch low-risk updates so the queue is a couple of PRs, not dozens.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5

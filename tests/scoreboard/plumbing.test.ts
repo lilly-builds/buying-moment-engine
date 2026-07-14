@@ -56,6 +56,9 @@ describe("real feed + scoreboard EXCLUDE demo-seeded data (D9 integrity fix)", (
     expect(data.scopes.all.endGoals[1].value).toBe("—"); // CAC: no denominator → no number
     expect(data.scopes.all.feedback.total).toBe(0);
     expect(data.bigTest.buyingMoment).toEqual({ meetings: 0, deals: 0 });
+    // E2E-01: nothing measured has flowed through, so the view can say so honestly
+    // instead of rendering a dashboard of zeros that reads as broken.
+    expect(data.hasMeasuredData).toBe(false);
   });
 
   // The deep brief is a per-id lookup, NOT a real-board aggregate, so reaching a seeded
@@ -144,6 +147,10 @@ describe("scoreboard aggregation math over a REAL cohort", () => {
     expect(data.bigTest.buyingMoment).toEqual({ meetings: 9, deals: 4 });
     expect(data.bigTest.cold).toEqual({ meetings: 1, deals: 0 });
 
+    // E2E-01: with a real funnel present, the board has measured data, so the honest
+    // empty-state note is NOT shown (positive control for the flag).
+    expect(data.hasMeasuredData).toBe(true);
+
     // Per-vertical rollup.
     expect(data.verticals).toHaveLength(4);
     const derm = data.verticals.find((v) => v.slug === "dermatology");
@@ -166,6 +173,7 @@ describe("scoreboard aggregation math over a REAL cohort", () => {
       expect(data.scopes.all.leading[0].value).toBe("0");
       expect(data.scopes.all.endGoals[1].value).toBe("—");
       expect(data.bigTest.buyingMoment).toEqual({ meetings: 0, deals: 0 });
+      expect(data.hasMeasuredData).toBe(false); // E2E-01: empty DB → honest empty state
     } finally {
       await fresh.close();
     }

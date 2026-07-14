@@ -1,14 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 
 type Status = "idle" | "sending" | "sent" | "error";
+
+const ERROR_ID = "login-error";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // On a failed sign-in, move focus back to the field. The role="alert" below
+  // announces the message to a screen reader; this stops a keyboard user being
+  // stranded on the button with no idea the sign-in failed (WCAG 3.3.1 / 4.1.3).
+  useEffect(() => {
+    if (status === "error") inputRef.current?.focus();
+  }, [status]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -54,8 +64,11 @@ export function LoginForm() {
       </label>
       <input
         id="email"
+        ref={inputRef}
         type="email"
         required
+        aria-invalid={status === "error" || undefined}
+        aria-describedby={status === "error" ? ERROR_ID : undefined}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         placeholder="you@company.com"
@@ -69,7 +82,9 @@ export function LoginForm() {
         {status === "sending" ? "Sending…" : "Send sign-in link"}
       </button>
       {status === "error" && (
-        <p className="text-sm text-red-600 dark:text-red-400">{message}</p>
+        <p id={ERROR_ID} role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {message}
+        </p>
       )}
     </form>
   );

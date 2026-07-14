@@ -19,6 +19,7 @@ import {
   type PipelineClients,
 } from "@/jobs/run-engine";
 import { scrapePractice } from "@/src/enrich/scrape";
+import { dnsLookupAll } from "@/src/enrich/url-guard";
 import { anthropicExtractClient } from "@/src/enrich/extract";
 import { createFullEnrichClient } from "@/src/enrich/fullenrich-client";
 import { createBetterContactClient } from "@/src/enrich/bettercontact-client";
@@ -203,7 +204,7 @@ const anthropicApiKey =
     const pipelineClients: PipelineClients | undefined =
       anthropicApiKey && fullenrichKey && bettercontactKey
         ? {
-            scrape: (url: string) => scrapePractice({ fetch }, url),
+            scrape: (url: string) => scrapePractice({ fetch, lookup: dnsLookupAll }, url),
             extract: anthropicExtractClient(anthropicApiKey),
             fullenrichPeople: createFullEnrichClient({ apiKey: fullenrichKey }),
             fullenrichEmail: createFullEnrichClient({ apiKey: fullenrichKey }),
@@ -240,7 +241,9 @@ const anthropicApiKey =
     return NextResponse.json(summary);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.warn("engine.run.setup_error", { error });
+    // error-level (not warn): this is the revenue cron failing to run at all, the exact
+    // signal a log-based alert should page on (COV-06). Structured for a log drain.
+    console.error("engine.run.setup_error", { error, ranAt: new Date().toISOString() });
     return NextResponse.json(
       { ran: false, stage: "setup", error },
       { status: 500 },
