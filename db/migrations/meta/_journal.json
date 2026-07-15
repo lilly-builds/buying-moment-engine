@@ -85,6 +85,13 @@
       "when": 1783977726011,
       "tag": "0011_striped_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784135968169,
+      "tag": "0012_nosy_thor_girl",
+      "breakpoints": true
     }
   ]
 }

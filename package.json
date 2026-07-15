@@ -15,6 +15,7 @@
     "db:seed:sandbox": "npx tsx scripts/seed-sandbox.ts",
     "db:backfill:send-config": "npx tsx scripts/backfill-send-config.ts",
     "pipeline": "npx tsx scripts/run-pipeline.ts",
+    "activity:report": "npx tsx scripts/activity-report.ts",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test"
   },

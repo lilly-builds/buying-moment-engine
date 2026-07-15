@@ -18,3 +18,4 @@ export * from "./roi";
 export * from "./integrations";
 export * from "./discovery";
 export * from "./outreach";
+export * from "./activity";

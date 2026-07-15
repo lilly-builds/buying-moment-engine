@@ -3,6 +3,7 @@ import { Inter, Inter_Tight, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { MobileTabBar } from "@/design/components/mobile-tab-bar";
 import { Onboarding } from "./onboarding/onboarding";
+import { ActivityTracker } from "./activity-tracker";
 
 /**
  * EliseAI's three real families (U2 / R15). `document.fonts` on eliseai.com
@@ -69,6 +70,10 @@ export default function RootLayout({
             the chooser is showing. (Per-user role persistence is the follow-up;
             today the choice lives in localStorage — see ./onboarding/onboarding.) */}
         <Onboarding />
+        {/* Logs a first-party page-view beacon on each route change. Renders
+            nothing; see ./activity-tracker for why it's first-party, not a
+            third-party analytics snippet. */}
+        <ActivityTracker />
       </body>
     </html>
   );
