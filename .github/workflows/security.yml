@@ -28,8 +28,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       # Fails on high/critical advisories; moderate/low are reported, not blocking.
-      - name: pnpm audit (fail on high or critical)
-        run: pnpm audit --audit-level=high
+      # NOTE: `pnpm audit` is broken — npm retired the legacy audit endpoint it
+      # calls (it now returns HTTP 410). audit-deps.mjs queries npm's current bulk
+      # advisory endpoint (the same data `npm audit` uses), keeping this exact
+      # policy and the installed-tree coverage, just with a backend that works.
+      - name: Dependency audit (fail on high or critical)
+        run: node scripts/audit-deps.mjs
 
   sast:
     name: Static analysis (Semgrep OWASP Top Ten)
