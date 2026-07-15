@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAllowlisted, parseAllowlist } from "@/src/lib/auth";
 import { createSupabaseServerClient } from "@/src/lib/supabase/server";
+import { getDb } from "@/db/client";
+import { recordActivity } from "@/db/activity";
 
 function safeRedirectPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
@@ -38,8 +40,26 @@ export async function GET(request: NextRequest) {
     return redirectToLogin(request, "not_allowed");
   }
 
+  const landingPath = safeRedirectPath(request.nextUrl.searchParams.get("next"));
+
+  // Log the sign-in — the unblockable "who signed in, from what org" moment.
+  // Guarded so a failed analytics write can never block a legitimate sign-in.
+  if (user?.email) {
+    try {
+      await recordActivity(getDb(), {
+        eventType: "sign_in",
+        email: user.email,
+        path: landingPath,
+        userId: user.id,
+        userAgent: request.headers.get("user-agent"),
+      });
+    } catch (err) {
+      console.error("[activity] failed to record sign_in:", err);
+    }
+  }
+
   const redirectUrl = request.nextUrl.clone();
-  redirectUrl.pathname = safeRedirectPath(request.nextUrl.searchParams.get("next"));
+  redirectUrl.pathname = landingPath;
   redirectUrl.search = "";
   return NextResponse.redirect(redirectUrl);
 }
