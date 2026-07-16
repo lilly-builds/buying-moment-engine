@@ -3,16 +3,28 @@ import {
   DEFAULT_DISCOVERY_METRO_LIMIT,
   DEFAULT_DISCOVERY_PER_CATEGORY_LIMIT,
   DEFAULT_DISCOVERY_REVIEW_LIMIT,
-  GET,
   MAX_DISCOVERY_METRO_LIMIT,
   MAX_DISCOVERY_PER_CATEGORY_LIMIT,
   MAX_DISCOVERY_REVIEW_LIMIT,
+  SCHEDULED_DOWNSTREAM_LIMIT,
+  createInvocationBudget,
   resolveBriefLimit,
   resolveDiscoveryMetroLimit,
   resolveDiscoveryPerCategoryLimit,
   resolveDiscoveryReviewLimit,
-} from "@/app/api/cron/run-engine/route";
+  resolveScheduledBriefLimit,
+} from "@/app/api/cron/run-engine/config";
+import { GET } from "@/app/api/cron/run-engine/route";
 import { DEFAULT_ENGINE_BRIEF_LIMIT, MAX_ENGINE_BRIEF_LIMIT } from "@/jobs/run-engine";
+import {
+  GET as GET_SOURCES,
+  maxDuration as sourceMaxDuration,
+} from "@/app/api/cron/run-engine/sources/route";
+import {
+  GET as GET_DOWNSTREAM,
+  maxDuration as downstreamMaxDuration,
+} from "@/app/api/cron/run-engine/downstream/route";
+import { ENGINE_RUN_STALE_AFTER_MS } from "@/db/engine-runs";
 
 /**
  * The scheduled engine trigger is fail-closed (Thread 06): only Vercel Cron, carrying the
@@ -46,6 +58,32 @@ describe("cron route auth (fail-closed)", () => {
     process.env.CRON_SECRET = "s3cret";
     const res = await GET(new Request("https://app/api/cron/run-engine"));
     expect(res.status).toBe(401);
+  });
+
+  it("keeps both scheduled phase routes behind the same fail-closed auth gate", async () => {
+    delete process.env.CRON_SECRET;
+    expect(
+      (await GET_SOURCES(new Request("https://app/api/cron/run-engine/sources")))
+        .status,
+    ).toBe(401);
+    expect(
+      (
+        await GET_DOWNSTREAM(
+          new Request("https://app/api/cron/run-engine/downstream"),
+        )
+      ).status,
+    ).toBe(401);
+  });
+
+  it("rejects the unsafe combined route and points operators to split phases", async () => {
+    process.env.CRON_SECRET = "s3cret";
+    const res = await GET(
+      new Request("https://app/api/cron/run-engine", {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ran: false });
   });
 });
 
@@ -103,6 +141,70 @@ describe("manual cron canary controls", () => {
 
   it("query limit is still clamped", () => {
     expect(resolveBriefLimit(new Request("https://app/api/cron/run-engine?limit=999"))).toBe(MAX_ENGINE_BRIEF_LIMIT);
+  });
+});
+
+describe("scheduled downstream safety", () => {
+  const original = process.env.ENGINE_BRIEF_LIMIT;
+  afterEach(() => {
+    if (original === undefined) delete process.env.ENGINE_BRIEF_LIMIT;
+    else process.env.ENGINE_BRIEF_LIMIT = original;
+  });
+
+  it("defaults scheduled downstream runs to one lead while preserving manual overrides", () => {
+    delete process.env.ENGINE_BRIEF_LIMIT;
+    const request = new Request("https://app/api/cron/run-engine/downstream");
+    expect(resolveScheduledBriefLimit(request, "downstream", true)).toBe(
+      SCHEDULED_DOWNSTREAM_LIMIT,
+    );
+    expect(
+      resolveScheduledBriefLimit(
+        new Request("https://app/api/cron/run-engine/downstream?limit=3"),
+        "downstream",
+        true,
+      ),
+    ).toBe(3);
+    expect(resolveScheduledBriefLimit(request, "downstream", false)).toBe(0);
+  });
+
+  it("does not let a legacy env value or blank query raise the scheduled cap", () => {
+    process.env.ENGINE_BRIEF_LIMIT = "50";
+    expect(
+      resolveScheduledBriefLimit(
+        new Request("https://app/api/cron/run-engine/downstream"),
+        "downstream",
+        true,
+      ),
+    ).toBe(SCHEDULED_DOWNSTREAM_LIMIT);
+    expect(
+      resolveScheduledBriefLimit(
+        new Request("https://app/api/cron/run-engine/downstream?limit="),
+        "downstream",
+        true,
+      ),
+    ).toBe(SCHEDULED_DOWNSTREAM_LIMIT);
+  });
+
+  it("stops starting leads and retries before the hard function ceiling", () => {
+    let now = 1_000;
+    const budget = createInvocationBudget(() => now);
+    expect(budget.canStartLead()).toBe(true);
+    expect(budget.canStartVoiceAttempt()).toBe(true);
+
+    now += 60_001;
+    expect(budget.canStartLead()).toBe(false);
+    expect(budget.canStartVoiceAttempt()).toBe(true);
+
+    now += 80_000;
+    expect(budget.canStartVoiceAttempt()).toBe(false);
+  });
+
+  it("only calls a running receipt stale after max duration plus a one-minute margin", () => {
+    expect(sourceMaxDuration).toBe(300);
+    expect(downstreamMaxDuration).toBe(300);
+    expect(ENGINE_RUN_STALE_AFTER_MS).toBe(
+      downstreamMaxDuration * 1_000 + 60_000,
+    );
   });
 });
 

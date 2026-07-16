@@ -45,7 +45,9 @@ describe("synthesizeBrief", () => {
 
     const result = await synthesizeBrief(d, ids.practiceId);
     expect(result.status).toBe("generated");
-    if (result.status === "failed") throw new Error(result.reason);
+    if (result.status !== "generated" && result.status !== "regenerated") {
+      throw new Error("brief was not generated");
+    }
     expect(result.attempts).toBe(1);
     expect(result.signalCount).toBe(2);
     expect(result.contactVariant).toBe("named");
@@ -313,6 +315,23 @@ describe("synthesizeBrief", () => {
     expect(rows.map((r) => (r.meta as { attempt: number }).attempt)).toEqual([1, 2]);
   });
 
+  it("does not start another paid retry when the invocation deadline guard closes", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    const client = FakeVoiceClient.always((req) => ({
+      ...goodVoice(req),
+      callOpener: "Leverage our seamless platform.",
+    }));
+    const { deps: d, rows } = deps(t, client);
+
+    const result = await synthesizeBrief(
+      { ...d, canStartVoiceAttempt: (attempt: number) => attempt === 1 },
+      ids.practiceId,
+    );
+    expect(result).toMatchObject({ status: "deferred", gate: "deadline", attempts: 1 });
+    expect(client.calls).toHaveLength(1);
+    expect(rows).toHaveLength(1);
+  });
+
   // ─── scenario 8 / R19: every paid call is metered ─────────────────────────────────────
   it("writes a priced cost_events row for every Anthropic call", async () => {
     const ids = await seedGoldenPractice(t.db);
@@ -392,7 +411,12 @@ describe("synthesizeBrief", () => {
     const second = await synthesizeBrief(d, ids.practiceId);
     expect(first.status).toBe("generated");
     expect(second.status).toBe("regenerated");
-    if (first.status === "failed" || second.status === "failed") throw new Error("unexpected");
+    if (
+      (first.status !== "generated" && first.status !== "regenerated") ||
+      (second.status !== "generated" && second.status !== "regenerated")
+    ) {
+      throw new Error("unexpected");
+    }
     expect(second.briefId).toBe(first.briefId);
   });
 
@@ -407,8 +431,17 @@ describe("synthesizeBrief", () => {
       synthesizeBrief(d, ids.practiceId),
       synthesizeBrief(d, ids.practiceId),
     ]);
-    expect([a.status, b.status].filter((s) => s === "failed")).toEqual([]);
-    if (a.status === "failed" || b.status === "failed") throw new Error("unexpected");
+    expect(
+      [a.status, b.status].filter(
+        (status) => status !== "generated" && status !== "regenerated",
+      ),
+    ).toEqual([]);
+    if (
+      (a.status !== "generated" && a.status !== "regenerated") ||
+      (b.status !== "generated" && b.status !== "regenerated")
+    ) {
+      throw new Error("unexpected");
+    }
     expect(a.briefId).toBe(b.briefId);
   });
 });

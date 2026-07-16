@@ -41,6 +41,8 @@ export interface SynthesizeDeps {
   /** Injected clock. Decides which signals are fresh, and stamps `generated_at`. */
   now?: () => Date;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
+  /** Refuse to start another paid voice call when the invocation is too close to its deadline. */
+  canStartVoiceAttempt?: (attempt: number) => boolean;
 }
 
 /** An evidence id the prose cited that was never in its input. Fabricated attribution. */
@@ -58,6 +60,13 @@ export type SynthesizeResult =
       zeroSignal: boolean;
       contactVariant: "named" | "role_only" | "none";
       signalCount: number;
+    }
+  | {
+      status: "deferred";
+      practiceId: string;
+      reason: string;
+      attempts: number;
+      gate: "deadline";
     }
   | {
       status: "failed";
@@ -332,6 +341,22 @@ export async function synthesizeBrief(
   };
 
   for (let attempt = 1; attempt <= VOICE_MAX_ATTEMPTS; attempt += 1) {
+    if (deps.canStartVoiceAttempt && !deps.canStartVoiceAttempt(attempt)) {
+      const reason = `voice attempt ${attempt} deferred: invocation deadline is too close`;
+      log("brief.attempt_deferred", {
+        practiceId,
+        practice: input.practice.name,
+        attempt,
+        reason,
+      });
+      return {
+        status: "deferred",
+        practiceId,
+        reason,
+        attempts: attempt - 1,
+        gate: "deadline",
+      };
+    }
     const outcome = await attemptVoice(deps, input, factual, signals, corrections, attempt);
     last = outcome;
 

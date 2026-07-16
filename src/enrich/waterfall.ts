@@ -1,7 +1,7 @@
 import {
+  getStoredContacts,
   fillPracticeSocialLinks,
   getContact,
-  getNamedContacts,
   setEnrichmentStatus,
   upsertContact,
   upsertPracticeFact,
@@ -621,29 +621,6 @@ function storedProviderToCoverageProvider(
   return null;
 }
 
-async function candidatesFromStoredContacts(
-  deps: Pick<WaterfallDeps, "db">,
-  practiceId: string,
-): Promise<DiscoveredContactCandidate[]> {
-  const stored = await getNamedContacts(deps.db, practiceId);
-  return stored.flatMap((contact) => {
-    if (!contact.name?.trim()) return [];
-    return [{
-      name: contact.name,
-      role: contact.role,
-      email: contact.email,
-      emailQuality: contact.emailQuality ?? undefined,
-      emailProvider: storedProviderToCoverageProvider(contact.emailProvider),
-      linkedinUrl: contact.linkedinUrl,
-      sourceProvider:
-        storedProviderToCoverageProvider(contact.personProvider) ??
-        storedProviderToCoverageProvider(contact.linkedinProvider),
-      sourceUrl: contact.sourceUrl,
-      confidence: 0.8,
-    }];
-  });
-}
-
 function candidateFromWebsite(findings: ResearchFindings): DiscoveredContactCandidate | null {
   const dm = findings.decisionMaker;
   if (!dm?.name) return null;
@@ -675,15 +652,38 @@ async function runCoverageFirstPath(
   const calls = providerCalls();
   const targetRoles = CONTACT_DISCOVERY_ROLES;
   const domain = websiteDomain(practice.websiteUrl);
+  const storedContacts = await getStoredContacts(deps.db, practice.id);
   const candidates: DiscoveredContactCandidate[] = [
-    ...(await candidatesFromStoredContacts(deps, practice.id)),
+    ...storedContacts.flatMap((contact) => {
+      if (!contact.name?.trim()) return [];
+      return [{
+        name: contact.name,
+        role: contact.role,
+        email: contact.email,
+        emailQuality: contact.emailQuality ?? undefined,
+        emailProvider: storedProviderToCoverageProvider(contact.emailProvider),
+        linkedinUrl: contact.linkedinUrl,
+        sourceProvider:
+          storedProviderToCoverageProvider(contact.personProvider) ??
+          storedProviderToCoverageProvider(contact.linkedinProvider),
+        sourceUrl: contact.sourceUrl,
+        confidence: 0.8,
+      }];
+    }),
   ];
   const websiteCandidate = candidateFromWebsite(findings);
   if (websiteCandidate) candidates.push(websiteCandidate);
 
   let selected = selectBestContact(candidates, { websiteDomain: domain, state: practice.state });
 
-  if (!selected || isWeakRole(selected.tier)) {
+  const recentNoContactAttempt = storedContacts.some(
+    (contact) =>
+      contact.selectedContactClassification === "none" &&
+      (deps.now ?? (() => new Date()))().getTime() - contact.updatedAt.getTime() <
+        7 * 24 * 60 * 60 * 1_000,
+  );
+
+  if ((!selected || isWeakRole(selected.tier)) && !recentNoContactAttempt) {
     calls.fullenrichPeople += 1;
     const fullenrich = await deps.meter(
       {

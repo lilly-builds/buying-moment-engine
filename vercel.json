@@ -2,8 +2,16 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/cron/run-engine",
+      "path": "/api/cron/run-engine/sources",
       "schedule": "0 8 * * 1-5"
+    },
+    {
+      "path": "/api/cron/run-engine/downstream",
+      "schedule": "0 10 * * 1-5"
+    },
+    {
+      "path": "/api/cron/run-engine/downstream",
+      "schedule": "0 12 * * 1-5"
     }
   ]
 }

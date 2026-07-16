@@ -103,6 +103,10 @@ export const practices = pgTable(
     enrichmentStatus: enrichmentStatus("enrichment_status")
       .notNull()
       .default("pending"),
+    // Queue fairness: every downstream start moves this practice behind leads that have
+    // never been attempted (or have waited longer since their last attempt). Nullable means
+    // "never attempted" and sorts first.
+    lastBriefAttemptAt: timestamp("last_brief_attempt_at", { withTimezone: true }),
     // NOTE (U5): `ehr` and `locations_count` used to live here as bare text/int.
     // They carried NO provenance, so they could never satisfy D2/R5 ("the brief
     // never states an uncited fact") or U6's requirement that each factual field

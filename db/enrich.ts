@@ -164,6 +164,25 @@ export type UpsertContactResult = {
 
 export type StoredContact = typeof contacts.$inferSelect;
 
+export async function getPracticeEnrichmentStatus(
+  db: Database,
+  practiceId: string,
+): Promise<"pending" | "enriched" | "failed"> {
+  const [row] = await db
+    .select({ status: practices.enrichmentStatus })
+    .from(practices)
+    .where(eq(practices.id, practiceId))
+    .limit(1);
+  return row?.status ?? "pending";
+}
+
+export async function getStoredContacts(
+  db: Database,
+  practiceId: string,
+): Promise<StoredContact[]> {
+  return db.select().from(contacts).where(eq(contacts.practiceId, practiceId));
+}
+
 /**
  * The stored contact for this practice + role, or null. Read BEFORE the waterfall
  * spends on PDL: `upsertContact` fills NULL columns only, so buying a field the row
@@ -194,10 +213,7 @@ export async function getNamedContacts(
   db: Database,
   practiceId: string,
 ): Promise<StoredContact[]> {
-  const rows = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.practiceId, practiceId));
+  const rows = await getStoredContacts(db, practiceId);
   return rows.filter((row) => Boolean(row.name?.trim()));
 }
 

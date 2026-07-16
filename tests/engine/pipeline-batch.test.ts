@@ -87,4 +87,43 @@ describe("runPipelineBatch", () => {
     const spend = spendFor(sink.filter((r) => r.practiceId === briefed.practiceId), "anthropic");
     expect(spend).toBeGreaterThan(0);
   });
+
+  it("defers the remaining leads before starting paid work when the deadline guard closes", async () => {
+    const sink: CostEventRecord[] = [];
+    const summary = await runPipelineBatch(
+      deps(sink),
+      [
+        { name: "First Clinic", geoKey: "first-tx" },
+        { name: "Second Clinic", geoKey: "second-tx" },
+      ],
+      quiet,
+      () => false,
+    );
+
+    expect(summary.total).toBe(0);
+    expect(summary.deferred).toBe(2);
+    expect(summary.deferredBeforeSpend).toBe(2);
+    expect(summary.deferredAfterEnrichment).toBe(0);
+    expect(sink).toHaveLength(0);
+  });
+
+  it("reports mid-batch unstarted leads separately from attempted work", async () => {
+    await seedGoldenPractice(t.db);
+    const sink: CostEventRecord[] = [];
+    let checks = 0;
+    const summary = await runPipelineBatch(
+      deps(sink),
+      [
+        GOLDEN_LEAD,
+        { name: "Second Clinic", geoKey: "second-tx" },
+      ],
+      quiet,
+      () => checks++ === 0,
+    );
+
+    expect(summary.total).toBe(1);
+    expect(summary.briefed).toBe(1);
+    expect(summary.deferred).toBe(1);
+    expect(summary.deferredBeforeSpend).toBe(1);
+  });
 });

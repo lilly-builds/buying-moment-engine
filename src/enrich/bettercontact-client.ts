@@ -3,6 +3,7 @@ import { normalizeBetterContactEmailQuality } from "./email-quality";
 import { ProviderBlockedError, type PersonEmailRequest, type PersonEmailResult } from "./types";
 
 export const BETTERCONTACT_ASYNC_URL = "https://app.bettercontact.rocks/api/v2/async";
+const BETTERCONTACT_FETCH_TIMEOUT_MS = 60_000;
 
 function rec(v: unknown): Record<string, unknown> | null { return typeof v === "object" && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null; }
 function str(v: unknown): string | null { return typeof v === "string" && v.trim() ? v.trim() : null; }
@@ -24,7 +25,7 @@ export function createBetterContactClient(deps: BetterContactClientDeps) {
     async enrichEmail(request: PersonEmailRequest): Promise<PersonEmailResult> {
       const body = { data: [{ full_name: request.fullName, company: request.companyName, company_domain: request.websiteDomain ?? undefined, linkedin_url: request.linkedinUrl ?? undefined }], enrich_email_address: true, enrich_phone_number: false };
       const call = async () => {
-        const res = await doFetch(BETTERCONTACT_ASYNC_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": deps.apiKey }, body: JSON.stringify(body) });
+        const res = await doFetch(BETTERCONTACT_ASYNC_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": deps.apiKey }, body: JSON.stringify(body), signal: AbortSignal.timeout(BETTERCONTACT_FETCH_TIMEOUT_MS) });
         const raw: unknown = await res.json().catch(() => ({}));
         const reason = block(res.status);
         if (reason) throw new ProviderBlockedError("bettercontact", reason, JSON.stringify(raw).slice(0, 300));

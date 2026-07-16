@@ -8,6 +8,8 @@ import {
   signalCount,
 } from "@/db/queries";
 import { briefs, contacts, evidence } from "@/db/schema";
+import { markBriefAttemptStarted } from "@/db/engine-queue";
+import { setEnrichmentStatus } from "@/db/enrich";
 
 const DETECTED = new Date("2026-07-01T00:00:00Z");
 
@@ -220,7 +222,7 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
     await fresh(a.id, "staffing_spike", FRESH, "https://a1");
     await fresh(a.id, "phone_complaints", FRESH, "https://a2");
 
-    // G: classified, 1 fresh signal (newest), no brief → second.
+    // G: classified, 1 fresh signal (newest), no brief → third.
     const g = await upsertPractice(t.db, {
       name: "Gamma Derm",
       geoKey: "dallas-tx",
@@ -233,7 +235,7 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
       "https://g1",
     );
 
-    // E: classified, 1 fresh signal (older), no brief → third.
+    // E: classified, 1 fresh signal (older), no brief → second (oldest waiting first).
     const e = await upsertPractice(t.db, {
       name: "Echo Derm",
       geoKey: "miami-fl",
@@ -288,14 +290,103 @@ describe("practicesNeedingBriefs (U4 — the seeding pull)", () => {
     });
 
     const result = await practicesNeedingBriefs(t.db, { now: NOW });
-    expect(result.map((r) => r.id)).toEqual([a.id, g.id, e.id]);
+    expect(result.map((r) => r.id)).toEqual([e.id, a.id, g.id]);
     expect(result.map((r) => r.name)).not.toContain("Seeded Demo Derm");
-    expect(result[0].freshSignalCount).toBe(2);
-    expect(result[1].freshSignalCount).toBe(1);
+    expect(result[0].freshSignalCount).toBe(1);
+    expect(result[1].freshSignalCount).toBe(2);
     // returned fields carry the scrape seed + geo the conductor needs
-    expect(result[0].websiteUrl).toBe("https://alphaderm.com");
-    expect(result[0].geoKey).toBe("austin-tx");
-    expect(result[1].websiteUrl).toBeNull();
+    expect(result[0].websiteUrl).toBeNull();
+    expect(result[0].geoKey).toBe("miami-fl");
+    expect(result[1].websiteUrl).toBe("https://alphaderm.com");
+  });
+
+  it("rotates attempted leads behind never-attempted leads instead of retrying one failure forever", async () => {
+    const oldest = await upsertPractice(t.db, {
+      name: "Oldest Clinic",
+      geoKey: "oldest-tx",
+      vertical: "dermatology",
+    });
+    await fresh(oldest.id, "phone_complaints", new Date("2026-07-04T00:00:00Z"), "https://oldest");
+
+    const newer = await upsertPractice(t.db, {
+      name: "Newer Clinic",
+      geoKey: "newer-tx",
+      vertical: "dermatology",
+    });
+    await fresh(newer.id, "phone_complaints", new Date("2026-07-06T00:00:00Z"), "https://newer");
+
+    expect(
+      (await practicesNeedingBriefs(t.db, { now: NOW })).map((row) => row.id),
+    ).toEqual([oldest.id, newer.id]);
+
+    await markBriefAttemptStarted(t.db, oldest.id, NOW);
+
+    expect(
+      (await practicesNeedingBriefs(t.db, { now: NOW })).map((row) => row.id),
+    ).toEqual([newer.id, oldest.id]);
+  });
+
+  it("orders previously attempted leads by longest wait", async () => {
+    const practices = [];
+    for (const [name, hours] of [
+      ["Three Hours", 3],
+      ["One Hour", 1],
+      ["Two Hours", 2],
+    ] as const) {
+      const practice = await upsertPractice(t.db, {
+        name,
+        geoKey: `${hours}-hours-tx`,
+        vertical: "dermatology",
+      });
+      await fresh(
+        practice.id,
+        "phone_complaints",
+        new Date("2026-07-04T00:00:00Z"),
+        `https://${hours}`,
+      );
+      await markBriefAttemptStarted(
+        t.db,
+        practice.id,
+        new Date(NOW.getTime() - hours * 60 * 60 * 1_000),
+      );
+      practices.push(practice);
+    }
+
+    expect(
+      (await practicesNeedingBriefs(t.db, { now: NOW })).map((row) => row.name),
+    ).toEqual(["Three Hours", "Two Hours", "One Hour"]);
+  });
+
+  it("prioritizes a paid enrichment checkpoint so the next run can finish its brief", async () => {
+    const ready = await upsertPractice(t.db, {
+      name: "Ready Clinic",
+      geoKey: "ready-tx",
+      vertical: "dermatology",
+    });
+    await fresh(
+      ready.id,
+      "phone_complaints",
+      new Date("2026-07-06T00:00:00Z"),
+      "https://ready",
+    );
+    await markBriefAttemptStarted(t.db, ready.id, NOW);
+    await setEnrichmentStatus(t.db, ready.id, "enriched");
+
+    const untouched = await upsertPractice(t.db, {
+      name: "Untouched Clinic",
+      geoKey: "untouched-tx",
+      vertical: "dermatology",
+    });
+    await fresh(
+      untouched.id,
+      "phone_complaints",
+      new Date("2026-07-01T00:00:00Z"),
+      "https://untouched",
+    );
+
+    const rows = await practicesNeedingBriefs(t.db, { now: NOW });
+    expect(rows.map((row) => row.id)).toEqual([ready.id, untouched.id]);
+    expect(rows[0].enrichmentStatus).toBe("enriched");
   });
 
   it("includeBriefed (--force) pulls already-briefed practices too", async () => {

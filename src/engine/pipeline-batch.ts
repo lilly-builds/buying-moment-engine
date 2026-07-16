@@ -15,18 +15,31 @@ export interface BatchItem {
   /** null only when resolve never returned — i.e. the lead threw before a practice existed. */
   practiceId: string | null;
   name: string;
-  status: "enriched" | "briefed" | "skipped" | "failed" | "errored";
+  status:
+    | "enriched"
+    | "briefed"
+    | "skipped"
+    | "failed"
+    | "errored"
+    | "deferred";
   result?: PipelineResult;
   error?: string;
 }
 
 export interface BatchSummary {
+  /** Leads actually passed to the conductor. */
   total: number;
   enriched: number;
   briefed: number;
   skipped: number;
   failed: number;
   errored: number;
+  /** All deadline deferrals, retained for compatibility. */
+  deferred: number;
+  /** Selected leads not started, before any provider spend. */
+  deferredBeforeSpend: number;
+  /** Attempted leads enriched in this invocation but deferred before voice synthesis. */
+  deferredAfterEnrichment: number;
   items: BatchItem[];
 }
 
@@ -38,10 +51,21 @@ export async function runPipelineBatch(
   deps: PipelineDeps,
   leads: readonly Lead[],
   logger: (event: string, meta?: Record<string, unknown>) => void = defaultLogger,
+  canStartLead: () => boolean = () => true,
 ): Promise<BatchSummary> {
   const items: BatchItem[] = [];
+  let unstarted = 0;
 
-  for (const lead of leads) {
+  for (let index = 0; index < leads.length; index += 1) {
+    const lead = leads[index];
+    if (!canStartLead()) {
+      unstarted = leads.length - index;
+      logger("pipeline.batch_deferred", {
+        deferred: unstarted,
+        nextPractice: lead.name,
+      });
+      break;
+    }
     try {
       const result = await runLeadToBrief(deps, lead);
       items.push({
@@ -60,6 +84,11 @@ export async function runPipelineBatch(
 
   const count = (status: BatchItem["status"]): number =>
     items.filter((item) => item.status === status).length;
+  const deferredAfterEnrichment = items.filter(
+    (item) => item.status === "deferred" && Boolean(item.result?.enrich),
+  ).length;
+  const deferredWithoutCurrentSpend =
+    count("deferred") - deferredAfterEnrichment;
 
   return {
     total: items.length,
@@ -68,6 +97,9 @@ export async function runPipelineBatch(
     skipped: count("skipped"),
     failed: count("failed"),
     errored: count("errored"),
+    deferred: count("deferred") + unstarted,
+    deferredBeforeSpend: unstarted + deferredWithoutCurrentSpend,
+    deferredAfterEnrichment,
     items,
   };
 }
