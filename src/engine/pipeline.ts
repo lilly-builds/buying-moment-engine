@@ -1,4 +1,5 @@
 import { getBrief } from "@/db/brief";
+import { getPracticeEnrichmentStatus } from "@/db/enrich";
 import { getPracticeWebsite, setPracticeWebsite } from "@/db/ingest";
 import type { Database } from "@/db/types";
 import { synthesizeBrief, type SynthesizeDeps } from "@/src/brief/synthesize";
@@ -78,11 +79,16 @@ export interface PipelineDeps {
   force?: boolean;
   now?: () => Date;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
+  /** Shared invocation guard passed into brief synthesis before each paid retry. */
+  canStartVoiceAttempt?: (attempt: number) => boolean;
+  /** Records queue rotation before slow or paid downstream work begins. */
+  onBriefAttemptStarted?: (practiceId: string) => Promise<void>;
 }
 
 /** The lead to turn into a brief — enough to resolve, plus an optional known website. */
 export interface Lead extends PracticeCandidate {
   websiteUrl?: string | null;
+  enrichmentStatus?: "pending" | "enriched" | "failed";
 }
 
 export interface EnrichSummary {
@@ -116,9 +122,10 @@ export interface PipelineResult {
    * `skipped`  — a current brief already existed; nothing was spent.
    * `enriched` — enrichment ran and persisted contact/fact fields; brief synthesis was skipped.
    * `briefed`  — a brief was generated or regenerated and persisted.
+   * `deferred` — enrichment completed, but the next paid brief attempt was too close to timeout.
    * `failed`   — no brief could be produced (synthesis failed at some gate).
    */
-  status: "skipped" | "enriched" | "briefed" | "failed";
+  status: "skipped" | "enriched" | "briefed" | "failed" | "deferred";
   /** Present whenever the pipeline ran past the skip guard. */
   enrich?: EnrichSummary;
   /** Present only when `status === "briefed"`. */
@@ -148,6 +155,8 @@ export async function runLeadToBrief(
   });
   const practiceId = resolved.practiceId;
   const base = { practiceId, practiceName: lead.name, merged: resolved.merged };
+
+  await deps.onBriefAttemptStarted?.(practiceId);
 
   // 2 — PROACTIVE CROSS-CHECK. Bounded to this already-qualified lead; every
   // source call is metered inside the injected function. Run before the brief
@@ -186,46 +195,54 @@ export async function runLeadToBrief(
     }
   }
 
-  // 5 — ENRICH. Non-fatal: a thin scrape returns status:"failed" without throwing, and the
-  // practice keeps whatever it already had. We record it and press on — synthesis self-guards.
-  const waterfallDeps: WaterfallDeps = {
-    db: deps.db,
-    scrape: deps.scrape,
-    extract: deps.extract,
-    pdl: deps.pdl,
-    fullenrichPeople: deps.fullenrichPeople,
-    fullenrichEmail: deps.fullenrichEmail,
-    bettercontact: deps.bettercontact,
-    meter: deps.meter,
-    escalation: deps.escalation,
-    now: deps.now,
-    logger: deps.logger,
-  };
-  const enriched = await enrichPractice(waterfallDeps, {
-    id: practiceId,
-    name: lead.name,
-    city: lead.city,
-    state: lead.state,
-    websiteUrl: website,
-  });
-  const enrich: EnrichSummary = {
-    status: enriched.status,
-    vertical: enriched.vertical,
-    factsWritten: enriched.factsWritten,
-    pdlCalls: enriched.pdlCalls,
-    providerCalls: enriched.providerCalls,
-    contactVariant: enriched.contactVariant,
-    escalated: enriched.escalated,
-    reason: enriched.reason,
-  };
+  // 5 — ENRICH. Successful enrichment is a durable checkpoint. A later invocation resumes at
+  // synthesis rather than repurchasing scrape, extraction, and contact discovery.
+  const enrichmentStatus =
+    lead.enrichmentStatus ??
+    (await getPracticeEnrichmentStatus(deps.db, practiceId));
+  let enrich: EnrichSummary | undefined;
+  if (enrichmentStatus !== "enriched") {
+    const waterfallDeps: WaterfallDeps = {
+      db: deps.db,
+      scrape: deps.scrape,
+      extract: deps.extract,
+      pdl: deps.pdl,
+      fullenrichPeople: deps.fullenrichPeople,
+      fullenrichEmail: deps.fullenrichEmail,
+      bettercontact: deps.bettercontact,
+      meter: deps.meter,
+      escalation: deps.escalation,
+      now: deps.now,
+      logger: deps.logger,
+    };
+    const enriched = await enrichPractice(waterfallDeps, {
+      id: practiceId,
+      name: lead.name,
+      city: lead.city,
+      state: lead.state,
+      websiteUrl: website,
+    });
+    enrich = {
+      status: enriched.status,
+      vertical: enriched.vertical,
+      factsWritten: enriched.factsWritten,
+      pdlCalls: enriched.pdlCalls,
+      providerCalls: enriched.providerCalls,
+      contactVariant: enriched.contactVariant,
+      escalated: enriched.escalated,
+      reason: enriched.reason,
+    };
+  } else {
+    log("pipeline.enrichment_reused", { practiceId });
+  }
 
   if (deps.enrichOnly) {
     return {
       ...base,
       website,
-      status: enriched.status === "enriched" ? "enriched" : "failed",
+      status: !enrich || enrich.status === "enriched" ? "enriched" : "failed",
       enrich,
-      reason: enriched.status === "failed" ? enriched.reason : undefined,
+      reason: enrich?.status === "failed" ? enrich.reason : undefined,
     };
   }
 
@@ -236,8 +253,26 @@ export async function runLeadToBrief(
     meter: deps.meter,
     now: deps.now,
     logger: deps.logger,
+    canStartVoiceAttempt: deps.canStartVoiceAttempt,
   };
   const synth = await synthesizeBrief(synthDeps, practiceId);
+
+  if (synth.status === "deferred") {
+    log("pipeline.brief_deferred", {
+      practiceId,
+      gate: synth.gate,
+      reason: synth.reason,
+    });
+    return {
+      ...base,
+      website,
+      status: "deferred",
+      enrich,
+      reason: enrich
+        ? `enrichment checkpointed; ${synth.reason}`
+        : synth.reason,
+    };
+  }
 
   if (synth.status === "failed") {
     log("pipeline.brief_failed", { practiceId, gate: synth.gate, reason: synth.reason });

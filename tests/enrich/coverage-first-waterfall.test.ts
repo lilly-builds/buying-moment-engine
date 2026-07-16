@@ -250,8 +250,12 @@ describe("coverage-first waterfall production path", () => {
     });
     const { meter } = recordingMeter();
 
+    let peopleCalls = 0;
     const fullenrichPeople: FullEnrichPeopleClient = {
-      async searchPeople() { return { candidates: [] }; },
+      async searchPeople() {
+        peopleCalls += 1;
+        return { candidates: [] };
+      },
     };
     const fullenrichEmail: FullEnrichEmailClient = {
       async enrichEmail() { throw new Error("should not enrich email without a person"); },
@@ -289,6 +293,27 @@ describe("coverage-first waterfall production path", () => {
     expect(contact.buyerTier).toBe("none");
     expect(contact.selectedContactClassification).toBe("none");
     expect(contact.fallbackReason).toContain("no usable named contact");
+
+    const retry = await enrichPractice({
+      db: t.db,
+      scrape: scraperWithSocial(),
+      extract: FakeExtractClient.fromFixture(roleOnly),
+      fullenrichPeople,
+      fullenrichEmail,
+      bettercontact,
+      meter,
+      now: () => new Date(NOW.getTime() + 24 * 60 * 60 * 1_000),
+      logger: SILENT,
+    }, {
+      id: practiceId,
+      name: "No Contact Eye Care",
+      city: "Portland",
+      state: "OR",
+      websiteUrl: "https://nocontact.example",
+    });
+
+    expect(retry.providerCalls?.fullenrichPeople).toBe(0);
+    expect(peopleCalls).toBe(1);
   });
 
 });

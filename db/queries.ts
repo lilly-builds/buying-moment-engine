@@ -511,7 +511,8 @@ export interface PracticeNeedingBrief {
   geoKey: string;
   /** The scrape seed for the conductor; null → Plan B fills it (U3). */
   websiteUrl: string | null;
-  /** Distinct FRESH signal kinds — the ranking key, same rule as the feed (D8). */
+  enrichmentStatus: "pending" | "enriched" | "failed";
+  /** Distinct FRESH signal kinds — a ranking input, same freshness rule as the feed (D8). */
   freshSignalCount: number;
 }
 
@@ -530,8 +531,12 @@ export interface PracticeNeedingBrief {
  * (`LEFT JOIN briefs ... IS NULL`) — the query-level half of the conductor's idempotency
  * (the conductor's `getBrief` skip is the other half).
  *
- * Ordered hottest-first (distinct fresh kinds desc, then freshest detection desc) so a
- * small `limit` briefs the most-briefable, highest-signal practices first (cost discipline).
+ * Ordered as a fair retry queue:
+ *   1. already-enriched practices first so paid work is converted into a brief,
+ *   2. then the practice waiting longest since either its last attempt or first fresh signal,
+ *   3. then signal strength,
+ *   4. then the oldest still-fresh buying moment.
+ * A single waiting-time axis prevents both fresh arrivals and retries from starving each other.
  * Grouped + limited in code because freshness is a code predicate; at demo scale (dozens
  * of practices) this is well within budget.
  *
@@ -560,6 +565,8 @@ export async function practicesNeedingBriefs(
       state: practices.state,
       geoKey: practices.geoKey,
       websiteUrl: practices.websiteUrl,
+      enrichmentStatus: practices.enrichmentStatus,
+      lastBriefAttemptAt: practices.lastBriefAttemptAt,
       kind: signals.kind,
       detectedAt: signals.detectedAt,
       expiresAt: signals.expiresAt,
@@ -571,7 +578,8 @@ export async function practicesNeedingBriefs(
     .orderBy(asc(practices.id), asc(signals.kind), asc(signals.detectedAt));
 
   interface Acc extends PracticeNeedingBrief {
-    freshest: Date;
+    oldestFreshSignalAt: Date;
+    lastBriefAttemptAt: Date | null;
     kinds: Set<string>;
   }
   const byPractice = new Map<string, Acc>();
@@ -589,8 +597,10 @@ export async function practicesNeedingBriefs(
         state: row.state,
         geoKey: row.geoKey,
         websiteUrl: row.websiteUrl,
+        enrichmentStatus: row.enrichmentStatus,
         freshSignalCount: 0,
-        freshest: row.detectedAt,
+        oldestFreshSignalAt: row.detectedAt,
+        lastBriefAttemptAt: row.lastBriefAttemptAt,
         kinds: new Set(),
       };
       byPractice.set(row.id, entry);
@@ -599,13 +609,28 @@ export async function practicesNeedingBriefs(
       entry.kinds.add(row.kind);
       entry.freshSignalCount += 1;
     }
-    if (row.detectedAt > entry.freshest) entry.freshest = row.detectedAt;
+    if (row.detectedAt < entry.oldestFreshSignalAt) {
+      entry.oldestFreshSignalAt = row.detectedAt;
+    }
   }
 
   const sorted = [...byPractice.values()].sort(
-    (a, b) =>
-      b.freshSignalCount - a.freshSignalCount ||
-      b.freshest.getTime() - a.freshest.getTime(),
+    (a, b) => {
+      const readyDelta =
+        Number(b.enrichmentStatus === "enriched") -
+        Number(a.enrichmentStatus === "enriched");
+      if (readyDelta !== 0) return readyDelta;
+      const waitingSinceA =
+        a.lastBriefAttemptAt?.getTime() ?? a.oldestFreshSignalAt.getTime();
+      const waitingSinceB =
+        b.lastBriefAttemptAt?.getTime() ?? b.oldestFreshSignalAt.getTime();
+      return (
+        waitingSinceA - waitingSinceB ||
+        b.freshSignalCount - a.freshSignalCount ||
+        a.oldestFreshSignalAt.getTime() - b.oldestFreshSignalAt.getTime() ||
+        a.id.localeCompare(b.id)
+      );
+    },
   );
   const limited =
     opts.limit !== undefined ? sorted.slice(0, opts.limit) : sorted;
@@ -616,6 +641,7 @@ export async function practicesNeedingBriefs(
     state: entry.state,
     geoKey: entry.geoKey,
     websiteUrl: entry.websiteUrl,
+    enrichmentStatus: entry.enrichmentStatus,
     freshSignalCount: entry.freshSignalCount,
   }));
 }

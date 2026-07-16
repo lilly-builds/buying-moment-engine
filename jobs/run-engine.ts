@@ -18,12 +18,12 @@ import {
   type BatchSummary,
 } from "@/src/engine/pipeline-batch";
 import type { PipelineDeps } from "@/src/engine/pipeline";
+import { markBriefAttemptStarted } from "@/db/engine-queue";
 
 /**
- * The engine heartbeat (Thread 06) — ONE scheduled run that fires every signal source at once,
- * then cascades the fresh leads downstream into cited briefs. This is the single orchestration
- * the Vercel Cron route (`app/api/cron/run-engine`) calls; it is the literal "constant flow"
- * (R1) made self-running — one trigger, all sources, the whole engine.
+ * The engine heartbeat (Thread 06). It can run the whole flow for manual calls, or one scheduled
+ * phase at a time so source collection and the slow downstream cascade do not compete for the
+ * same Vercel function deadline.
  *
  *   SOURCES (fan out)                       DOWNSTREAM (bounded cascade)
  *   ├─ detectors  (Adzuna · GDELT · Google)   practicesNeedingBriefs()
@@ -70,6 +70,7 @@ export type PipelineClients = Pick<
 >;
 
 export type DownstreamCohort = "all" | "website_present" | "needs_contact" | "named_no_email" | "weak_email" | "website_missing";
+export type EnginePhase = "all" | "sources" | "downstream";
 
 export interface RunEngineDeps {
   db: Database;
@@ -83,8 +84,10 @@ export interface RunEngineDeps {
    * This run's discovery deps (rotating metro batch, already assembled by the caller), or
    * `null` to skip discovery — e.g. its Google/Anthropic creds are absent. When present it MUST
    * share this run's `db` + `meter` + `now` so spend and timestamps stay consistent.
-   */
+  */
   discovery: RunDiscoveryDeps | RunDiscoveryDeps[] | null;
+  /** Honest reason discovery was unavailable when dependency assembly failed. */
+  discoverySkipReason?: string;
   /** Optional proactive cross-check stage. Runs after sources and before brief selection. */
   crossCheck?: (practiceId: string) => Promise<unknown>;
   /** Max practices to cross-check this run. Defaults to the brief batch size, then the normal default. */
@@ -104,6 +107,12 @@ export interface RunEngineDeps {
   /** Regenerate already-briefed practices too (deliberate). Default false → skip briefed. */
   force?: boolean;
   logger?: (event: string, meta?: Record<string, unknown>) => void;
+  /** Split scheduled source work from slow downstream work so they do not share one timeout. */
+  phase?: EnginePhase;
+  /** Do not begin another lead unless this invocation has enough safe time left. */
+  canStartLead?: () => boolean;
+  /** Do not begin another paid voice retry unless it can finish before the invocation deadline. */
+  canStartVoiceAttempt?: (attempt: number) => boolean;
 }
 
 type Skipped = { skipped: true; reason: string };
@@ -126,6 +135,7 @@ export interface CrossCheckRunSummary {
 
 export interface EngineRunSummary {
   ran: true;
+  phase: EnginePhase;
   startedAt: string;
   finishedAt: string;
   /** Back-compat name for the invocation batch size. */
@@ -137,7 +147,7 @@ export interface EngineRunSummary {
   /** Operational batch size used for external brief-building calls this invocation. */
   briefBatchSize: number;
   sources: {
-    detectors: RunSummary | Errored;
+    detectors: RunSummary | Skipped | Errored;
     discovery: DiscoverySummary | Skipped | Errored;
   };
   crossCheck: CrossCheckRunSummary | Skipped | Errored;
@@ -288,32 +298,43 @@ export async function runEngine(
   const log = deps.logger ?? defaultLogger;
   const startedAt = now.toISOString();
   const downstreamCohort = deps.downstreamCohort ?? "all";
+  const phase = deps.phase ?? "all";
+  const runSources = phase !== "downstream";
+  const runDownstream = phase !== "sources";
 
   // 1 — SIGNAL SOURCES. Fan out to every source; each stage isolated so one flaky source never
   //     takes down the others or the cascade.
-  const detectors = await runStage("detectors", log, () =>
-    runDetectors({
-      db: deps.db,
-      detectors: deps.detectors,
-      meter: deps.meter,
-      now,
-      logger: deps.logger,
-    }),
-  );
+  const detectors: RunSummary | Skipped | Errored = runSources
+    ? await runStage("detectors", log, () =>
+        runDetectors({
+          db: deps.db,
+          detectors: deps.detectors,
+          meter: deps.meter,
+          now,
+          logger: deps.logger,
+        }),
+      )
+    : { skipped: true, reason: "source stages disabled for downstream invocation" };
 
-  const discovery: DiscoverySummary | Skipped | Errored = deps.discovery
+  const discovery: DiscoverySummary | Skipped | Errored = !runSources
+    ? { skipped: true, reason: "source stages disabled for downstream invocation" }
+    : deps.discovery
     ? await runStage("discovery", log, () =>
         runDiscoveryBatch(deps.discovery as RunDiscoveryDeps | RunDiscoveryDeps[]),
       )
     : {
         skipped: true,
-        reason: "no discovery deps (missing Google Places / Anthropic key)",
+        reason:
+          deps.discoverySkipReason ??
+          "no discovery deps (missing Google Places / Anthropic key)",
       };
 
   // 2 — PROACTIVE CROSS-CHECK. After all source stages have landed signals, but BEFORE the
   //     brief cohort is selected, check feed-eligible practices against the other signal
   //     families. This is the point where the brief can still see newly stacked signals.
-  const crossCheck: CrossCheckRunSummary | Skipped | Errored = deps.crossCheck
+  const crossCheck: CrossCheckRunSummary | Skipped | Errored = !runSources
+    ? { skipped: true, reason: "cross-check runs with source collection, not conversion" }
+    : deps.crossCheck
     ? await runStage("cross-check", log, async () => {
         const limit =
           deps.crossCheckLimit ?? (deps.briefLimit > 0 ? deps.briefLimit : 0);
@@ -351,8 +372,18 @@ export async function runEngine(
   //     this invocation's bounded batch through the conductor. The bound protects time/cost; it
   //     must never hide the rest of the backlog.
   const clients = deps.pipelineClients;
-  const downstream: DownstreamSummary | DownstreamSkipped | Errored =
-    await runStage("downstream", log, async () => {
+  const downstream: DownstreamSummary | DownstreamSkipped | Errored = !runDownstream
+    ? {
+        skipped: true,
+        reason: "downstream stages disabled for source invocation",
+        eligible: 0,
+        attempted: 0,
+        briefed: 0,
+        pending: 0,
+        skippedReasons: [],
+        cohort: downstreamCohort,
+      }
+    : await runStage("downstream", log, async () => {
       const allEligible = await practicesNeedingBriefs(deps.db, {
         now,
         includeBriefed: deps.force ?? false,
@@ -392,6 +423,9 @@ export async function runEngine(
         skipped: 0,
         failed: 0,
         errored: 0,
+        deferred: 0,
+        deferredBeforeSpend: 0,
+        deferredAfterEnrichment: 0,
         items: [],
       };
       const batchSummary =
@@ -405,6 +439,9 @@ export async function runEngine(
                 logger: deps.logger,
                 enrichOnly: deps.enrichOnly ?? false,
                 force: deps.force ?? false,
+                canStartVoiceAttempt: deps.canStartVoiceAttempt,
+                onBriefAttemptStarted: (practiceId) =>
+                  markBriefAttemptStarted(deps.db, practiceId, new Date()),
                 ...clients,
               },
               batch.map((p) => ({
@@ -413,10 +450,20 @@ export async function runEngine(
                 city: p.city,
                 state: p.state,
                 websiteUrl: p.websiteUrl,
+                enrichmentStatus: p.enrichmentStatus,
               })),
               deps.logger,
+              deps.canStartLead,
             );
 
+      if (batchSummary.deferredBeforeSpend > 0)
+        skippedReasons.push(
+          `${batchSummary.deferredBeforeSpend} selected lead(s) deferred before provider spend to avoid the invocation timeout`,
+        );
+      if (batchSummary.deferredAfterEnrichment > 0)
+        skippedReasons.push(
+          `${batchSummary.deferredAfterEnrichment} lead(s) completed and checkpointed enrichment, then deferred voice synthesis to the next invocation`,
+        );
       if (batchSummary.skipped > 0)
         skippedReasons.push("brief pipeline skipped attempted lead(s)");
       if (batchSummary.failed > 0)
@@ -435,9 +482,9 @@ export async function runEngine(
       return {
         ...batchSummary,
         eligible: eligibleCount,
-        attempted: batch.length,
+        attempted: batchSummary.total,
         pending: deps.enrichOnly
-          ? Math.max(eligibleCount - batchSummary.enriched, 0)
+          ? eligibleCount
           : Math.max(eligibleCount - batchSummary.briefed, 0),
         skippedReasons,
         cohort: downstreamCohort,
@@ -455,10 +502,12 @@ export async function runEngine(
     mode: deps.enrichOnly ? "enrich_only" : "brief",
     completedBriefLimit: deps.briefLimit,
     downstreamCohort,
+    phase,
   });
 
   return {
     ran: true,
+    phase,
     startedAt,
     finishedAt,
     briefLimit: deps.briefLimit,

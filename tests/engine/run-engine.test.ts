@@ -34,10 +34,8 @@ import { computeExpiresAt } from "@/src/engine/freshness";
 import type { Database } from "@/db/types";
 
 /**
- * The engine heartbeat (Thread 06) — ONE run fires every signal source, then cascades the fresh
- * cohort into briefs. These tests prove the ORCHESTRATION contract (all sources fire, metered,
- * bounded, isolated, cascade → brief); the deep behaviour of each stage is proven in its own
- * unit (run-detectors, run-discovery, pipeline-batch).
+ * Engine orchestration coverage: whole-flow manual runs plus separated scheduled source and
+ * downstream phases. Deep stage behavior is covered in each stage's own test suite.
  */
 
 const quiet = () => {};
@@ -154,6 +152,39 @@ describe("runEngine", () => {
 
     // R19: the detector's paid call was metered through the shared meter.
     expect(sink.some((r) => r.costUsd === 0.02)).toBe(true);
+  });
+
+  it("splits source and downstream invocations so slow enrichment does not consume source time", async () => {
+    await seedGoldenPractice(t.db);
+
+    const sources = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [fakeDetector()],
+      discovery: null,
+      pipelineClients: goldenClients(),
+      briefLimit: 1,
+      phase: "sources",
+      logger: quiet,
+    });
+    expect(sources.phase).toBe("sources");
+    expect("skipped" in sources.downstream && sources.downstream.skipped).toBe(true);
+
+    const downstream = await runEngine({
+      db: t.db,
+      meter,
+      now: NOW,
+      detectors: [fakeDetector()],
+      discovery: null,
+      pipelineClients: goldenClients(),
+      briefLimit: 1,
+      phase: "downstream",
+      logger: quiet,
+    });
+    expect(downstream.phase).toBe("downstream");
+    expect("skipped" in downstream.sources.detectors).toBe(true);
+    expect("briefed" in downstream.downstream && downstream.downstream.briefed).toBe(1);
   });
 
   it("skips discovery honestly when no discovery deps are supplied", async () => {

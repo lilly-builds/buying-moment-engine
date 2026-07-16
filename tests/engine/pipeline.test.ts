@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runLeadToBrief, type Lead, type PipelineDeps } from "@/src/engine/pipeline";
 import { getPracticeWebsite, setPracticeWebsite } from "@/db/ingest";
+import { setEnrichmentStatus } from "@/db/enrich";
 import { createTestDb, type TestDb } from "../setup";
 import {
   emptyScraper,
@@ -113,5 +114,61 @@ describe("runLeadToBrief — orchestration", () => {
     const steps = rows.map((r) => r.pipelineStep);
     expect(steps).toContain("enrich.extract");
     expect(steps).toContain("brief.voice");
+  });
+
+  it("resumes an enriched lead at synthesis without repurchasing enrichment", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    await setEnrichmentStatus(t.db, ids.practiceId, "enriched");
+    const scraper = emptyScraper();
+    const extract = FakeExtractClient.malformed();
+    const { deps, rows } = baseDeps(t, {
+      scrape: scraper.scrape,
+      extract,
+    });
+
+    const result = await runLeadToBrief(deps, {
+      ...GOLDEN_LEAD,
+      enrichmentStatus: "enriched",
+    });
+
+    expect(result.status).toBe("briefed");
+    expect(result.enrich).toBeUndefined();
+    expect(scraper.calls).toEqual([]);
+    expect(rows.map((row) => row.pipelineStep)).toEqual(["brief.voice"]);
+  });
+
+  it("defers synthesis without provider spend when a checkpointed lead lacks voice time", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    await setEnrichmentStatus(t.db, ids.practiceId, "enriched");
+    const voice = FakeVoiceClient.always(goodVoice);
+    const { deps, rows } = baseDeps(t, {
+      voice,
+      canStartVoiceAttempt: () => false,
+    });
+
+    const result = await runLeadToBrief(deps, {
+      ...GOLDEN_LEAD,
+      enrichmentStatus: "enriched",
+    });
+
+    expect(result.status).toBe("deferred");
+    expect(result.enrich).toBeUndefined();
+    expect(voice.calls).toHaveLength(0);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("records the queue attempt immediately after resolve and before downstream work", async () => {
+    const ids = await seedGoldenPractice(t.db);
+    const onBriefAttemptStarted = vi.fn(async () => {});
+    const resolveWebsite = vi.fn(async () => {
+      expect(onBriefAttemptStarted).toHaveBeenCalledWith(ids.practiceId);
+      throw new Error("stop after queue marker");
+    });
+    const { deps } = baseDeps(t, { onBriefAttemptStarted, resolveWebsite });
+
+    await expect(runLeadToBrief(deps, GOLDEN_LEAD)).rejects.toThrow(
+      "stop after queue marker",
+    );
+    expect(onBriefAttemptStarted).toHaveBeenCalledOnce();
   });
 });

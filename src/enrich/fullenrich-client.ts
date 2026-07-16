@@ -158,12 +158,16 @@ export interface FullEnrichClientDeps {
   practiceId?: string | null;
   sleep?: (ms: number) => Promise<void>;
 }
+const FULLENRICH_FETCH_TIMEOUT_MS = 100_000;
+const FULLENRICH_EMAIL_OPERATION_TIMEOUT_MS = 110_000;
+
 export function createFullEnrichClient(deps: FullEnrichClientDeps) {
   const doFetch = deps.fetch ?? fetch;
   const doSleep = deps.sleep ?? sleep;
   async function request(url: string, init: RequestInit): Promise<unknown> {
     const res = await doFetch(url, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(FULLENRICH_FETCH_TIMEOUT_MS),
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${deps.apiKey}`, ...init.headers },
     });
     const raw: unknown = await res.json().catch(() => ({}));
@@ -195,12 +199,20 @@ export function createFullEnrichClient(deps: FullEnrichClientDeps) {
     async enrichEmail(request: PersonEmailRequest): Promise<PersonEmailResult> {
       const body = fullEnrichEmailBody(request);
       const call = async () => {
+        const operationDeadline = Date.now() + FULLENRICH_EMAIL_OPERATION_TIMEOUT_MS;
         const submit = await post(FULLENRICH_CONTACT_ENRICH_URL, body);
         const submitRecord = rec(submit) ?? {};
         const id = pick(submitRecord, ["id", "enrichment_id", "request_id"]);
         if (!id) return normalizeFullEnrichEmailResponse(submit);
         let latest: unknown = submit;
         for (let i = 0; i < FULLENRICH_EMAIL_POLL_ATTEMPTS; i += 1) {
+          if (Date.now() >= operationDeadline) {
+            throw new ProviderBlockedError(
+              "fullenrich",
+              "api_contract",
+              "email enrichment exceeded its operation timeout",
+            );
+          }
           if (i > 0) await doSleep(FULLENRICH_EMAIL_POLL_MS);
           latest = await get(`${FULLENRICH_CONTACT_ENRICH_URL}/${encodeURIComponent(id)}`);
           if (isDone(latest)) return normalizeFullEnrichEmailResponse(latest);
