@@ -9,7 +9,8 @@
       "type": "oauth",
       "redirectUrls": [
         "http://localhost:3000/api/hubspot/oauth",
-        "https://buying-moment-maestro.vercel.app/api/hubspot/oauth"
+        "https://buying-moment-maestro.vercel.app/api/hubspot/oauth",
+        "https://ripebuyers.vercel.app/api/hubspot/oauth"
       ],
       "requiredScopes": [
         "oauth",
